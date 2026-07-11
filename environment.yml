@@ -1,0 +1,17 @@
+name: bim_rag
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - conda-forge::ifcopenshell
+  - pip
+  - pip:
+      - psycopg2-binary
+      - sqlalchemy==2.0.*
+      - pgvector==0.5.*
+      - python-dotenv
+      - torch --index-url https://download.pytorch.org/whl/cu128
+      - sentence-transformers
+      - pytest
+      - ruff

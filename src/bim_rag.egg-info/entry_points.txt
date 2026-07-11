@@ -1,0 +1,3 @@
+[console_scripts]
+bim-stage1 = bim_rag.stage1_import:main
+bim-stage2 = bim_rag.stage2_embed:main
