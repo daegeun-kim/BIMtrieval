@@ -9,4 +9,10 @@ Requires-Dist: sqlalchemy>=2.0
 Requires-Dist: pgvector>=0.5
 Requires-Dist: python-dotenv
 Requires-Dist: sentence-transformers
+Provides-Extra: query
+Requires-Dist: fastapi; extra == "query"
+Requires-Dist: uvicorn[standard]; extra == "query"
+Requires-Dist: pydantic-settings; extra == "query"
+Requires-Dist: openai; extra == "query"
+Requires-Dist: httpx; extra == "query"
 Dynamic: license-file

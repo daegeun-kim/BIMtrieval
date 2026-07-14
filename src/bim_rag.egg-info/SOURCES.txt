@@ -5,10 +5,15 @@ src/bim_rag/__init__.py
 src/bim_rag/config.py
 src/bim_rag/ifc_parser.py
 src/bim_rag/pipeline.py
+src/bim_rag/pipeline_structured.py
+src/bim_rag/rel_parser.py
+src/bim_rag/rel_templates.py
 src/bim_rag/reporting.py
+src/bim_rag/smoke_test.py
 src/bim_rag/stage1_import.py
 src/bim_rag/stage2_embed.py
 src/bim_rag/templates.py
+src/bim_rag/text_limits.py
 src/bim_rag.egg-info/PKG-INFO
 src/bim_rag.egg-info/SOURCES.txt
 src/bim_rag.egg-info/dependency_links.txt
@@ -18,7 +23,10 @@ src/bim_rag.egg-info/top_level.txt
 src/bim_rag/schema/__init__.py
 src/bim_rag/schema/models.py
 tests/test_canonical_json.py
+tests/test_crash_recovery.py
 tests/test_eligibility.py
 tests/test_embedding_mock.py
 tests/test_idempotency.py
+tests/test_rag_documents.py
+tests/test_relationships.py
 tests/test_templates.py

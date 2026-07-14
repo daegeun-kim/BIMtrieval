@@ -15,6 +15,16 @@ dependencies = [
     "sentence-transformers",
 ]
 
+[project.optional-dependencies]
+# v002 query architecture scaffold (spec_v002_query_architecture.md / task04)
+query = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "openai",
+    "httpx",
+]
+
 [project.scripts]
 bim-stage1 = "bim_rag.stage1_import:main"
 bim-stage2 = "bim_rag.stage2_embed:main"
@@ -24,7 +34,8 @@ bim-pipeline = "bim_rag.pipeline:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "backend/tests"]
+pythonpath = ["backend/src"]
 addopts = "-v"
 
 [tool.ruff]

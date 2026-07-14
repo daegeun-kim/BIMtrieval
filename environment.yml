@@ -15,3 +15,9 @@ dependencies:
       - sentence-transformers
       - pytest
       - ruff
+      # v002 query architecture scaffold (spec_v002_query_architecture.md / task04)
+      - fastapi
+      - uvicorn[standard]
+      - pydantic-settings
+      - openai
+      - httpx

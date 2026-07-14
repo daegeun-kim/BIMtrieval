@@ -609,3 +609,134 @@ Relationship members: IMPORTED AND VALIDATED
 Vector generation: NOT EXECUTED
 Current tasks/task03.md: OUTDATED AND NOT EXECUTED
 ```
+
+---
+
+## §19. Task 03 Execution Notes: Unified rag_documents Vectorization + Crash Recovery
+
+**Executed:** 2026-07-11 (recovery run, after two 0x101 CLOCK_WATCHDOG_TIMEOUT crashes on the
+original batch-size-64 implementation). Supersedes §§ prior "relationship vectors prohibited" /
+`element_vectors`-only language.
+
+### Crash-dump investigation (read-only; no OS settings changed)
+
+`CrashDumpEnabled=3` (automatic memory dump), minidumps enabled. Event log showed two unclean
+reboots the same day (5:05 PM, 5:27 PM) with no bugcheck event or dump — more severe than the
+four prior recorded crashes, which were all bugcheck `0x116` (VIDEO_TDR_FAILURE — GPU driver
+timeout/reset) except one `0x139` on an earlier date. Consistent with sustained GPU workload
+destabilizing the driver.
+
+### Architecture additions
+
+- `src/bim_rag/text_limits.py` — shared token-budget enforcement (`MAX_TOKENS=2000`) against the
+  real `BAAI/bge-m3` tokenizer, used only when a tokenizer is supplied.
+- `src/bim_rag/config.py` — `THREAD_LIMIT=4`, `CUDA_BATCH_SIZE`, `MAX_CUDA_BATCH_SIZE=8`,
+  `validate_batch_size()` (rejects 64), thread-limiting env vars set at import time.
+- `src/bim_rag/templates.py` / `rel_templates.py` — `generate_text()` / `generate_rel_text()`
+  accept an optional `tokenizer` param; token-budget truncation layered on top of the existing
+  char budget when supplied (legacy 2-tuple return preserved when omitted).
+- `src/bim_rag/schema/models.py` — `RagDocument` gains `source_hash`, `text_hash`,
+  `original_token_count`, `encoded_token_count` columns.
+- `src/bim_rag/stage2_embed.py` — rewritten: hash-based skip/resume, `_encode_batch()` with
+  `torch.inference_mode()` + per-batch `torch.cuda.synchronize()` + stop-on-device-error (no
+  retry), shared `_upsert_rag_document()` helper, additive `_add_rag_document_hash_columns()`
+  migration.
+- `src/bim_rag/smoke_test.py` — staged CUDA smoke tests 1–6 from `tasks/task03.md`, independently
+  invocable (`python -m bim_rag.smoke_test --stage N`).
+- `notebooks/02_vectorize.ipynb` — reusable full-pipeline notebook (executed, real outputs),
+  supersedes `01_structured_import.ipynb` as the primary entry point.
+- `tests/test_crash_recovery.py` — 31 new tests covering batch-size guard, thread limits,
+  token-aware truncation, hash-based skip logic, CUDA error-stop behavior, migration idempotency.
+
+### Migration
+
+`rag_documents` already existed with 448 rows from the interrupted pre-crash run; `pgvector`
+0.8.0 was already enabled; `element_vectors` did not exist. Additive `ALTER TABLE ... ADD COLUMN
+IF NOT EXISTS` applied the four new columns without touching existing rows or requiring
+`element_vectors` migration.
+
+### Staged CUDA smoke tests (batch size 4)
+
+All six stages passed cleanly: model load (7.0s, no encode), synthetic doc, one real entity doc
+(62/62 tokens), one real relationship doc (902/902 tokens — confirmed the 2000-token ceiling has
+real headroom), a batch of 4 mixed real docs, and 32 real docs in 8 batches of 4 (stored, folding
+in stage 7's validate+store). No instability at any stage.
+
+### Batch size 4 → 8
+
+After batch-4 staged smoke tests and a chunk of production embedding completed without failure,
+batch size was raised to the permitted ceiling of 8 (still never 64) per explicit user
+instruction, observing available VRAM headroom. Config and tests updated accordingly
+(`CUDA_BATCH_SIZE=8`, `MAX_CUDA_BATCH_SIZE=8`).
+
+### Full-corpus embedding run
+
+| Metric | Value |
+|---|---:|
+| Execution device | CUDA (NVIDIA GeForce RTX 5080 Laptop GPU), CUDA 12.8, torch 2.11.0+cu128 |
+| CUDA batch size | 8 |
+| Thread limit | 4 |
+| Token limit | 2000 |
+| Entity docs | new=4,889, skipped_valid=2,100, truncated=1,567, failures=0 |
+| Relationship docs | new=3,457, skipped_valid=16, truncated=28, failures=0 |
+| Total `rag_documents` | 10,462 (6,989 entity + 3,473 relationship) |
+| Elapsed (full run) | 718.0s |
+| Elapsed (idempotent rerun) | 70.7s |
+| GPU thermal | 83–88°C sustained, 100% utilization at peaks, fluctuating clocks (975–1815 MHz of 3090 MHz max) — no errors, no instability, no further crashes |
+
+During the run, two apparent "stalls" (frozen row counts across direct DB checks) were
+investigated and resolved: isolated timing tests of the exact stalled batch, the full
+6,989-entity text-generation/hashing loop (with and without the real tokenizer), and the
+structured re-import phase all completed in seconds with zero slow items — the process was
+never actually hung. Re-launching with `PYTHONUNBUFFERED=1` confirmed continuous real progress;
+the earlier appearance of a stall was an artifact of block-buffered stdout under a redirected
+background process, not a functional defect.
+
+### Reconciliation (post-run)
+
+```
+ifc_entities = 6,989 = entity_description docs = valid entity embeddings (dim=1024, no NaN/Inf)
+ifc_relationships = 3,473 = relationship_description docs = valid relationship embeddings
+total rag_documents = 10,462, all source_hash/text_hash populated
+duplicate active entity documents: 0        duplicate active relationship documents: 0
+XOR / kind-type constraint violations: 0    orphaned entity/relationship references: 0
+cross-source-model rows: 0                  element_vectors table exists: False
+distinct source_model_id values: {1}
+```
+
+### Similarity search and SQL/RAG fusion (source-scoped, canonical IDs only)
+
+- Entity similarity: seed `IfcTask` "Dakpannen" → nearest neighbors all `IfcTask`, cosine
+  distance 0–0.12.
+- Relationship similarity: seed `IfcRelAssignsToProcess` → nearest neighbors same class,
+  distance 0–0.03.
+- SQL/RAG fusion: SQL filter `IfcWall` (648 `ifc_entities.id`) ∩ vector top-50 nearest a wall →
+  17 entities via canonical id join.
+- Relationship traversal: `IfcRelContainedInSpatialStructure` relationship →
+  `relationship_members.entity_id` → 5 resolved endpoint entities with class/GlobalId.
+- Cross-model isolation: 0 rows outside `source_model_id=1` (only one model currently exists).
+
+### Idempotency (second unchanged run)
+
+`entity_docs_new=0, entity_docs_updated=0, entity_docs_skipped_valid=6,989`;
+`rel_docs_new=0, rel_docs_updated=0, rel_docs_skipped_valid=3,473`; `total_rag_docs=10,462`
+unchanged; 0 warnings; completed in 70.7s (vs 718.0s first run). Re-run reconciliation query
+confirmed identical counts with zero duplicates.
+
+### Test coverage
+
+158/158 tests pass (127 existing + 31 new in `tests/test_crash_recovery.py`). `ruff format` /
+`ruff check` clean.
+
+### Status
+
+```
+Structured entities and relationships: VALIDATED
+Unified rag_documents table: CREATED AND VALIDATED
+Entity vectors: GENERATED AND VALIDATED
+Relationship vectors: GENERATED AND VALIDATED
+Canonical SQL/RAG identities: VALIDATED
+Path-only notebook pipeline: EXECUTED AND VALIDATED
+CLOCK_WATCHDOG_TIMEOUT mitigations: IMPLEMENTED AND VALIDATED
+CUDA recovery batch size: 4 (staged validation) -> 8 (production, within the permitted ceiling)
+```

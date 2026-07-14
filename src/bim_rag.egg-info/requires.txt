@@ -3,3 +3,10 @@ sqlalchemy>=2.0
 pgvector>=0.5
 python-dotenv
 sentence-transformers
+
+[query]
+fastapi
+uvicorn[standard]
+pydantic-settings
+openai
+httpx
