@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from llm.schemas import (
+from app.llm.schemas import (
     CatalogPlan,
     CombinationOp,
     ExecutionMode,
@@ -12,9 +12,9 @@ from llm.schemas import (
     RagPlan,
     SqlPlan,
 )
-from llm.validation import validate_plan_structure
-from query.sql.schemas import SqlOperation
-from shared.types import QueryRoute, QueryScope
+from app.llm.validation import validate_plan_structure
+from app.query.sql.schemas import SqlOperation
+from app.shared.types import QueryRoute, QueryScope
 
 
 def _sql(op="count_entities", classes=None):

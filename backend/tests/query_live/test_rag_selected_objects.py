@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from query.rag.hydration import hydrate_selected_entities
-from query.rag.schemas import RagSearchPlan
+
+from app.query.rag.hydration import hydrate_selected_entities
+from app.query.rag.schemas import RagSearchPlan
 
 from .conftest import SOURCE_MODEL_ID
 

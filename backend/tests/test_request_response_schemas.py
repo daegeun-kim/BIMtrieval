@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import pytest
-from api.schemas.request import SessionQueryRequest
-from api.schemas.response import EvidenceSummary, QueryResponseEnvelope
 from pydantic import ValidationError
-from shared.types import AnswerBasis, QueryRoute, QueryScope, ResponseStatus
-from viewer.actions import build_default_viewer_actions
+
+from app.api.schemas.request import SessionQueryRequest
+from app.api.schemas.response import EvidenceSummary, QueryResponseEnvelope
+from app.shared.types import AnswerBasis, QueryRoute, QueryScope, ResponseStatus
+from app.viewer.actions import build_default_viewer_actions
 
 
 def test_valid_request_accepted():

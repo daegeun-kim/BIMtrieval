@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from config.logging import redact_secrets, write_jsonl_event
+from app.config.logging import redact_secrets, write_jsonl_event
 
 
 def test_redacts_secret_shaped_keys():

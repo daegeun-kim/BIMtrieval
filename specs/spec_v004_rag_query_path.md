@@ -1,5 +1,19 @@
 # Specification v004: RAG and Vector Query Path
 
+## Current architecture amendment (Task 09 and frontend planning)
+
+The active backend is the independent Poetry application under `backend/app/`. Read every
+`backend/src/...` path later in this document as `backend/app/...`.
+
+The query embedding service is fully backend-owned. It may use the same third-party model and
+compatible settings as ingestion, but it must not import `bim_rag`, ingestion constants, or the
+corpus-vectorization implementation. Compatibility is validated from stored database metadata.
+
+Frontend selections arrive as IFC GlobalIds scoped by `source_model_id` and are resolved through
+a deterministic read-only backend contract before selected-object RAG filtering. This resolution
+does not consume an LLM call. PostGIS is deferred and is not required for semantic retrieval or
+frontend rendering.
+
 ## 1. Purpose
 
 Define semantic retrieval over `rag_documents` under `spec_v002_query_architecture.md`.
@@ -11,7 +25,7 @@ This is a blueprint only. Implementation and execution require later task files.
 ## 2. Code Organization
 
 ```text
-backend/src/query/rag/
+backend/app/query/rag/
 ├── schemas.py
 ├── embedding_service.py
 ├── search.py
@@ -264,7 +278,7 @@ The RAG path is acceptable when:
 
 Task 06 (`tasks/task06_done.md`) implemented this specification against the
 live database and the real BGE-M3 embedding service:
-`backend/src/query/rag/{schemas,embedding_service,search,thresholds,fusion,
+`backend/app/query/rag/{schemas,embedding_service,search,thresholds,fusion,
 hydration,relationship_expansion,errors}.py`. Full command reference,
 per-question calibration detail, and two documented negative findings
 (doors/windows are not well-separated by this embedding model on this
@@ -273,7 +287,7 @@ to outrank a closely related record) are in `docs/architecture_v004.md`.
 
 Threshold profiles were calibrated empirically against this project's real
 `rag_documents` and an 8-question set
-(`backend/src/evaluation/rag_calibration_v001.jsonl`), not asserted:
+(`backend/app/evaluation/rag_calibration_v001.jsonl`), not asserted:
 `default_v001 = 0.50`, `high_precision_v001 = 0.55` (documented alternative).
 
 `rag_documents` was read-only throughout — verified unchanged (10,462 rows:
@@ -294,4 +308,3 @@ Query vectors persisted: NO
 OpenAI orchestration: NOT EXECUTED
 Hybrid path: NOT IMPLEMENTED
 ```
-

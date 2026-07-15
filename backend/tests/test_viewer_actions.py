@@ -3,7 +3,7 @@ tasks/task04.md required verification)."""
 
 from __future__ import annotations
 
-from viewer.actions import (
+from app.viewer.actions import (
     ModelAction,
     SelectionAction,
     ViewerRole,

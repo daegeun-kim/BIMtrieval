@@ -3,8 +3,8 @@ live against the read-only role."""
 
 from __future__ import annotations
 
-from query.sql import catalog
-from query.sql.schemas import (
+from app.query.sql import catalog
+from app.query.sql.schemas import (
     FieldKind,
     FieldRef,
     FilterCondition,
@@ -16,7 +16,7 @@ from query.sql.schemas import (
     Operator,
     RankModelsByEntityCountPlan,
 )
-from shared.errors import ModelNotFoundError
+from app.shared.errors import ModelNotFoundError
 
 from .conftest import SOURCE_MODEL_ID
 

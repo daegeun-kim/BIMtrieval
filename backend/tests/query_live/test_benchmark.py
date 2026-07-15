@@ -6,17 +6,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from evaluation.cases import load_cases
-from query.graph.traversal import traverse
-from query.sql import entities
-from query.sql.schemas import CountEntitiesPlan, TraverseRelationshipsPlan
 from sqlalchemy import text
+
+from app.evaluation.cases import load_cases
+from app.query.graph.traversal import traverse
+from app.query.sql import entities
+from app.query.sql.schemas import CountEntitiesPlan, TraverseRelationshipsPlan
 
 from .conftest import SOURCE_MODEL_ID
 
 _BENCHMARK_PATH = (
     Path(__file__).resolve().parents[2]
-    / "src"
+    / "app"
     / "evaluation"
     / "benchmark_v002_sql_graph_cases.jsonl"
 )
@@ -107,8 +108,9 @@ def test_average_door_width_case_reports_zero_coverage_honestly(live_session):
     resolve_field raises before any aggregate runs — a fabricated average is
     not returned."""
     import pytest
-    from query.sql.errors import FieldNotFoundError
-    from query.sql.schemas import AggregateEntitiesPlan, FieldKind, FieldRef
+
+    from app.query.sql.errors import FieldNotFoundError
+    from app.query.sql.schemas import AggregateEntitiesPlan, FieldKind, FieldRef
 
     with pytest.raises(FieldNotFoundError):
         entities.aggregate_entities(

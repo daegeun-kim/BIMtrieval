@@ -4,9 +4,14 @@ relationship class (spec_v003 §12), live."""
 from __future__ import annotations
 
 import pytest
-from query.sql import relationships
-from query.sql.errors import UnknownEntityOrRelationshipError
-from query.sql.schemas import GetRelationshipMembersPlan, GetRelationshipPlan, ListRelationshipsPlan
+
+from app.query.sql import relationships
+from app.query.sql.errors import UnknownEntityOrRelationshipError
+from app.query.sql.schemas import (
+    GetRelationshipMembersPlan,
+    GetRelationshipPlan,
+    ListRelationshipsPlan,
+)
 
 from .conftest import SOURCE_MODEL_ID
 

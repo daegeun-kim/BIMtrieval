@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from api.schemas.response import PrimaryEntityResult, RelationshipResult
-from config.settings import Settings
-from query.hybrid.evidence import apply_bounds, build_answer_payload
-from query.hybrid.schemas import EvidencePackage, RagInternalItem
-from shared.types import AnswerBasis
+from app.api.schemas.response import PrimaryEntityResult, RelationshipResult
+from app.config.settings import Settings
+from app.query.hybrid.evidence import apply_bounds, build_answer_payload
+from app.query.hybrid.schemas import EvidencePackage, RagInternalItem
+from app.shared.types import AnswerBasis
 
 
 def _entities(n: int) -> list[PrimaryEntityResult]:

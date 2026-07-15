@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from query.sql.operations import PLAN_BY_OPERATION, MissingValueState
-from query.sql.schemas import (
+
+from app.query.sql.operations import PLAN_BY_OPERATION, MissingValueState
+from app.query.sql.schemas import (
     AggregateEntitiesPlan,
     CountEntitiesPlan,
     FieldKind,

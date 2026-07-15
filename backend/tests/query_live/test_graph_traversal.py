@@ -5,11 +5,12 @@ isolation, live."""
 
 from __future__ import annotations
 
-from query.graph.hydration import hydrate_traversal
-from query.graph.traversal import traverse
-from query.sql.schemas import TraverseRelationshipsPlan
 from sqlalchemy import text
-from viewer.actions import SelectionAction
+
+from app.query.graph.hydration import hydrate_traversal
+from app.query.graph.traversal import traverse
+from app.query.sql.schemas import TraverseRelationshipsPlan
+from app.viewer.actions import SelectionAction
 
 from .conftest import SOURCE_MODEL_ID
 

@@ -3,8 +3,8 @@ ranked lists — no database access, no model load."""
 
 from __future__ import annotations
 
-from query.rag.fusion import DEFAULT_RRF_K, reciprocal_rank_fusion
-from query.rag.schemas import RagCandidate
+from app.query.rag.fusion import DEFAULT_RRF_K, reciprocal_rank_fusion
+from app.query.rag.schemas import RagCandidate
 
 
 def _candidate(

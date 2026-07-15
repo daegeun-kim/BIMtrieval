@@ -1,4 +1,0 @@
-[console_scripts]
-bim-pipeline = bim_rag.pipeline:main
-bim-stage1 = bim_rag.stage1_import:main
-bim-stage2 = bim_rag.stage2_embed:main

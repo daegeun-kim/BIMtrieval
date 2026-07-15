@@ -9,3 +9,21 @@ __pycache__/
 
 # v002 query architecture scaffold
 backend/logs/
+
+# Backend Poetry virtualenv + local test temp dirs (Task 09)
+backend/.venv/
+.venv/
+backend/.pytest-tmp/
+
+# Prepared viewer artifacts (large generated Fragments; spec_v006 §9, Task 11).
+# The real model artifacts are generated locally and must not be committed, but
+# small tracked test fixtures under model_assets/fixtures/ are kept.
+model_assets/*
+!model_assets/fixtures/
+!model_assets/README.md
+
+# Frontend OpenAPI snapshot is regenerable from the backend; keep it out of Git.
+frontend_openapi_snapshot.json
+
+# Local dev launcher runtime record (Task 12) — ephemeral PIDs/ports, no secrets.
+.runtime/

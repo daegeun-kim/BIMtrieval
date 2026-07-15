@@ -1,5 +1,29 @@
 # Specification v005: Hybrid Query Planning and Orchestration
 
+## Current architecture and frontend-contract amendment
+
+The active backend is the independent Poetry application under `backend/app/`. Read every
+`backend/src/...` path later in this document as `backend/app/...`. The backend has no dependency
+on ingestion Python code.
+
+`spec_v006_frontend_application.md` is authoritative for frontend behavior. Its narrow deterministic
+model-list, viewer-asset, and GlobalId-resolution endpoints do not add LLM calls and do not alter
+the two-call planner/answer architecture described here.
+
+The frontend sends selected IFC GlobalIds scoped to an active `source_model_id`. Trusted backend
+code resolves them to canonical entity IDs before existing SQL/RAG/graph planning and execution.
+Invalid, duplicate, cross-model, or excessive selections are rejected or safely bounded before
+LLM context is constructed.
+
+**Clear Chat** and **Reset App** are separate controls. Clear Chat removes visible and server-side
+conversation history plus current answer evidence while preserving the active model and manual
+viewer selection. Reset App returns to the initial no-model state and clears all conversational,
+selection, result, and active-model state. Both create a fresh conversation identity; neither
+deletes persistent BIM data, stored vectors, prepared viewer assets, or IndexedDB geometry cache.
+
+Normal tests never call OpenAI. The one-time connectivity check from Task 09 is complete and its
+live test module was deleted; do not recreate persistent live-provider tests.
+
 ## 1. Purpose
 
 Define how natural-language questions are planned, routed, executed, fused, answered, logged, and translated into frontend/viewer actions.
@@ -42,7 +66,7 @@ Do not run SQL and RAG for every question. Always running both wastes database/m
 ## 3. Code Organization
 
 ```text
-backend/src/llm/
+backend/app/llm/
 ├── client.py
 ├── schemas.py
 ├── router.py
@@ -51,7 +75,7 @@ backend/src/llm/
     ├── planner_v001.md
     └── answerer_v001.md
 
-backend/src/query/hybrid/
+backend/app/query/hybrid/
 ├── schemas.py
 ├── orchestrator.py
 ├── concurrency.py
@@ -59,9 +83,9 @@ backend/src/query/hybrid/
 ├── evidence.py
 └── errors.py
 
-backend/src/query/service.py
-backend/src/viewer/actions.py
-backend/src/evaluation/
+backend/app/query/service.py
+backend/app/viewer/actions.py
+backend/app/evaluation/
 ```
 
 Keep prompts versioned. Keep typed schemas in Python. Do not place orchestration in FastAPI route handlers.
@@ -451,7 +475,7 @@ delivered code and how it satisfies §19.
 ### Modules
 
 ```text
-backend/src/llm/
+backend/app/llm/
 ├── schemas.py        # unified, non-recursive planner QueryPlan (all routes)
 ├── prompts/
 │   ├── planner_v001.md
@@ -463,15 +487,15 @@ backend/src/llm/
 ├── context.py        # sanitized planner context (schema/catalog, ops, limits)
 └── answerer.py       # grounded-answer + explain-general helpers
 
-backend/src/query/
+backend/app/query/
 ├── sql/dispatch.py         # execute typed SQL/catalog/graph plans -> normalized results
 ├── hybrid/{schemas,combination,concurrency,evidence,errors,orchestrator}.py
 ├── session.py              # SessionStore + candidate/follow-up state + reset
 └── service.py              # full pipeline (planner -> validate/1-repair -> execute -> answer)
 
-backend/src/viewer/actions.py   # + await_user_confirmation / load_model actions
-backend/src/api/routes/{query.py (public), dev.py (dev-only, gated)}
-backend/src/evaluation/hybrid_failure_cases_v001.jsonl   # curated reusable cases
+backend/app/viewer/actions.py   # + await_user_confirmation / load_model actions
+backend/app/api/routes/{query.py (public), dev.py (dev-only, gated)}
+backend/app/evaluation/hybrid_failure_cases_v001.jsonl   # curated reusable cases
 ```
 
 ### Prompt / schema versions
@@ -507,8 +531,10 @@ backend/src/evaluation/hybrid_failure_cases_v001.jsonl   # curated reusable case
 10. **Stable viewer actions**: every response returns a full `ViewerActions` object.
 11. **Safe logs**: JSONL via `config.logging.write_jsonl_event` (redacted), runtime logs
     under gitignored `backend/logs/`.
-12. **Tests**: `backend/tests/query_hybrid/` (offline) + `backend/tests/query_live/`
-    (`test_hybrid_pipeline.py` fake-LLM+DB, `test_hybrid_live_openai.py` real gpt-5-nano).
+12. **Tests at Task 07 completion**: `backend/tests/query_hybrid/` (offline) plus
+    `backend/tests/query_live/`. Task 09 subsequently performed the authorized one-time provider
+    connectivity check and deleted `test_hybrid_live_openai.py`; current normal tests make zero
+    OpenAI calls and must remain offline/fake-LLM for provider behavior.
 
 ### Live validation performed
 
@@ -522,9 +548,9 @@ was modified. Secrets never logged or returned.
 
 Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.md`.
 
-- Benchmark: `backend/src/evaluation/benchmark_v003_e2e_cases.jsonl` (27 versioned cases
+- Benchmark: `backend/app/evaluation/benchmark_v003_e2e_cases.jsonl` (27 versioned cases
   spanning the required matrix); runner `run_benchmark_v003.py`; committed machine-readable
-  results `backend/src/evaluation/benchmark_v003_results.json`.
+  results `backend/app/evaluation/benchmark_v003_results.json`.
 - Authoritative run through the real `/api/query` pipeline with live `gpt-5-nano`:
   **26/27 cases**, operation 16/16, exact-answer 6/6, viewer-ID 1/1, retrieval 2/2,
   grounding failures **0**, corpus **unchanged** (6989/3473/10462). Latency by stage:
@@ -537,4 +563,3 @@ Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.m
 - Documented limitations (not defects): occasional semantic-vs-lexical route judgment,
   subjective ambiguity threshold, absent-class clarification, single-model/no-quantity
   corpus. All handled without hallucination.
-

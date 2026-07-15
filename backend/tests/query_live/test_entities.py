@@ -4,10 +4,11 @@ states + exact-count-despite-limits (spec_v003 §6, §7, §9, §11), live."""
 from __future__ import annotations
 
 import pytest
-from query.sql import entities
-from query.sql.errors import UnknownEntityOrRelationshipError
-from query.sql.operations import MissingValueState
-from query.sql.schemas import (
+
+from app.query.sql import entities
+from app.query.sql.errors import UnknownEntityOrRelationshipError
+from app.query.sql.operations import MissingValueState
+from app.query.sql.schemas import (
     AggregateEntitiesPlan,
     CountEntitiesPlan,
     FieldKind,

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from query.rag.schemas import (
+
+from app.query.rag.schemas import (
     MAX_SELECTED_ENTITY_IDS,
     MAX_TOP_K_PER_KIND,
     MAX_VISIBLE_LIMIT,

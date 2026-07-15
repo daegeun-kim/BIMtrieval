@@ -1,5 +1,14 @@
 # BIM RAG Backend Query Prototype — End-to-End Evaluation (Task 08)
 
+> **Note — superseded by Task 09 (three independent applications).**
+> Paths and run commands in this document reflect the pre-split layout
+> (`backend/src`, `api.app:app`, and the `bim_rag` compatibility shim). The
+> authoritative current structure and commands are in [`README.md`](../README.md)
+> and [`workflow.md`](../workflow.md): ingestion lives under `ingestion/`, the
+> backend is a Poetry app run from `backend/` with `poetry run uvicorn app.main:app`,
+> and the backend has no dependency on the ingestion `bim_rag` package.
+
+
 Governed by `specs/spec_v002/003/004/005`. This report validates the complete backend
 query prototype against the live BIM database (source_model_id=1, "IFC Schependomlaan incl
 planningsdata", IFC2X3) through the real `POST /api/query` pipeline, using real

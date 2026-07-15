@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from query.rag.thresholds import THRESHOLD_PROFILES, get_threshold
-from shared.errors import UnsupportedOperationError
+
+from app.query.rag.thresholds import THRESHOLD_PROFILES, get_threshold
+from app.shared.errors import UnsupportedOperationError
 
 
 def test_default_v001_profile_exists():

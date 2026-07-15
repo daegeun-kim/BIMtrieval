@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 
-from query.rag.embedding_service import EMBEDDING_DIM, EmbeddingService, EmbeddingServiceState
+from app.query.rag.embedding_service import EMBEDDING_DIM, EmbeddingService, EmbeddingServiceState
 
 
 def test_service_starts_not_loaded():
@@ -43,7 +43,7 @@ def test_query_vector_is_a_plain_list_not_persisted_anywhere(embedding_service):
     source has no INSERT/session.add/session.execute call sites."""
     import inspect
 
-    import query.rag.embedding_service as mod
+    import app.query.rag.embedding_service as mod
 
     source = inspect.getsource(mod)
     assert "INSERT" not in source.upper()

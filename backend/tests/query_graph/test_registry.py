@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from query.graph.registry import REGISTRY, RelationshipSemanticRole
+from app.query.graph.registry import REGISTRY, RelationshipSemanticRole
 
 # Verified against this project's live database (relationship_members.role,
 # grouped by ifc_relationships.ifc_class) — see task05 completion report.

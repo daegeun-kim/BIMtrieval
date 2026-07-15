@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import pytest
-from config.settings import Settings
-from llm.client import LLMUnavailableError, OpenAIQueryClient, _is_transient
-from llm.schemas import QueryPlan
-from shared.types import QueryRoute, QueryScope
+
+from app.config.settings import Settings
+from app.llm.client import LLMUnavailableError, OpenAIQueryClient, _is_transient
+from app.llm.schemas import QueryPlan
+from app.shared.types import QueryRoute, QueryScope
 
 
 class _Msg:

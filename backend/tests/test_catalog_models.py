@@ -7,7 +7,7 @@ not remove or alter the five existing canonical tables.
 
 from __future__ import annotations
 
-from bim_rag.schema.models import Base
+from app.db.models import Base
 
 _EXISTING_TABLES = {
     "ifc_source_models",
@@ -22,13 +22,13 @@ def test_import_does_not_execute_a_migration(monkeypatch):
     calls = []
     monkeypatch.setattr(Base.metadata, "create_all", lambda *a, **k: calls.append((a, k)))
 
-    import db.models  # noqa: F401
+    import app.db.models  # noqa: F401
 
     assert calls == []
 
 
 def test_new_tables_are_additive_and_named():
-    import db.models  # noqa: F401
+    import app.db.models  # noqa: F401
 
     table_names = set(Base.metadata.tables.keys())
     assert "model_families" in table_names
@@ -36,7 +36,7 @@ def test_new_tables_are_additive_and_named():
 
 
 def test_existing_five_tables_untouched():
-    import db.models  # noqa: F401
+    import app.db.models  # noqa: F401
 
     table_names = set(Base.metadata.tables.keys())
     assert _EXISTING_TABLES.issubset(table_names)
@@ -47,7 +47,7 @@ def test_existing_five_tables_untouched():
 
 
 def test_catalog_entry_references_ifc_source_models():
-    import db.models as catalog
+    import app.db.models as catalog
 
     entry_table = catalog.SourceModelCatalogEntry.__table__
     fk_targets = {fk.target_fullname for fk in entry_table.foreign_keys}

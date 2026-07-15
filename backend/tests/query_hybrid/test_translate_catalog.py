@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import pytest
-from llm.schemas import CatalogPlan, PlanFieldRef, PlanFilter
-from llm.translate import _catalog_filter_group, _translate_catalog
-from llm.validation import PlanValidationError
-from query.sql.schemas import FieldKind, Operator, SqlOperation
+
+from app.llm.schemas import CatalogPlan, PlanFieldRef, PlanFilter
+from app.llm.translate import _catalog_filter_group, _translate_catalog
+from app.llm.validation import PlanValidationError
+from app.query.sql.schemas import FieldKind, Operator, SqlOperation
 
 
 def _filter(field_name, op=Operator.EQ, value_text="x"):
@@ -31,7 +32,9 @@ def test_supported_catalog_field_builds_group():
 
 
 def test_is_current_is_coerced_to_boolean_eq():
-    fg = _catalog_filter_group([_filter("is_current", op=Operator.EXACT, value_text="current")], "and")
+    fg = _catalog_filter_group(
+        [_filter("is_current", op=Operator.EXACT, value_text="current")], "and"
+    )
     cond = fg.conditions[0]
     assert cond.value is True
     assert cond.operator is Operator.EQ  # forced to boolean equality

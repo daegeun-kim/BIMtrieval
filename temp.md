@@ -1,0 +1,13 @@
+modifications:
+- I want below in the backend terminal:
+  - exact SQL/RAG query retrieved from db
+- 3d modeler color (put all color definition at the top of the document)
+  - roof: dark grey
+  - wall: light grey
+  - all others: very light grey
+- motion change to: left click: pan (with hand cursor change), scroll wheel click: rotate
+- limit zoom out level to an appropriate value
+- rotate: the rotate center point should be the location of the cursor
+- camera: angle too wide: make it 50mm fullframe distortion level
+- base plane: move to level 0 (currently the base plne goes through the center)
+- "how many doors are there in total?" tells me "There are 205 doors in total." , but the doors are not highlighted with transparent other components. I want this kind of query, when certain entities are retrieved through sql, the components are highlighted, with other components with high transparency (grey color).

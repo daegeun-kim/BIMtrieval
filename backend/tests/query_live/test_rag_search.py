@@ -5,9 +5,10 @@ incompatible-model/dimension rejection (spec_v004 §3, §6, §7, §8, §15)."""
 from __future__ import annotations
 
 import pytest
-from query.rag.errors import IncompatibleEmbeddingError
-from query.rag.schemas import RagSearchPlan
-from query.rag.search import check_compatibility, run_rag_search, search_kind
+
+from app.query.rag.errors import IncompatibleEmbeddingError
+from app.query.rag.schemas import RagSearchPlan
+from app.query.rag.search import check_compatibility, run_rag_search, search_kind
 
 from .conftest import SOURCE_MODEL_ID
 
@@ -106,13 +107,13 @@ def test_no_result_above_threshold_reports_insufficient_evidence(live_session, e
 
 
 def test_incompatible_embedding_model_rejected(live_session, monkeypatch):
-    monkeypatch.setattr("query.rag.search.EMBEDDING_MODEL_NAME", "some-other-model")
+    monkeypatch.setattr("app.query.rag.search.EMBEDDING_MODEL_NAME", "some-other-model")
     with pytest.raises(IncompatibleEmbeddingError):
         check_compatibility(live_session, SOURCE_MODEL_ID, "entity")
 
 
 def test_incompatible_embedding_dimension_rejected(live_session, monkeypatch):
-    monkeypatch.setattr("query.rag.search.EMBEDDING_DIM", 768)
+    monkeypatch.setattr("app.query.rag.search.EMBEDDING_DIM", 768)
     with pytest.raises(IncompatibleEmbeddingError):
         check_compatibility(live_session, SOURCE_MODEL_ID, "entity")
 

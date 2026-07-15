@@ -1,0 +1,48 @@
+[tool.poetry]
+# Application project, not a distributable library (Task 09, spec direction).
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+fastapi = ">=0.110"
+uvicorn = { extras = ["standard"], version = ">=0.27" }
+pydantic = ">=2.6"
+pydantic-settings = ">=2.1"
+sqlalchemy = ">=2.0"
+pgvector = ">=0.2"
+psycopg2-binary = ">=2.9"
+python-dotenv = ">=1.0"
+openai = ">=1.0"
+# Query-embedding runtime. Must match the stored corpus embedding model/dim
+# (BAAI/bge-m3, 1024). CUDA build kept for GPU query embedding where available.
+torch = { version = "2.11.0+cu128", source = "pytorch-cu128" }
+sentence-transformers = ">=2.7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+httpx = ">=0.27"
+ruff = ">=0.4"
+
+[[tool.poetry.source]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+markers = [
+    "live: tests that require a live PostgreSQL connection (read-only)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

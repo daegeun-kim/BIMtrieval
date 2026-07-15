@@ -9,13 +9,13 @@ import json
 import re
 from pathlib import Path
 
-from query.rag.search import search_kind
-from query.rag.thresholds import get_threshold
+from app.query.rag.search import search_kind
+from app.query.rag.thresholds import get_threshold
 
 from .conftest import SOURCE_MODEL_ID
 
 _CALIBRATION_PATH = (
-    Path(__file__).resolve().parents[2] / "src" / "evaluation" / "rag_calibration_v001.jsonl"
+    Path(__file__).resolve().parents[2] / "app" / "evaluation" / "rag_calibration_v001.jsonl"
 )
 
 _CLASS_RE = re.compile(r"This is an (\w+) (?:entity|relationship)")

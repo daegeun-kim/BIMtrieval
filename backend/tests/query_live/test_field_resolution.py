@@ -5,13 +5,14 @@ properties/type_facts, with provenance, plus ambiguous-concept resolution
 from __future__ import annotations
 
 import pytest
-from query.sql.errors import AmbiguousFieldError, FieldNotFoundError
-from query.sql.field_registry import (
+
+from app.query.sql.errors import AmbiguousFieldError, FieldNotFoundError
+from app.query.sql.field_registry import (
     build_schema_catalog,
     resolve_concept,
     resolve_field,
 )
-from query.sql.schemas import FieldKind, FieldRef
+from app.query.sql.schemas import FieldKind, FieldRef
 
 from .conftest import SOURCE_MODEL_ID
 

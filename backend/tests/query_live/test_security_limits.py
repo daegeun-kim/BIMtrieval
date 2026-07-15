@@ -4,11 +4,14 @@ limits, and read-only role enforcement (spec_v003 §7, §11, §13, §16), live."
 from __future__ import annotations
 
 import pytest
-from db.session import get_engine
 from pydantic import ValidationError
-from query.sql import entities
-from query.sql.errors import FieldNotFoundError
-from query.sql.schemas import (
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
+
+from app.db.session import get_engine
+from app.query.sql import entities
+from app.query.sql.errors import FieldNotFoundError
+from app.query.sql.schemas import (
     CountEntitiesPlan,
     FieldKind,
     FieldRef,
@@ -18,8 +21,6 @@ from query.sql.schemas import (
     ListEntitiesPlan,
     Operator,
 )
-from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
 
 from .conftest import SOURCE_MODEL_ID
 

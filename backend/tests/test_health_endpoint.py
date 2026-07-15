@@ -11,7 +11,7 @@ def test_health_is_always_ok(client):
 
 
 def test_ready_reports_ok_without_touching_real_database(client, monkeypatch):
-    monkeypatch.setattr("api.routes.health.check_connectivity", lambda: (True, None))
+    monkeypatch.setattr("app.api.routes.health.check_connectivity", lambda: (True, None))
     resp = client.get("/ready")
     assert resp.status_code == 200
     body = resp.json()
@@ -21,7 +21,7 @@ def test_ready_reports_ok_without_touching_real_database(client, monkeypatch):
 
 def test_ready_degrades_gracefully_and_sanitizes_error(client, monkeypatch):
     monkeypatch.setattr(
-        "api.routes.health.check_connectivity",
+        "app.api.routes.health.check_connectivity",
         lambda: (False, "connection failed: postgresql://user:<credentials>@host/db"),
     )
     resp = client.get("/ready")

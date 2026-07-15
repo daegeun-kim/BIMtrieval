@@ -1,5 +1,14 @@
 # BIM RAG v001 Pipeline: Commands and Documentation
 
+> **Note — superseded by Task 09 (three independent applications).**
+> Paths and run commands in this document reflect the pre-split layout
+> (`backend/src`, `api.app:app`, and the `bim_rag` compatibility shim). The
+> authoritative current structure and commands are in [`README.md`](../README.md)
+> and [`workflow.md`](../workflow.md): ingestion lives under `ingestion/`, the
+> backend is a Poetry app run from `backend/` with `poetry run uvicorn app.main:app`,
+> and the backend has no dependency on the ingestion `bim_rag` package.
+
+
 ## Environment
 
 ```bash

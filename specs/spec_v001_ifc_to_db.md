@@ -1,5 +1,35 @@
 # Specification v001: IFC to PostgreSQL with Element-Description Vectors
 
+## Current architecture amendment (Task 09 and frontend planning)
+
+This specification remains authoritative for the ingestion application's behavior. After
+Task 09, all active ingestion code and assets are owned by the independent `ingestion/`
+project:
+
+```text
+ingestion/
+├── environment.yml
+├── pyproject.toml
+├── ifc_original/
+├── notebooks/
+├── src/bim_rag/
+└── tests/
+```
+
+Any later examples using root `src/bim_rag/`, `tests/`, `notebooks/`, `ifc_original/`,
+`environment.yml`, or `pyproject.toml` must be read using the corresponding path under
+`ingestion/`. Those old paths document the original implementation milestone; they are not
+active project locations.
+
+The ingestion application is independent from `backend/` and `frontend/`. It may write the
+five BIM data tables and stored vectors, but it must not import or invoke backend/frontend
+code. The backend reads the database and never imports `bim_rag`.
+
+PostGIS geometry extraction remains deferred to a separate future specification. It is not
+part of v001 or the frontend MVP. Browser rendering uses an optimized viewer artifact rather
+than reconstructing the model directly from PostGIS. Viewer-asset preparation is governed by
+`spec_v006_frontend_application.md` and does not change the v001 database/vector pipeline.
+
 ## 1. Purpose
 
 Implement the first isolated data-ingestion milestone for the BIM RAG project:
@@ -20,7 +50,7 @@ This specification covers IFC ingestion and vector storage only. It does not inc
 Use this exact file:
 
 ```text
-C:\Users\kdgki\Desktop\MSCDP\Projects\BIM_RAG\ifc_original\IFC Schependomlaan incl planningsdata.ifc
+C:\Users\kdgki\Desktop\MSCDP\Projects\BIM_RAG\ingestion\ifc_original\IFC Schependomlaan incl planningsdata.ifc
 ```
 
 The source IFC is authoritative and must never be edited, rewritten, repaired in place, renamed, or moved.

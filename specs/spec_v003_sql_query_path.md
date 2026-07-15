@@ -1,5 +1,24 @@
 # Specification v003: SQL and IFC Relationship Query Path
 
+## Current architecture amendment (Task 09 and frontend planning)
+
+The active backend is the independent Poetry application under `backend/app/`. Read every
+`backend/src/...` path later in this document as `backend/app/...`. Shared database access is
+`backend/app/db/`, and planner schemas are under `backend/app/llm/`.
+
+The backend must not import `bim_rag` or use ingestion ORM/configuration code. Backend-owned
+read-only models describe the existing tables. PostgreSQL remains the structured-information
+boundary between ingestion and backend.
+
+Frontend viewer selection is expressed using IFC GlobalIds plus an active `source_model_id`.
+A deterministic backend resolution layer validates and resolves those identifiers before calling
+the existing selected-object SQL operations. The browser must not construct or depend on database
+integer IDs, and identity resolution must not invoke the LLM.
+
+PostGIS remains outside this specification. A later spatial-query specification may add geometry
+tables and safe spatial operations, but frontend rendering will continue to use an optimized
+viewer artifact rather than SQL geometry serialization.
+
 ## 1. Purpose
 
 Define the deterministic SQL and relational IFC-graph path governed by `spec_v002_query_architecture.md`.
@@ -23,10 +42,10 @@ Do not support arbitrary SQL, PostGIS, unrestricted recursive queries, geometry 
 
 ## 3. Code Organization
 
-Place new backend code under:
+The original implementation paths below map to the active `backend/app/` package:
 
 ```text
-backend/src/query/sql/
+backend/app/query/sql/
 ├── schemas.py
 ├── operations.py
 ├── compiler.py
@@ -38,14 +57,15 @@ backend/src/query/sql/
 ├── hydration.py
 └── errors.py
 
-backend/src/query/graph/
+backend/app/query/graph/
 ├── schemas.py
 ├── registry.py
 ├── traversal.py
 └── hydration.py
 ```
 
-Shared database access belongs under `backend/src/db/`. SQL-planner schemas integrate with `backend/src/llm/schemas.py`. Do not put SQL execution in prompt files or route handlers.
+Shared database access belongs under `backend/app/db/`. SQL-planner schemas integrate with
+`backend/app/llm/schemas.py`. Do not put SQL execution in prompt files or route handlers.
 
 Preserve working ingestion modules until a dedicated refactoring task.
 
@@ -350,9 +370,9 @@ The SQL path is acceptable when:
 ## 18. Task 05 Implementation Notes
 
 Task 05 (`tasks/task05_done.md`) implemented this specification in full
-against the live database: `backend/src/query/sql/*` (schemas, field
+against the live database: `backend/app/query/sql/*` (schemas, field
 registry, compiler, catalog/entities/relationships/aggregates/hydration,
-errors) and `backend/src/query/graph/*` (semantic registry, bounded BFS
+errors) and `backend/app/query/graph/*` (semantic registry, bounded BFS
 traversal, hydration). Full command reference and data-specific caveats:
 `docs/architecture_v003.md`.
 
@@ -376,7 +396,7 @@ than fabricating it (see `docs/architecture_v003.md` for details and the
 300/300 tests pass (158 pre-existing ingestion + 40 Task 04 + 102 new:
 `backend/tests/query_sql`, `query_graph`, `query_live`). `ruff format`/`ruff
 check` clean. Benchmark:
-`backend/src/evaluation/benchmark_v002_sql_graph_cases.jsonl` (8 manually
+`backend/app/evaluation/benchmark_v002_sql_graph_cases.jsonl` (8 manually
 verified cases with canonical IDs/exact counts).
 
 ```text
@@ -386,4 +406,3 @@ Existing canonical BIM IDs: PRESERVED
 RAG query path: NOT IMPLEMENTED
 OpenAI orchestration: NOT EXECUTED
 ```
-

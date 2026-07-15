@@ -5,7 +5,9 @@ llm.validation (see tests/query_hybrid/test_validation.py)."""
 from __future__ import annotations
 
 import pytest
-from llm.schemas import (
+from pydantic import ValidationError
+
+from app.llm.schemas import (
     CombinationOp,
     ExecutionMode,
     GraphPlan,
@@ -14,9 +16,8 @@ from llm.schemas import (
     RagPlan,
     SqlPlan,
 )
-from pydantic import ValidationError
-from query.sql.schemas import SqlOperation
-from shared.types import QueryRoute, QueryScope
+from app.query.sql.schemas import SqlOperation
+from app.shared.types import QueryRoute, QueryScope
 
 
 def test_section5_hybrid_example_accepted():

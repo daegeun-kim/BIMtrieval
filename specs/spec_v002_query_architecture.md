@@ -19,9 +19,54 @@ This specification establishes the boundaries shared by all query paths. Detaile
 spec_v003_sql_query_path.md
 spec_v004_rag_query_path.md
 spec_v005_hybrid_query_orchestration.md
+spec_v006_frontend_application.md
 ```
 
-Frontend implementation will be specified later. This specification defines the backend/frontend contract that future frontend work must consume.
+Frontend behavior is defined by `spec_v006_frontend_application.md`. Where an older frontend
+example in this specification conflicts with v006, v006 is authoritative.
+
+## 1.1 Current application and frontend-contract amendment
+
+Task 09 established three independent top-level applications:
+
+```text
+ingestion/   # Conda/IfcOpenShell IFC-to-database and stored-vector pipeline
+backend/     # pyenv-win/Poetry FastAPI read-only query application
+frontend/    # npm/Vite/React/TypeScript viewer and chat application
+```
+
+The active backend package root is `backend/app/`, not `backend/src/`. The backend owns its
+read-only database definitions and has no imports or runtime dependency on `bim_rag`.
+
+The frontend MVP is desktop-oriented and local-only. It uses a full-window bright Three.js/
+That Open viewer with a resizable, collapsible floating chat panel placed over the viewer with
+outer margin and rounded corners. It does not use the older hard split-panel drawing below.
+
+The MVP has no IFC upload, authentication, charts, editing, PostGIS geometry path, model catalog
+page, or catalog-card landing page. It has a minimal display-name model selector and allows
+catalog questions through chat.
+
+Renderable geometry is delivered as a preprocessed, immutable That Open Fragments artifact.
+The backend serves the artifact through a narrow validated read-only endpoint; it never converts
+IFC at request time. A one-time TypeScript preparation tool creates the artifact from the local
+IFC independently of `bim_rag`. PostGIS is reserved for later spatial SQL and does not replace
+the optimized viewer artifact.
+
+Viewer clicks and chat citations use IFC GlobalIds at the browser boundary. The frontend does
+not need to know database integer IDs. A narrow deterministic backend endpoint resolves selected
+GlobalIds within the active `source_model_id`; object selection never requires an LLM call.
+
+There are two distinct clearing actions:
+
+- **Clear Chat** clears visible messages, LLM history, current answer evidence/result highlights,
+  and establishes a fresh server conversation while keeping the loaded model, manual object
+  selection, and IndexedDB geometry cache.
+- **Reset App** returns to the initial model-selection state, clears conversation/model/selection/
+  highlights, unloads the scene, cancels pending requests, and establishes a fresh session. It
+  retains the IndexedDB geometry cache because that cache has no conversational meaning.
+
+The required narrow backend additions must be implemented and validated separately before the
+frontend integration task. They must not add an LLM call, IFC parsing, or database writes.
 
 ## 2. Product Intent
 
@@ -54,7 +99,9 @@ Show the available versions of this project.
 Load the Schependomlaan model.
 ```
 
-After the user confirms and loads a model, the session becomes scoped to that model until the user resets or selects another model.
+After the user confirms and loads a model, the session becomes scoped to that model until the user
+uses **Reset App** or selects another model. **Clear Chat** starts a fresh conversation but keeps
+the same active model.
 
 Examples:
 
@@ -637,13 +684,15 @@ Represent selected objects by canonical IDs and compact summaries, not complete 
 
 Use FastAPI.
 
-The only public query endpoint in the first version is:
+The public natural-language query endpoint is:
 
 ```text
 POST /api/query
 ```
 
-Low-level SQL, RAG, graph, planning, model, entity, and relationship endpoints may exist for development/testing but are not part of the public frontend contract.
+Low-level SQL, RAG, graph, and planning endpoints remain development-only. The narrow deterministic
+model-list, viewer-asset, and GlobalId-resolution endpoints defined by v006 are also public frontend
+contracts, but they never invoke an LLM.
 
 ### 16.1 Request envelope
 
@@ -654,12 +703,13 @@ Support a request equivalent to:
   "question": "Which doors relate to fire separation?",
   "session_id": "browser-session-id",
   "active_source_model_id": 1,
-  "selected_entity_ids": [101, 102],
+  "selected_global_ids": ["IFC-GLOBAL-ID-1", "IFC-GLOBAL-ID-2"],
   "history": []
 }
 ```
 
-The active model may be null for catalog queries.
+The active model may be null for catalog queries. Browser selection uses GlobalIds; database
+integer entity IDs are backend-internal/backward-compatible inputs only.
 
 ### 16.2 Response envelope
 
@@ -744,11 +794,14 @@ The backend supplies semantic roles. The frontend chooses colors and rendering s
 
 The backend must not generate camera coordinates or directly control Three.js.
 
-## 18. Future Three.js/IFC Frontend Direction
+## 18. Current Three.js/IFC Frontend Direction
 
-The first frontend viewer may load the selected raw IFC directly in the browser using `web-ifc` or a compatible current That Open/Three.js stack.
+The frontend loads a preprocessed That Open Fragments artifact using the current supported That
+Open/Three.js stack. It must not parse the full raw IFC during normal application startup.
 
-The database remains the source of semantic/structured information. The IFC file remains the geometry source.
+The database remains the source of semantic/structured information. The immutable Fragments file
+is the browser rendering source. A manual TypeScript preparation tool may read the local IFC to
+produce that artifact; it is not an ingestion import and must not run during an HTTP request.
 
 Use IFC GlobalId mapping:
 
@@ -758,19 +811,26 @@ query result entity
 → rendered viewer object
 ```
 
-Because large IFC files may be slow to parse repeatedly, preserve the option to add cached Fragments-derived viewer artifacts later without storing geometry in PostgreSQL.
+Cache prepared artifacts in IndexedDB by source-model identity and model fingerprint. Keep the
+initial cache policy conservative and bounded. PostGIS geometry is explicitly deferred and is not
+a replacement for the rendering artifact.
 
 Clicking an object in the viewer must be able to:
 
 - select it visually
-- resolve its GlobalId/canonical entity ID
-- retrieve a compact indexed database summary
+- obtain its IFC GlobalId from the rendered artifact
+- resolve the GlobalId deterministically through the backend within the active model
 - add it to chat context
 - support questions such as `What is this?` and `What connects to this?`
 
 Use frontend caching and selection debouncing. Indexed object lookup should not require loading full canonical JSON unless requested.
 
 ## 19. Source-Code Organization
+
+The tree below records the original scaffold plan. Task 09 superseded its Python paths. The active
+top-level applications are `ingestion/`, `backend/`, and `frontend/`; backend code is under
+`backend/app/`, with no backend ingestion package. The authoritative frontend tree and boundaries
+are defined in `spec_v006_frontend_application.md`.
 
 Separate backend and frontend at repository level.
 
@@ -830,13 +890,13 @@ frontend/
 Detailed prompt text belongs in versioned files under:
 
 ```text
-backend/src/llm/prompts/
+backend/app/llm/prompts/
 ```
 
 Typed planner and answer schemas belong in:
 
 ```text
-backend/src/llm/schemas.py
+backend/app/llm/schemas.py
 ```
 
 Do not place all LLM, SQL, RAG, and API logic in one Python module.
@@ -1038,3 +1098,58 @@ RAG query path: NOT IMPLEMENTED
 Hybrid orchestration: NOT IMPLEMENTED
 ```
 
+
+---
+
+## Task 09 Addendum: Three Independent Applications (Database-Only Boundary)
+
+Task 09 restructured the repository into three independently managed top-level
+projects. **PostgreSQL is the only runtime integration boundary between them.**
+
+```text
+ingestion/   IFC → PostgreSQL structured tables + stored corpus vectors (Conda `bim_rag`, Python 3.11)
+backend/     FastAPI SQL/RAG/graph/hybrid query service, read-only on BIM data (pyenv-win 3.11 + Poetry)
+frontend/    (placeholder) future Three.js BIM viewer + chat UI
+```
+
+### Boundary rules
+
+- The backend does **not** import ingestion code (`bim_rag`), parse IFC files,
+  create/migrate BIM tables, or generate stored corpus vectors.
+- Ingestion does not import backend code.
+- The backend owns its own read-oriented SQLAlchemy models (`backend/app/db/models.py`)
+  mirroring the live schema, its own DB config (`backend/app/config/database.py`:
+  `get_db_url`, `sanitize_db_error`, `THREAD_LIMIT`), and its own query-embedding
+  runtime (BAAI/bge-m3, dim 1024), validated against stored vectors at query time
+  (`app/query/rag/search.py::check_compatibility`).
+- Similar-looking model/config definitions across the two applications are
+  intentional duplication: independence over de-duplication.
+
+### Schema ownership
+
+Ingestion creates/migrates the five canonical tables (`ifc_source_models`,
+`ifc_entities`, `ifc_relationships`, `relationship_members`, `rag_documents`) and
+the two catalog tables (`model_families`, `source_model_catalog_entries`). Schema
+and read-only-role admin utilities live under `ingestion/src/bim_rag/db_admin/`
+(`apply_catalog_migration`, `bootstrap_readonly_role`). The backend is read-only:
+no table creation/alteration, no corpus/vector mutation, and no superuser fallback
+for ordinary operation (it uses the dedicated `bim_rag_query_ro` role via `DATABASE_URL`).
+
+### Authoritative commands
+
+```powershell
+# Ingestion (from ingestion/, Conda bim_rag)
+pip install -e .
+pytest
+
+# Backend (from backend/, pyenv-win 3.11 + Poetry)
+poetry install
+poetry run uvicorn app.main:app --reload     # authoritative
+poetry run pytest                             # offline; ZERO OpenAI calls
+poetry run pytest tests/query_live            # live read-only PostgreSQL tests
+```
+
+`app.main:app` exposes the same FastAPI application and public endpoints
+(`POST /api/query`, `/health`, `/ready`) as the previous `api.app:app`. Normal
+test runs make zero OpenAI API calls (LLM behavior is mocked/faked); there is no
+automatic or opt-in live-OpenAI test setup.

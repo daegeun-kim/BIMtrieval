@@ -5,7 +5,7 @@ live 'absent' confirmation)."""
 
 from __future__ import annotations
 
-from query.sql.field_registry import normalize_quantity_value
+from app.query.sql.field_registry import normalize_quantity_value
 
 
 def test_mm_conversion_from_normalized_meters():

@@ -3,9 +3,9 @@ primary/context classification (spec_v004 §10, §11), live."""
 
 from __future__ import annotations
 
-from query.rag.hydration import hydrate_rag_result
-from query.rag.relationship_expansion import expand_relationship_endpoints
-from query.rag.schemas import RagCandidate, RagSearchResult
+from app.query.rag.hydration import hydrate_rag_result
+from app.query.rag.relationship_expansion import expand_relationship_endpoints
+from app.query.rag.schemas import RagCandidate, RagSearchResult
 
 from .conftest import SOURCE_MODEL_ID
 

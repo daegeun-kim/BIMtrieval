@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from query.hybrid.combination import (
+from app.query.hybrid.combination import (
     intersection,
     rag_rank_of_sql,
     sql_filter_of_rag,

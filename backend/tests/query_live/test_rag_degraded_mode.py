@@ -5,12 +5,13 @@ failure must never disable deterministic query paths."""
 from __future__ import annotations
 
 import pytest
-from query.rag.embedding_service import EmbeddingService, EmbeddingServiceState
-from query.rag.errors import EmbeddingServiceUnavailableError
-from query.rag.schemas import RagSearchPlan
-from query.rag.search import run_rag_search
-from query.sql import entities as sql_entities
-from query.sql.schemas import CountEntitiesPlan
+
+from app.query.rag.embedding_service import EmbeddingService, EmbeddingServiceState
+from app.query.rag.errors import EmbeddingServiceUnavailableError
+from app.query.rag.schemas import RagSearchPlan
+from app.query.rag.search import run_rag_search
+from app.query.sql import entities as sql_entities
+from app.query.sql.schemas import CountEntitiesPlan
 
 from .conftest import SOURCE_MODEL_ID
 

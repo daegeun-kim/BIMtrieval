@@ -13,29 +13,29 @@ test_hybrid_live_openai.py.
 
 from __future__ import annotations
 
-import pytest
 import sqlalchemy as sa
-from api.schemas.request import SessionQueryRequest
-from llm.client import AnswerOutput, AnswerResult, PlanResult, TokenUsage
-from llm.schemas import (
+
+from app.api.schemas.request import SessionQueryRequest
+from app.db.models import IfcEntity
+from app.llm.client import AnswerOutput, AnswerResult, PlanResult, TokenUsage
+from app.llm.schemas import (
     CombinationOp,
     ExecutionMode,
     PlanExecution,
+    PlanFieldRef,
+    PlanFilter,
     QueryPlan,
     RagPlan,
     SqlPlan,
 )
-from query.rag.schemas import RagCandidate, RagSearchResult
-from query.service import QueryService
-from query.sql.schemas import (
+from app.query.rag.schemas import RagCandidate, RagSearchResult
+from app.query.service import QueryService
+from app.query.sql.schemas import (
     FieldKind,
     Operator,
     SqlOperation,
 )
-from llm.schemas import PlanFieldRef, PlanFilter
-from shared.types import AnswerBasis, QueryRoute, QueryScope
-
-from bim_rag.schema.models import IfcEntity
+from app.shared.types import AnswerBasis, QueryRoute, QueryScope
 
 SOURCE_MODEL_ID = 1
 
@@ -77,7 +77,9 @@ def _service(plans, **kw):
 
 
 def _req(question="q", sid="pipe", active=SOURCE_MODEL_ID, **kw):
-    return SessionQueryRequest(question=question, session_id=sid, active_source_model_id=active, **kw)
+    return SessionQueryRequest(
+        question=question, session_id=sid, active_source_model_id=active, **kw
+    )
 
 
 def _door_ids(session, n=6):
@@ -210,11 +212,11 @@ def _hybrid_plan(combo=CombinationOp.INTERSECTION):
         scope=QueryScope.ACTIVE_MODEL,
         route=QueryRoute.HYBRID,
         source_model_id=SOURCE_MODEL_ID,
-        sql_plan=SqlPlan(operation=SqlOperation.LIST_ENTITIES, entity_classes=["IfcDoor"], limit=500),
-        rag_plan=RagPlan(semantic_query="fire", search_entity_documents=True),
-        execution=PlanExecution(
-            mode=ExecutionMode.PARALLEL_INDEPENDENT, combination=combo
+        sql_plan=SqlPlan(
+            operation=SqlOperation.LIST_ENTITIES, entity_classes=["IfcDoor"], limit=500
         ),
+        rag_plan=RagPlan(semantic_query="fire", search_entity_documents=True),
+        execution=PlanExecution(mode=ExecutionMode.PARALLEL_INDEPENDENT, combination=combo),
     )
 
 
@@ -251,14 +253,14 @@ def test_hybrid_intersection_nonempty(live_session, monkeypatch):
     assert len(doors) >= 4
     accepted = [doors[0], doors[1], 999999999]  # two real doors + one non-door
     monkeypatch.setattr(
-        "query.hybrid.orchestrator.run_rag_search", lambda s, e, p: _fake_rag_result(accepted)
+        "app.query.hybrid.orchestrator.run_rag_search", lambda s, e, p: _fake_rag_result(accepted)
     )
     monkeypatch.setattr(
-        "query.hybrid.orchestrator.get_embedding_service", lambda: object(), raising=False
+        "app.query.hybrid.orchestrator.get_embedding_service", lambda: object(), raising=False
     )
     svc = QueryService(llm_client=FakeLLMClient([_hybrid_plan()]))
     # inject the getter used by orchestrate via service; embedding getter is imported there
-    monkeypatch.setattr("query.service.get_embedding_service", lambda: object())
+    monkeypatch.setattr("app.query.service.get_embedding_service", lambda: object())
     resp = svc.handle_query(_req("doors related to fire", sid="hyb1"))
     assert resp.route is QueryRoute.HYBRID
     ids = {e.entity_id for e in resp.primary_entities}
@@ -267,12 +269,11 @@ def test_hybrid_intersection_nonempty(live_session, monkeypatch):
 
 
 def test_hybrid_empty_intersection_is_not_union(live_session, monkeypatch):
-    doors = _door_ids(live_session, 4)
     monkeypatch.setattr(
-        "query.hybrid.orchestrator.run_rag_search",
+        "app.query.hybrid.orchestrator.run_rag_search",
         lambda s, e, p: _fake_rag_result([888888888, 777777777]),
     )
-    monkeypatch.setattr("query.service.get_embedding_service", lambda: object())
+    monkeypatch.setattr("app.query.service.get_embedding_service", lambda: object())
     svc = QueryService(llm_client=FakeLLMClient([_hybrid_plan(CombinationOp.INTERSECTION)]))
     resp = svc.handle_query(_req("doors related to fire", sid="hyb2"))
     assert resp.primary_entities == []  # empty intersection stays empty
@@ -280,19 +281,21 @@ def test_hybrid_empty_intersection_is_not_union(live_session, monkeypatch):
 
 
 def test_degraded_hybrid_returns_sql_portion_with_warning(live_session, monkeypatch):
-    from query.rag.errors import EmbeddingServiceUnavailableError
+    from app.query.rag.errors import EmbeddingServiceUnavailableError
 
     def _boom(session, emb, plan):
         raise EmbeddingServiceUnavailableError("embedding model down")
 
-    monkeypatch.setattr("query.hybrid.orchestrator.run_rag_search", _boom)
-    monkeypatch.setattr("query.service.get_embedding_service", lambda: object())
+    monkeypatch.setattr("app.query.hybrid.orchestrator.run_rag_search", _boom)
+    monkeypatch.setattr("app.query.service.get_embedding_service", lambda: object())
     # sequential mode so the RAG failure surfaces as a DegradedCapabilityError
     plan = QueryPlan(
         scope=QueryScope.ACTIVE_MODEL,
         route=QueryRoute.HYBRID,
         source_model_id=SOURCE_MODEL_ID,
-        sql_plan=SqlPlan(operation=SqlOperation.LIST_ENTITIES, entity_classes=["IfcDoor"], limit=10),
+        sql_plan=SqlPlan(
+            operation=SqlOperation.LIST_ENTITIES, entity_classes=["IfcDoor"], limit=10
+        ),
         rag_plan=RagPlan(semantic_query="fire", search_entity_documents=True),
         execution=PlanExecution(
             mode=ExecutionMode.SQL_THEN_RAG, combination=CombinationOp.INTERSECTION
@@ -307,12 +310,12 @@ def test_degraded_hybrid_returns_sql_portion_with_warning(live_session, monkeypa
 
 
 def test_execution_error_degrades_gracefully_not_500(monkeypatch):
-    from shared.errors import UnsupportedOperationError
+    from app.shared.errors import UnsupportedOperationError
 
     def _boom(**kwargs):
         raise UnsupportedOperationError("unknown field at execution")
 
-    monkeypatch.setattr("query.service.orchestrate", _boom)
+    monkeypatch.setattr("app.query.service.orchestrate", _boom)
     plan = QueryPlan(
         scope=QueryScope.ACTIVE_MODEL,
         route=QueryRoute.SQL,

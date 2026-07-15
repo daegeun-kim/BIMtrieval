@@ -28,3 +28,29 @@ def test_unknown_field_is_rejected(client):
         json={"question": "q", "session_id": "s1", "raw_sql": "SELECT 1"},
     )
     assert resp.status_code == 422
+
+
+def test_more_than_five_selected_global_ids_is_rejected(client):
+    resp = client.post(
+        "/api/query",
+        json={
+            "question": "q",
+            "session_id": "s1",
+            "active_source_model_id": 1,
+            "selected_global_ids": ["G1", "G2", "G3", "G4", "G5", "G6"],
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_selected_global_ids_without_active_model_returns_bounded_error(client):
+    # Reject happens before any LLM/DB work (spec_v006 §10.4), so this succeeds
+    # offline with no OpenAI/database access.
+    resp = client.post(
+        "/api/query",
+        json={"question": "q", "session_id": "s1", "selected_global_ids": ["G1"]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "error"
+    assert "active model" in body["answer"].lower()

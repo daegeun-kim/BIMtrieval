@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from query.session import ChatMessage, SessionState, reset
-from shared.types import QueryScope
+from app.query.session import ChatMessage, SessionState, reset
+from app.shared.types import QueryScope
 
 
 def test_reset_clears_chat_and_selection_but_keeps_session_id():

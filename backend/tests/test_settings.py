@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from config.settings import Settings, get_settings
+from app.config.settings import Settings, get_settings
 
 
 def test_defaults_use_gpt5_nano():

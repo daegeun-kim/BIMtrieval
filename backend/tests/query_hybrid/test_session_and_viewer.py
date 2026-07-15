@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from query.session import SessionStore, reset
-from shared.types import QueryScope
-from viewer.actions import (
+from app.query.session import SessionStore, reset
+from app.shared.types import QueryScope
+from app.viewer.actions import (
     ModelAction,
     SelectionAction,
     build_await_confirmation_actions,
@@ -41,7 +41,7 @@ def test_reset_clears_all_session_state():
 
 
 def test_reset_function_preserves_only_session_id():
-    from query.session import SessionState
+    from app.query.session import SessionState
 
     s = SessionState(session_id="x", active_source_model_id=9, last_primary_entity_ids=[7])
     fresh = reset(s)

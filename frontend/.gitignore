@@ -1,0 +1,19 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*
+!.env.example
+
+# Vite / test / tooling caches
+.vite/
+coverage/
+playwright-report/
+test-results/
+.playwright/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
