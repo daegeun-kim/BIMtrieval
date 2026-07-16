@@ -406,3 +406,73 @@ Existing canonical BIM IDs: PRESERVED
 RAG query path: NOT IMPLEMENTED
 OpenAI orchestration: NOT EXECUTED
 ```
+
+## 19. Task 13 Implementation Notes — separate limits, class expansion, component details
+
+Task 13 (`tasks/task13_done.md`) extended this path with three independent result limits, explicit
+IFC class expansion, and two deterministic read-only component contracts. Read-only throughout: no
+migration, no re-ingestion, no IFC parsing, no new table.
+
+### 19.1 Three independent limits (supersedes the single §11 reading)
+
+§11's `default list limit = 50 / maximum list limit = 500` continues to govern **example rows kept
+as answer-LLM evidence**. It never governed — and must not govern — what the viewer may highlight.
+The limits are now explicitly separate:
+
+```text
+exact database count      no application cap        (count_entities/aggregates, unchanged)
+viewer match identities   max_viewer_match_ids = 2000
+answer-LLM evidence       max_primary_entities = 50 (spec_v005 §10)
+```
+
+`entities.select_viewer_identities()` performs a deterministic **identity-only** retrieval over the
+same predicate as the count (it reuses `_base_where` + the same filter compilation, so the
+highlighted set can never drift from the counted set). It selects only `global_id` + `ifc_class`,
+orders by `id`, and returns the exact total alongside the capped rows — truncation therefore never
+reduces the exact count. `entities.count_by_class()` computes the compact per-class summary with its
+own `GROUP BY` over the full matching set, so class counts stay exact above the 2,000 cap.
+
+`sql/dispatch.execute_sql()` attaches these for `COUNT_ENTITIES`, `AGGREGATE_ENTITIES`,
+`LIST_ENTITIES`, and `FILTER_ENTITIES`. Counts and aggregates previously returned only
+`facts={"count": n}` with **zero** entity ids, so a count question highlighted nothing; it now
+carries the matching GlobalIds. Hybrid passes `with_viewer_identities=False` because there the
+highlighted set is the *combined* SQL/RAG outcome, not this path's raw match set.
+
+### 19.2 Explicit entity-class expansion
+
+`sql/class_aliases.py` is a hand-written, centralized table applied in `llm/translate.py` where the
+planner's `SqlPlan` becomes a typed plan, so every entity operation inherits it:
+
+```text
+IfcWall | wall | walls  ->  [IfcWall, IfcWallStandardCase]
+```
+
+Rules: unknown classes pass through untouched; an explicit subtype request (`IfcWallStandardCase`)
+is never widened; no fuzzy/prefix/substring matching (`IfcCurtainWall` and `IfcWallElementedCase`
+are unaffected).
+
+**Measured on the live model:** `IfcWall` alone matches **648** entities, but **880** walls exist
+(648 `IfcWall` + 232 `IfcWallStandardCase`). Before this change "show me all the walls" silently
+missed 232 walls — 26% of them.
+
+### 19.3 Component detail and group operations
+
+New read-only entity operations, all `source_model_id`-scoped and parameterized:
+`get_entity_canonical`, `get_ifc_class_for_global_id`, `match_instance`, `match_by_type_global_id`,
+`match_by_type_name`, `match_by_family`. The allowlist/extraction layer is `app/viewer/details.py`.
+
+Type/family semantics (mandatory):
+
+- **Type** comes only from explicitly stored `canonical_json["type"]`.
+- **Family** is not a universal IFC concept — it comes only from an allowlisted family-like property
+  name in a stored property set, and is always returned with its source pset/property for
+  transparency.
+- Neither is ever inferred from the instance name, IFC class, material, or an LLM.
+
+**Measured on the live model: 0 of 6,989 entities have explicit `canonical_json.type`.** Unavailable
+type/family is therefore the expected, correct result for Schependomlaan — not an error — and the
+frontend actions degrade cleanly. Other future models expose these automatically from already-stored
+canonical data with no schema change or re-ingestion.
+
+Contracts, routes, and validation results: `tasks/task13_done.md`; frontend-facing shape:
+`spec_v006_frontend_application.md` §10.8.

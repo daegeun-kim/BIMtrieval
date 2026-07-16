@@ -120,6 +120,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{source_model_id}/entities/{global_id}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Entity Details
+         * @description Truthful, bounded, allowlisted component details (task13 §4).
+         *
+         *     Deterministic and LLM-free — no OpenAI call, no embedding, no IFC parse, no
+         *     database write. Reads only the canonical JSON ingestion already stored.
+         *
+         *     Type and family appear only when the source IFC explicitly supplied them;
+         *     they are never inferred from the object's name, class, or material. For the
+         *     current Schependomlaan model both are expected to be absent, and that is a
+         *     valid result rather than an error.
+         */
+        get: operations["entity_details_api_models__source_model_id__entities__global_id__details_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/{source_model_id}/entities/highlight-group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Highlight Group
+         * @description Deterministic instance/type/family match set for the component panel
+         *     (task13 §5).
+         *
+         *     Exists solely for the panel's buttons: it creates no chat message, calls no
+         *     LLM, creates no embedding, and mutates no session history. Every lookup is
+         *     scoped to the route model. Returns the exact total plus at most
+         *     `max_viewer_match_ids` deterministically ordered GlobalIds.
+         */
+        post: operations["highlight_group_api_models__source_model_id__entities_highlight_group_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -147,6 +201,54 @@ export interface components {
             summary?: string | null;
         };
         /**
+         * DetailAvailability
+         * @description Truthful availability of each deterministic group action (task13 §4).
+         */
+        DetailAvailability: {
+            /**
+             * Instance
+             * @default true
+             */
+            instance?: boolean;
+            /**
+             * Same Type
+             * @default false
+             */
+            same_type?: boolean;
+            /**
+             * Same Family
+             * @default false
+             */
+            same_family?: boolean;
+            /** Type Unavailable Reason */
+            type_unavailable_reason?: string | null;
+            /** Family Unavailable Reason */
+            family_unavailable_reason?: string | null;
+        };
+        /**
+         * DetailValue
+         * @description One allowlisted, length-bounded property/quantity value.
+         */
+        DetailValue: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string;
+            /** Source Set */
+            source_set?: string | null;
+            /** Unit */
+            unit?: string | null;
+        };
+        /** EntityDetailsResponse */
+        EntityDetailsResponse: {
+            /** Source Model Id */
+            source_model_id: number;
+            instance: components["schemas"]["InstanceDetails"];
+            type?: components["schemas"]["TypeDetails"] | null;
+            family?: components["schemas"]["FamilyDetails"] | null;
+            availability: components["schemas"]["DetailAvailability"];
+        };
+        /**
          * EvidenceSummary
          * @description spec_v002 Section 13 — internal basis classification, bounded evidence counts.
          */
@@ -161,11 +263,61 @@ export interface components {
             /** Notes */
             notes?: string[];
         };
+        /**
+         * FamilyDetails
+         * @description Present ONLY when an allowlisted family-like property exists in a stored
+         *     property set. The source set/property are returned for transparency.
+         */
+        FamilyDetails: {
+            /** Value */
+            value: string;
+            /** Property Set */
+            property_set: string;
+            /** Property Name */
+            property_name: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HighlightGroupRequest */
+        HighlightGroupRequest: {
+            /** Selected Global Id */
+            selected_global_id: string;
+            scope: components["schemas"]["HighlightScope"];
+        };
+        /** HighlightGroupResponse */
+        HighlightGroupResponse: {
+            /** Source Model Id */
+            source_model_id: number;
+            scope: components["schemas"]["HighlightScope"];
+            /** Available */
+            available: boolean;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+            /**
+             * Total
+             * @default 0
+             */
+            total?: number;
+            /** Global Ids */
+            global_ids?: string[];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
+            /** Class Counts */
+            class_counts?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * HighlightScope
+         * @enum {string}
+         */
+        HighlightScope: "instance" | "type" | "family";
         /** HistoryTurn */
         HistoryTurn: {
             /**
@@ -175,6 +327,38 @@ export interface components {
             role: "user" | "assistant";
             /** Content */
             content: string;
+        };
+        /**
+         * InstanceDetails
+         * @description Always available for a valid entity (task13 §4).
+         */
+        InstanceDetails: {
+            /** Global Id */
+            global_id: string;
+            /** Ifc Class */
+            ifc_class: string;
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Object Type */
+            object_type?: string | null;
+            /** Predefined Type */
+            predefined_type?: string | null;
+            /** Tag */
+            tag?: string | null;
+            /** Storey Name */
+            storey_name?: string | null;
+            /** Storey Global Id */
+            storey_global_id?: string | null;
+            /** Elevation */
+            elevation?: number | null;
+            /** Materials */
+            materials?: string[];
+            /** Quantities */
+            quantities?: components["schemas"]["DetailValue"][];
+            /** Properties */
+            properties?: components["schemas"]["DetailValue"][];
         };
         /**
          * ModelAction
@@ -265,6 +449,7 @@ export interface components {
             relationships?: components["schemas"]["RelationshipResult"][];
             viewer_actions?: components["schemas"]["ViewerActions"];
             evidence_summary: components["schemas"]["EvidenceSummary"];
+            result_summary?: components["schemas"]["ResultSummary"] | null;
             /** Warnings */
             warnings?: string[];
         };
@@ -325,11 +510,69 @@ export interface components {
          * @enum {string}
          */
         ResponseStatus: "success" | "error";
+        /**
+         * ResultSummary
+         * @description Compact, deterministic result description (task13 §3).
+         *
+         *     Lets the frontend state the outcome without listing every retrieved object.
+         *     The three counts are deliberately independent:
+         *
+         *     - `exact_total` — the true database total, never reduced by any cap;
+         *     - `viewer_match_count` — identities actually returned for highlighting
+         *       (at most `max_viewer_match_ids`);
+         *     - `class_counts` — exact counts grouped by IFC class over the FULL matching
+         *       set, so they stay correct even when the viewer set is truncated.
+         */
+        ResultSummary: {
+            /** Exact Total */
+            exact_total?: number | null;
+            /**
+             * Viewer Match Count
+             * @default 0
+             */
+            viewer_match_count?: number;
+            /** Viewer Matches Total */
+            viewer_matches_total?: number | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
+            /** Class Counts */
+            class_counts?: {
+                [key: string]: number;
+            };
+            sample_detail?: components["schemas"]["SampleDetail"] | null;
+        };
         /** RoleGroup */
         RoleGroup: {
             role: components["schemas"]["ViewerRole"];
             /** Global Ids */
             global_ids?: string[];
+        };
+        /**
+         * SampleDetail
+         * @description Bounded details for ONE deterministically chosen matching entity.
+         *
+         *     Populated only when the planner reports explicit sample-detail intent
+         *     (task13 §3), e.g. "pick a sample door and show me the details". The entity
+         *     and every value come from the database — the LLM cannot invent a sample.
+         */
+        SampleDetail: {
+            /** Global Id */
+            global_id: string;
+            /** Ifc Class */
+            ifc_class: string;
+            /** Name */
+            name?: string | null;
+            /** Storey Name */
+            storey_name?: string | null;
+            /** Materials */
+            materials?: string[];
+            /** Quantities */
+            quantities?: components["schemas"]["DetailValue"][];
+            /** Properties */
+            properties?: components["schemas"]["DetailValue"][];
         };
         /**
          * SelectionAction
@@ -357,6 +600,21 @@ export interface components {
             reset?: boolean;
             /** Confirm Model Id */
             confirm_model_id?: number | null;
+        };
+        /**
+         * TypeDetails
+         * @description Present ONLY when the source IFC explicitly supplied type information
+         *     that ingestion stored. Never inferred from name/class/material/LLM.
+         */
+        TypeDetails: {
+            /** Name */
+            name?: string | null;
+            /** Global Id */
+            global_id?: string | null;
+            /** Ifc Class */
+            ifc_class?: string | null;
+            /** Predefined Type */
+            predefined_type?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -387,6 +645,13 @@ export interface components {
             load_model_id?: number | null;
             /** Viewer Source Location */
             viewer_source_location?: string | null;
+            /** Viewer Matches Total */
+            viewer_matches_total?: number | null;
+            /**
+             * Viewer Matches Truncated
+             * @default false
+             */
+            viewer_matches_truncated?: boolean;
         };
         /**
          * ViewerAssetStatus
@@ -564,6 +829,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolveEntitiesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    entity_details_api_models__source_model_id__entities__global_id__details_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_model_id: number;
+                global_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDetailsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    highlight_group_api_models__source_model_id__entities_highlight_group_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_model_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HighlightGroupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighlightGroupResponse"];
                 };
             };
             /** @description Validation Error */

@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from app.config import trace
 from app.config.settings import Settings
 from app.llm.schemas import CombinationOp, ExecutionMode, QueryPlan
 from app.llm.translate import TranslatedPlan  # noqa: F401 (type annotation only)
@@ -81,11 +82,11 @@ def orchestrate(
     )
 
     if plan.route is QueryRoute.SQL:
-        return _run_sql_route(plan, translated, session, pkg)
+        return _run_sql_route(plan, translated, session, settings, pkg)
     if plan.route is QueryRoute.RAG:
-        return _run_rag_route(plan, translated, session, embedding_service_getter, pkg)
+        return _run_rag_route(plan, translated, session, embedding_service_getter, settings, pkg)
     if plan.route is QueryRoute.GRAPH:
-        return _run_graph_route(plan, translated, session, pkg)
+        return _run_graph_route(plan, translated, session, settings, pkg)
     if plan.route is QueryRoute.HYBRID:
         return _run_hybrid_route(
             plan, translated, session, session_factory, embedding_service_getter, settings, pkg
@@ -99,7 +100,11 @@ def orchestrate(
 
 
 def _run_sql_route(
-    plan: QueryPlan, translated: "TranslatedPlan", session: Session, pkg: EvidencePackage
+    plan: QueryPlan,
+    translated: "TranslatedPlan",
+    session: Session,
+    settings: Settings,
+    pkg: EvidencePackage,
 ) -> tuple[EvidencePackage, ViewerActions]:
     if translated.catalog_plan is not None:
         res = execute_catalog(session, translated.catalog_operation, translated.catalog_plan)
@@ -117,12 +122,13 @@ def _run_sql_route(
     pkg.relationships = res.relationships
     pkg.sql_facts = res.facts
     pkg.warnings.extend(res.warnings)
+    _adopt_viewer_matches(pkg, res)
     if res.exact_total is not None:
         pkg.exact_totals["sql_result"] = res.exact_total
     has_any = bool(res.primary_entities or res.context_entities or res.relationships or res.facts)
     pkg.answer_basis = AnswerBasis.EXACT_SQL if has_any else AnswerBasis.INSUFFICIENT_EVIDENCE
     pkg.path_runs.append(PathRun(name="sql", ran=True, ok=True))
-    return pkg, _select_actions(pkg)
+    return pkg, _select_actions(pkg, settings)
 
 
 def _run_rag_route(
@@ -130,6 +136,7 @@ def _run_rag_route(
     translated: "TranslatedPlan",
     session: Session,
     embedding_service_getter: Callable[[], Any],
+    settings: Settings,
     pkg: EvidencePackage,
 ) -> tuple[EvidencePackage, ViewerActions]:
     try:
@@ -160,11 +167,15 @@ def _run_rag_route(
         else AnswerBasis.INSUFFICIENT_EVIDENCE
     )
     pkg.path_runs.append(PathRun(name="rag", ran=True, ok=True))
-    return pkg, viewer
+    return pkg, _finalize_viewer(pkg, viewer, settings)
 
 
 def _run_graph_route(
-    plan: QueryPlan, translated: "TranslatedPlan", session: Session, pkg: EvidencePackage
+    plan: QueryPlan,
+    translated: "TranslatedPlan",
+    session: Session,
+    settings: Settings,
+    pkg: EvidencePackage,
 ) -> tuple[EvidencePackage, ViewerActions]:
     result = traverse(session, translated.graph_plan)
     primary, context, viewer = hydrate_traversal(session, plan.source_model_id, result)
@@ -176,7 +187,7 @@ def _run_graph_route(
         AnswerBasis.GRAPH_TRAVERSAL if (primary or context) else AnswerBasis.INSUFFICIENT_EVIDENCE
     )
     pkg.path_runs.append(PathRun(name="graph", ran=True, ok=True))
-    return pkg, viewer
+    return pkg, _finalize_viewer(pkg, viewer, settings)
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +237,7 @@ def _run_hybrid_route(
     # Degraded hybrid: one path missing → return the surviving portion, clearly
     # labelled, without pretending the missing path returned no matches (§17).
     if need_sql and need_rag and (sql_res is None or rag_res is None):
-        return _degraded_hybrid(plan, session, pkg, sql_res, sql_ids, rag_res, rag_ids)
+        return _degraded_hybrid(plan, session, settings, pkg, sql_res, sql_ids, rag_res, rag_ids)
 
     if combo is CombinationOp.RELATIONSHIP_ENDPOINT_EXPANSION:
         outcome, rel_ids = _relationship_expansion(session, plan, sql_ids, rag_rel_ids, rag_res)
@@ -245,7 +256,9 @@ def _run_hybrid_route(
         if (pkg.primary_entities or pkg.context_entities or pkg.relationships)
         else AnswerBasis.INSUFFICIENT_EVIDENCE
     )
-    return pkg, _select_actions(pkg)
+    # The viewer set is the *combined* outcome, not the raw SQL match set — so it
+    # is derived from pkg.primary_entities here, not adopted from sql_res.
+    return pkg, _select_actions(pkg, settings)
 
 
 def _run_hybrid_paths(
@@ -256,7 +269,14 @@ def _run_hybrid_paths(
 
     def sql_task():
         with session_factory() as s:
-            return execute_sql(s, translated.sql_operation, translated.sql_plan)
+            # Viewer identities are derived from the combined outcome downstream,
+            # not from this path's raw match set (task13 §2).
+            return execute_sql(
+                s,
+                translated.sql_operation,
+                translated.sql_plan,
+                with_viewer_identities=False,
+            )
 
     def rag_task():
         with session_factory() as s:
@@ -341,7 +361,7 @@ def _relationship_expansion(session, plan, sql_ids, rag_rel_ids, rag_res):
     ), rag_rel_ids
 
 
-def _degraded_hybrid(plan, session, pkg, sql_res, sql_ids, rag_res, rag_ids):
+def _degraded_hybrid(plan, session, settings, pkg, sql_res, sql_ids, rag_res, rag_ids):
     pkg.warnings.append(
         "hybrid answer is degraded: one retrieval path was unavailable, so this reflects "
         "only the surviving path — not a complete hybrid result."
@@ -362,11 +382,67 @@ def _degraded_hybrid(plan, session, pkg, sql_res, sql_ids, rag_res, rag_ids):
         )
     else:
         pkg.answer_basis = AnswerBasis.INSUFFICIENT_EVIDENCE
-    return pkg, _select_actions(pkg)
+    return pkg, _select_actions(pkg, settings)
 
 
-def _select_actions(pkg: EvidencePackage) -> ViewerActions:
-    primary_ids = [e.global_id for e in pkg.primary_entities]
+def _adopt_viewer_matches(pkg: EvidencePackage, res: Any) -> None:
+    """Carry identity-only viewer matches from a SQL entity operation onto the
+    package (task13 §2). Only entity operations produce them; other operations
+    leave the viewer fields unset for `_ensure_viewer_matches` to derive."""
+    if res.viewer_matches_total is None:
+        return
+    pkg.viewer_global_ids = res.viewer_global_ids
+    pkg.viewer_matches_total = res.viewer_matches_total
+    pkg.viewer_matches_truncated = res.viewer_matches_truncated
+    pkg.class_histogram = res.class_histogram
+
+
+def _ensure_viewer_matches(pkg: EvidencePackage, settings: Settings) -> None:
+    """Derive the viewer match set from retrieved evidence when the SQL path did
+    not already supply an identity-only one (task13 §2).
+
+    Must run in the orchestrator, *before* `apply_bounds` truncates
+    `primary_entities` to the 50-item answer-LLM limit — otherwise RAG/graph/
+    hybrid results would highlight only the LLM's evidence subset rather than
+    their full match set. The two limits stay independent.
+    """
+    if pkg.viewer_matches_total is not None:
+        return  # already supplied by an identity-only SQL retrieval
+    total = len(pkg.primary_entities)
+    limit = settings.max_viewer_match_ids
+    kept = pkg.primary_entities[:limit]
+    pkg.viewer_global_ids = [e.global_id for e in kept]
+    pkg.viewer_matches_total = total
+    pkg.viewer_matches_truncated = total > len(kept)
+    pkg.class_histogram = trace.histogram(e.ifc_class for e in pkg.primary_entities)
+    if pkg.viewer_matches_truncated:
+        pkg.warnings.append(
+            f"{total} objects match; the viewer received the first {len(kept)} "
+            "(the exact total above is unaffected)"
+        )
+
+
+def _finalize_viewer(
+    pkg: EvidencePackage, viewer: ViewerActions, settings: Settings
+) -> ViewerActions:
+    """Stamp the match totals onto a viewer action a path built for itself
+    (RAG/graph), so every route reports the same truncation contract."""
+    _ensure_viewer_matches(pkg, settings)
+    viewer.viewer_matches_total = pkg.viewer_matches_total
+    viewer.viewer_matches_truncated = pkg.viewer_matches_truncated
+    return viewer
+
+
+def _select_actions(pkg: EvidencePackage, settings: Settings) -> ViewerActions:
+    """Build the viewer action for a result.
+
+    Always highlights the full viewer match set — that is what lets a
+    count/aggregate question highlight every object it counted, and a list
+    question highlight all matches rather than only the 50 entities kept as LLM
+    evidence (task13 §2).
+    """
+    _ensure_viewer_matches(pkg, settings)
+    primary_ids = pkg.viewer_global_ids
     context_ids = [e.global_id for e in pkg.context_entities]
     if not primary_ids and not context_ids:
         return build_default_viewer_actions()
@@ -374,4 +450,6 @@ def _select_actions(pkg: EvidencePackage) -> ViewerActions:
         selection_action=SelectionAction.SELECT_AND_FIT,
         primary_global_ids=primary_ids,
         context_global_ids=context_ids,
+        viewer_matches_total=pkg.viewer_matches_total,
+        viewer_matches_truncated=pkg.viewer_matches_truncated,
     )

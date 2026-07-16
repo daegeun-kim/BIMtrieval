@@ -30,6 +30,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.schemas.request import SessionQueryRequest
 from app.api.schemas.response import EvidenceSummary, QueryResponseEnvelope
+from app.config import trace
 from app.config.logging import write_jsonl_event
 from app.config.settings import Settings, get_settings
 from app.db.session import session_scope
@@ -40,7 +41,7 @@ from app.llm.prompts import ANSWERER_PROMPT_VERSION, PLANNER_PROMPT_VERSION
 from app.llm.schemas import QueryPlan
 from app.llm.translate import TranslatedPlan, translate_plan
 from app.llm.validation import PlanValidationError, validate_plan_structure
-from app.query.hybrid.evidence import apply_bounds
+from app.query.hybrid.evidence import apply_bounds, build_result_summary, build_sample_detail
 from app.query.hybrid.orchestrator import orchestrate
 from app.query.hybrid.schemas import EvidencePackage
 from app.query.rag.embedding_service import get_embedding_service
@@ -157,7 +158,26 @@ class QueryService:
             )
 
         client = self._client()
+        # Per-question OpenAI usage (task15 §1): snapshot the client's call log
+        # so only the calls made for THIS question are summed, whether the
+        # question succeeds, degrades, or fails after a completed planner call.
+        usage_start = len(client.log.calls) if hasattr(client, "log") else None
 
+        try:
+            return self._answer_question(request, request_id, scope, client, state, t0)
+        finally:
+            if usage_start is not None:
+                _emit_question_usage(client.log.calls[usage_start:])
+
+    def _answer_question(
+        self,
+        request: SessionQueryRequest,
+        request_id: str,
+        scope: QueryScope,
+        client: OpenAIQueryClient,
+        state: SessionState,
+        t0: float,
+    ) -> QueryResponseEnvelope:
         try:
             with session_scope() as session:
                 # Trusted resolution of the browser selection to canonical entity
@@ -332,6 +352,14 @@ class QueryService:
                 scope=plan.scope,
             )
         pkg.question = request.question
+        # Explicit sample-detail intent only: pick ONE deterministic matching
+        # entity and attach its bounded details from the database (task13 §3).
+        # Must run before apply_bounds so the choice is made over the full result
+        # set, and before the answer call so the model cannot invent a sample.
+        if plan.sample_detail_requested and plan.source_model_id and pkg.primary_entities:
+            pkg.sample_detail = build_sample_detail(
+                session, plan.source_model_id, pkg.primary_entities[0].global_id
+            )
         apply_bounds(pkg, self.settings)
         execute_ms = round((time.perf_counter() - t_exec) * 1000.0, 1)
 
@@ -489,6 +517,25 @@ def _evidence_summary(pkg: EvidencePackage) -> EvidenceSummary:
     )
 
 
+def _emit_question_usage(calls: list[dict]) -> None:
+    """Print one per-question OpenAI usage block (task15 §1).
+
+    `calls` are the client-log entries added during this question only — each
+    carries the usage the OpenAI API itself reported (planner, repair, and
+    answerer alike), so the sums are actuals, never estimates. A question that
+    made no OpenAI call (or none that reported usage) prints nothing rather
+    than a misleading zero block; a question that failed after a completed
+    planner call prints only what was actually reported.
+    """
+    if not calls:
+        return
+    trace.emit_openai_usage(
+        prompt_tokens=sum(int(c.get("prompt_tokens", 0) or 0) for c in calls),
+        completion_tokens=sum(int(c.get("completion_tokens", 0) or 0) for c in calls),
+        total_tokens=sum(int(c.get("total_tokens", 0) or 0) for c in calls),
+    )
+
+
 def _from_package(
     request: SessionQueryRequest,
     request_id: str,
@@ -512,6 +559,7 @@ def _from_package(
         relationships=pkg.relationships,
         viewer_actions=viewer,
         evidence_summary=_evidence_summary(pkg),
+        result_summary=build_result_summary(pkg),
         warnings=list(pkg.warnings)[:20],
     )
 

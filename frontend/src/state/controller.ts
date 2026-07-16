@@ -7,6 +7,7 @@ import { api } from "../api/client";
 import { ApiError } from "../api/types";
 import type {
   EntityCitation,
+  HighlightScope,
   HistoryTurn,
   ModelListItem,
   QueryResponseEnvelope,
@@ -30,13 +31,18 @@ export class AppController {
   private queryAbort: AbortController | null = null;
   private loadAbort: AbortController | null = null;
   private resolveAbort: AbortController | null = null;
+  private detailAbort: AbortController | null = null;
+  private groupAbort: AbortController | null = null;
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Monotonic tokens so late/stale async results are ignored after the model or
-  // session changes (spec_v006 §11.2, §12.3).
+  // session changes (spec_v006 §11.2, §12.3). Detail and group have separate
+  // tokens: a group action must not invalidate an in-flight detail fetch.
   private queryToken = 0;
   private loadToken = 0;
   private resolveToken = 0;
+  private detailToken = 0;
+  private groupToken = 0;
 
   private get s() {
     return useStore.getState();
@@ -85,6 +91,9 @@ export class AppController {
     this.s.setLoadError(null);
     this.s.setLoadPhase("metadata");
     this.s.clearSelection();
+    // Component details belong to the outgoing model — close the panel and
+    // retire its tokens so no cross-model detail can land (task14 §5).
+    this.closeComponent();
     this.viewer.clearManualSelection();
     await this.viewer.clearQueryRoles();
 
@@ -148,6 +157,109 @@ export class AppController {
     for (const g of guids) if (this.s.resolvedChips[g]) kept[g] = this.s.resolvedChips[g];
     this.s.setResolvedChips(kept);
     this.scheduleResolve(guids);
+    this.syncComponentPanel(guids);
+  }
+
+  // ---- component detail panel (task14 §5) --------------------------------
+
+  /**
+   * The panel follows the selection: the most recently picked object is its
+   * subject, and clicking empty space (which clears the selection) closes it.
+   */
+  private syncComponentPanel(guids: string[]): void {
+    const subject = guids.length > 0 ? guids[guids.length - 1]! : null;
+    if (subject === null) {
+      this.closeComponent();
+      return;
+    }
+    if (this.s.componentGuid === subject) return;
+    void this.openComponent(subject);
+  }
+
+  /** Fetch bounded details for one component. Deterministic — no LLM call. */
+  async openComponent(guid: string): Promise<void> {
+    const modelId = this.s.activeModelId;
+    if (modelId === null) return;
+    this.s.openComponentPanel(guid);
+
+    const token = ++this.detailToken;
+    this.detailAbort?.abort();
+    this.detailAbort = new AbortController();
+    try {
+      const details = await api.entityDetails(modelId, guid, this.detailAbort.signal);
+      if (!this.detailStillCurrent(token, guid, modelId)) return;
+      this.s.setComponentDetails(details);
+    } catch (err) {
+      if (this.isCanceled(err)) return;
+      if (!this.detailStillCurrent(token, guid, modelId)) return;
+      this.s.setComponentError(this.uiError(err, "Couldn't load this component's details."));
+    }
+  }
+
+  /** Guard against a stale response after rapid selection or a model switch. */
+  private detailStillCurrent(token: number, guid: string, modelId: number): boolean {
+    return (
+      token === this.detailToken &&
+      this.s.componentGuid === guid &&
+      this.s.activeModelId === modelId
+    );
+  }
+
+  closeComponent(): void {
+    this.detailToken++;
+    this.groupToken++;
+    this.detailAbort?.abort();
+    this.groupAbort?.abort();
+    this.s.closeComponentPanel();
+  }
+
+  /**
+   * Apply a deterministic instance/type/family highlight group (task14 §5).
+   *
+   * Never submits a chat query, adds a message, alters backend session history,
+   * or consumes OpenAI tokens — it is a viewer operation over a bounded
+   * identity list from the group endpoint.
+   */
+  async applyGroupScope(scope: HighlightScope): Promise<void> {
+    const modelId = this.s.activeModelId;
+    const guid = this.s.componentGuid;
+    if (modelId === null || guid === null) return;
+
+    const token = ++this.groupToken;
+    this.groupAbort?.abort();
+    this.groupAbort = new AbortController();
+    try {
+      const res = await api.highlightGroup(modelId, guid, scope, this.groupAbort.signal);
+      if (!this.groupStillCurrent(token, guid, modelId)) return;
+
+      if (!res.available) {
+        this.s.setComponentScope(
+          null,
+          res.unavailable_reason ?? "That grouping isn't available for this object.",
+        );
+        return;
+      }
+      const ids = res.global_ids ?? [];
+      const total = res.total ?? ids.length;
+      // Primary role + dimmed remainder, centered with the guarded moderate fit.
+      await this.viewer.applyQueryRoles(ids, []);
+      this.s.setComponentScope(scope, this.groupNotice(ids.length, total, res.truncated ?? false));
+    } catch (err) {
+      if (this.isCanceled(err)) return;
+      if (!this.groupStillCurrent(token, guid, modelId)) return;
+      this.s.setComponentScope(null, "Couldn't apply that highlight.");
+    }
+  }
+
+  private groupStillCurrent(token: number, guid: string, modelId: number): boolean {
+    return (
+      token === this.groupToken && this.s.componentGuid === guid && this.s.activeModelId === modelId
+    );
+  }
+
+  private groupNotice(shown: number, total: number, truncated: boolean): string {
+    if (truncated) return `Highlighted the first ${shown} of ${total} matching objects.`;
+    return total === 1 ? "1 matching object." : `${total} matching objects.`;
   }
 
   private scheduleResolve(guids: string[]): void {
@@ -245,6 +357,8 @@ export class AppController {
       evidence: this.evidenceOf(env, citations),
       citations,
       candidates: env.model_candidates?.length ? env.model_candidates : undefined,
+      // Compact totals/class counts replace the old component listing (task14 §4).
+      resultSummary: env.result_summary ?? undefined,
     };
     this.s.addMessage(message);
 
@@ -267,13 +381,28 @@ export class AppController {
     const context = va.context_global_ids ?? [];
     if (primary.length === 0 && context.length === 0) return;
     const { missing } = await this.viewer.applyQueryRoles(primary, context);
+
+    const notices: string[] = [];
+    // The viewer set is capped at 2,000; the exact total in the answer is not
+    // (spec_v006 §10.9). Disclose the difference rather than letting the
+    // highlighted count silently contradict the stated total.
+    if (va.viewer_matches_truncated && va.viewer_matches_total) {
+      notices.push(
+        `Highlighted the first ${primary.length} of ${va.viewer_matches_total} matching objects.`,
+      );
+    }
     if (missing.length > 0) {
+      notices.push(
+        `${missing.length} referenced object(s) aren't in the current 3D view and couldn't be highlighted.`,
+      );
+    }
+    if (notices.length > 0) {
       this.s.addMessage({
         id: makeMessageId(),
         role: "assistant",
         kind: "notice",
         createdAt: Date.now(),
-        content: `${missing.length} referenced object(s) aren't in the current 3D view and couldn't be highlighted.`,
+        content: notices.join(" "),
       });
     }
   }
@@ -295,7 +424,14 @@ export class AppController {
     this.s.clearMessages();
     this.s.setRetryQuestion(null);
     await this.viewer.clearQueryRoles();
-    // fresh backend + frontend conversation identity; keep model + selection + cache
+    // A group highlight is a query-result role, so it clears too — and the
+    // in-flight token is retired so a late group response cannot re-highlight
+    // after the clear (task14 §5).
+    this.groupToken++;
+    this.groupAbort?.abort();
+    this.s.setComponentScope(null, null);
+    // fresh backend + frontend conversation identity; keep model + selection +
+    // the component panel (which follows selection) + cache
     this.resetBackendSession();
     this.s.regenerateSessionId();
   }
@@ -304,6 +440,7 @@ export class AppController {
     this.cancelQuery();
     this.loadToken++; // invalidate any in-flight load
     this.loadAbort?.abort();
+    this.closeComponent(); // retires detail/group tokens and disposes panel state
     this.resetBackendSession();
 
     this.s.clearMessages();

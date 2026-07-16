@@ -16,6 +16,7 @@ from app.api.schemas.response import (
     ModelCandidate,
     PrimaryEntityResult,
     RelationshipResult,
+    SampleDetail,
 )
 from app.shared.types import AnswerBasis
 
@@ -57,6 +58,19 @@ class EvidencePackage:
     evidence_groups: dict = field(default_factory=dict)
     combination: str | None = None
     rag_internal: list[RagInternalItem] = field(default_factory=list)
+
+    # --- Viewer match identities (task13 §2) ---
+    # Deliberately separate from `primary_entities`, which `apply_bounds`
+    # truncates to the 50-item answer-LLM evidence limit. These identities are
+    # for highlighting only (up to max_viewer_match_ids) and are never sent to
+    # the LLM. `viewer_matches_total` is the true total regardless of both caps.
+    viewer_global_ids: list[str] = field(default_factory=list)
+    viewer_matches_total: int | None = None
+    viewer_matches_truncated: bool = False
+    class_histogram: dict[str, int] = field(default_factory=dict)
+    # Bounded details for one deterministically chosen entity, populated only on
+    # explicit sample-detail intent (task13 §3).
+    sample_detail: SampleDetail | None = None
 
     conflicts: list[str] = field(default_factory=list)
     missing_coverage: list[str] = field(default_factory=list)

@@ -7,11 +7,14 @@ import { create } from "zustand";
 
 import type {
   EntityCitation,
+  EntityDetailsResponse,
+  HighlightScope,
   ModelCandidate,
   ModelListItem,
   RelationshipResult,
   ResolvedEntity,
   ResponseStatus,
+  ResultSummary,
 } from "../api/types";
 
 export type LoadPhase =
@@ -49,6 +52,8 @@ export interface ChatMessage {
   candidates?: ModelCandidate[];
   citations?: EntityCitation[];
   status?: ResponseStatus;
+  /** Compact totals/class counts shown instead of a component dump (task14 §4). */
+  resultSummary?: ResultSummary;
 }
 
 const SS_SESSION = "bimrag.sessionId";
@@ -57,6 +62,19 @@ const SS_PANEL_C = "bimrag.panelCollapsed";
 
 export const PANEL_MIN_WIDTH = 320;
 export const PANEL_MAX_WIDTH = 520;
+
+// Dual-panel desktop layout (task14 §5). With the component panel open, both
+// panels take narrower defaults so the model stays the dominant workspace: at
+// 1440px the two panels + margins occupy ~730px, leaving the viewer ~49%.
+export const COMPONENT_PANEL_WIDTH = 320;
+export const PANEL_PAIRED_WIDTH = 360;
+export const PANEL_PAIRED_MAX_WIDTH = 400;
+
+/** Chat width to use for the current pairing, without mutating the stored preference. */
+export function effectivePanelWidth(stored: number, componentOpen: boolean): number {
+  if (!componentOpen) return stored;
+  return Math.min(stored, PANEL_PAIRED_MAX_WIDTH, PANEL_PAIRED_WIDTH);
+}
 
 function newSessionId(): string {
   const id =
@@ -124,6 +142,16 @@ export interface AppState {
   panelWidth: number;
   panelCollapsed: boolean;
 
+  // component detail panel (task14 §5). Current-session UI state only — details
+  // are never persisted, and no backend trace data is ever stored here.
+  componentGuid: string | null;
+  componentDetails: EntityDetailsResponse | null;
+  componentLoading: boolean;
+  componentError: string | null;
+  /** Which group action is currently applied, for button affordance. */
+  componentScope: HighlightScope | null;
+  componentGroupNotice: string | null;
+
   // actions (pure state; side effects live in the controller)
   regenerateSessionId: () => string;
   setModels: (models: ModelListItem[]) => void;
@@ -147,6 +175,13 @@ export interface AppState {
 
   setPanelWidth: (w: number) => void;
   togglePanelCollapsed: () => void;
+
+  openComponentPanel: (guid: string) => void;
+  setComponentDetails: (details: EntityDetailsResponse | null) => void;
+  setComponentLoading: (v: boolean) => void;
+  setComponentError: (msg: string | null) => void;
+  setComponentScope: (scope: HighlightScope | null, notice?: string | null) => void;
+  closeComponentPanel: () => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -172,6 +207,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   panelWidth: initialPanelWidth(),
   panelCollapsed: readSessionStorage(SS_PANEL_C) === "1",
+
+  componentGuid: null,
+  componentDetails: null,
+  componentLoading: false,
+  componentError: null,
+  componentScope: null,
+  componentGroupNotice: null,
 
   regenerateSessionId: () => {
     const id = newSessionId();
@@ -209,6 +251,33 @@ export const useStore = create<AppState>((set, get) => ({
     writeSessionStorage(SS_PANEL_C, next ? "1" : "0");
     set({ panelCollapsed: next });
   },
+
+  // Selecting a new component clears the previous subject's details outright, so
+  // a slow in-flight response can never paint over the new selection.
+  openComponentPanel: (guid) =>
+    set({
+      componentGuid: guid,
+      componentDetails: null,
+      componentLoading: true,
+      componentError: null,
+      componentScope: null,
+      componentGroupNotice: null,
+    }),
+  setComponentDetails: (componentDetails) =>
+    set({ componentDetails, componentLoading: false, componentError: null }),
+  setComponentLoading: (componentLoading) => set({ componentLoading }),
+  setComponentError: (componentError) => set({ componentError, componentLoading: false }),
+  setComponentScope: (componentScope, componentGroupNotice = null) =>
+    set({ componentScope, componentGroupNotice }),
+  closeComponentPanel: () =>
+    set({
+      componentGuid: null,
+      componentDetails: null,
+      componentLoading: false,
+      componentError: null,
+      componentScope: null,
+      componentGroupNotice: null,
+    }),
 }));
 
 export function makeMessageId(): string {

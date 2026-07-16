@@ -64,6 +64,200 @@ def count_entities(session: Session, plan: CountEntitiesPlan) -> int:
     return session.execute(sa.select(sa.func.count()).select_from(_ET).where(where)).scalar_one()
 
 
+@dataclass
+class ViewerIdentityResult:
+    """Identity-only match set for viewer highlighting (task13 §2)."""
+
+    rows: list  # (global_id, ifc_class) — nothing else is selected
+    exact_total: int
+    truncated: bool
+
+
+def _identities_for_where(
+    session: Session, where: sa.ColumnElement, limit: int
+) -> ViewerIdentityResult:
+    """Identity-only rows + the exact total for an arbitrary scoped predicate.
+
+    Selects only `global_id` + `ifc_class`; the exact total is counted over the
+    full predicate so it is never reduced by `limit`. Ordered by `id` so
+    truncation is stable and deterministic across calls.
+    """
+    exact_total = session.execute(
+        sa.select(sa.func.count()).select_from(_ET).where(where)
+    ).scalar_one()
+    rows = session.execute(
+        sa.select(_ET.c.global_id, _ET.c.ifc_class).where(where).order_by(_ET.c.id).limit(limit)
+    ).all()
+    return ViewerIdentityResult(
+        rows=list(rows),
+        exact_total=exact_total,
+        truncated=exact_total > len(rows),
+    )
+
+
+def _class_counts_for_where(session: Session, where: sa.ColumnElement) -> dict[str, int]:
+    """Exact count grouped by IFC class over the full predicate."""
+    rows = session.execute(
+        sa.select(_ET.c.ifc_class, sa.func.count().label("cnt"))
+        .where(where)
+        .group_by(_ET.c.ifc_class)
+    ).all()
+    return {r.ifc_class: r.cnt for r in sorted(rows, key=lambda r: (-r.cnt, r.ifc_class))}
+
+
+def _entity_where(source_model_id: int, entity_classes: list[str], filters, session: Session):
+    where = _base_where(source_model_id, entity_classes)
+    if filters is not None:
+        where = sa.and_(where, build_condition_expr(session, source_model_id, filters, _ET))
+    return where
+
+
+def select_viewer_identities(
+    session: Session,
+    source_model_id: int,
+    entity_classes: list[str],
+    filters,
+    limit: int,
+) -> ViewerIdentityResult:
+    """Deterministic identity-only retrieval over the *same* filtered set a
+    count/list/aggregate matched (task13 §2).
+
+    Deliberately separate from both the exact count (never capped) and the
+    50-item LLM evidence bound: this returns only what the viewer needs to
+    highlight geometry — active-model-scoped GlobalId + minimal class identity,
+    never names, canonical JSON, or full object detail.
+
+    Reuses `_base_where` (source_model_id first) and the same filter compilation
+    as `count_entities`, so the highlighted set can never drift from the counted
+    set.
+    """
+    where = _entity_where(source_model_id, entity_classes, filters, session)
+    return _identities_for_where(session, where, limit)
+
+
+def count_by_class(
+    session: Session,
+    source_model_id: int,
+    entity_classes: list[str],
+    filters,
+) -> dict[str, int]:
+    """Exact count grouped by IFC class over the FULL matching set (task13 §3).
+
+    Computed with its own GROUP BY rather than tallying the returned rows, so
+    the compact class summary stays exact even when the viewer match set is
+    truncated at the 2,000 cap.
+    """
+    where = _entity_where(source_model_id, entity_classes, filters, session)
+    return _class_counts_for_where(session, where)
+
+
+# ---------------------------------------------------------------------------
+# Component details + deterministic group matching (task13 §4, §5)
+# ---------------------------------------------------------------------------
+
+_TYPE_GLOBAL_ID_PATH = ("type", "global_id")
+_TYPE_NAME_PATH = ("type", "name")
+
+
+def _json_text(path: tuple[str, ...]) -> sa.ColumnElement:
+    return _ET.c.canonical_json.op("#>>")(path_array_param(path))
+
+
+def get_entity_canonical(session: Session, source_model_id: int, global_id: str):
+    """Fetch one entity's stored canonical JSON, scoped to the model (task13 §4).
+
+    Every predicate includes `source_model_id`, so a GlobalId belonging to a
+    different model simply does not resolve — the caller returns 404 without
+    revealing that the entity exists elsewhere.
+    """
+    row = session.execute(
+        sa.select(_ET.c.id, _ET.c.global_id, _ET.c.ifc_class, _ET.c.canonical_json).where(
+            _ET.c.source_model_id == source_model_id,
+            _ET.c.global_id == global_id,
+        )
+    ).first()
+    return row
+
+
+def get_ifc_class_for_global_id(
+    session: Session, source_model_id: int, global_id: str
+) -> str | None:
+    """IFC class of an in-model entity by GlobalId, or None.
+
+    Used to report an explicit type object's own IFC class when that type was
+    itself ingested as an entity. Returns None rather than guessing.
+    """
+    return session.execute(
+        sa.select(_ET.c.ifc_class).where(
+            _ET.c.source_model_id == source_model_id,
+            _ET.c.global_id == global_id,
+        )
+    ).scalar_one_or_none()
+
+
+def match_instance(
+    session: Session, source_model_id: int, global_id: str, limit: int
+) -> tuple[ViewerIdentityResult, dict[str, int]]:
+    """`instance` scope: the selected entity only (task13 §5)."""
+    where = sa.and_(
+        _ET.c.source_model_id == source_model_id,
+        _ET.c.global_id == global_id,
+    )
+    return _identities_for_where(session, where, limit), _class_counts_for_where(session, where)
+
+
+def match_by_type_global_id(
+    session: Session, source_model_id: int, type_global_id: str, limit: int
+) -> tuple[ViewerIdentityResult, dict[str, int]]:
+    """`type` scope, preferred form: exact explicit type GlobalId (task13 §5)."""
+    where = sa.and_(
+        _ET.c.source_model_id == source_model_id,
+        _json_text(_TYPE_GLOBAL_ID_PATH) == type_global_id,
+    )
+    return _identities_for_where(session, where, limit), _class_counts_for_where(session, where)
+
+
+def match_by_type_name(
+    session: Session, source_model_id: int, type_name: str, limit: int
+) -> tuple[ViewerIdentityResult, dict[str, int]]:
+    """`type` scope, fallback: exact *normalized* stored type name, used only
+    when the IFC gave a type name without a GlobalId (task13 §5).
+
+    Normalization is case/whitespace folding on both sides — an exact match, not
+    a fuzzy or partial one, and always within the same model.
+    """
+    normalized = sa.func.lower(sa.func.btrim(_json_text(_TYPE_NAME_PATH)))
+    where = sa.and_(
+        _ET.c.source_model_id == source_model_id,
+        normalized == sa.func.lower(sa.func.btrim(sa.bindparam(None, type_name))),
+    )
+    return _identities_for_where(session, where, limit), _class_counts_for_where(session, where)
+
+
+def match_by_family(
+    session: Session,
+    source_model_id: int,
+    property_set: str,
+    property_name: str,
+    value: str,
+    limit: int,
+) -> tuple[ViewerIdentityResult, dict[str, int]]:
+    """`family` scope: exact normalized value of the *same* allowlisted stored
+    property the selected entity's family came from (task13 §5).
+
+    Tied to explicit stored family data — the property set and property name are
+    bound path parameters taken from the selected entity's own record, never a
+    name-derived guess.
+    """
+    path = ("property_sets", property_set, property_name, "value")
+    normalized = sa.func.lower(sa.func.btrim(_json_text(path)))
+    where = sa.and_(
+        _ET.c.source_model_id == source_model_id,
+        normalized == sa.func.lower(sa.func.btrim(sa.bindparam(None, value))),
+    )
+    return _identities_for_where(session, where, limit), _class_counts_for_where(session, where)
+
+
 def _select_entities(
     session: Session,
     source_model_id: int,

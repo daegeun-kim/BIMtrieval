@@ -13,6 +13,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from app.config import trace
 from app.db.models import RagDocument
 from app.query.rag.embedding_service import EMBEDDING_DIM, EMBEDDING_MODEL_NAME, EmbeddingService
 from app.query.rag.errors import IncompatibleEmbeddingError
@@ -126,21 +127,51 @@ def run_rag_search(
     threshold = get_threshold(plan.minimum_similarity_profile)
     query_vector = embedding_service.embed_query(plan.semantic_query)
 
+    kinds = [
+        kind
+        for kind, wanted in (
+            ("entity", plan.search_entity_documents),
+            ("relationship", plan.search_relationship_documents),
+        )
+        if wanted
+    ]
+
     entity_candidates: list[RagCandidate] = []
     relationship_candidates: list[RagCandidate] = []
-    if plan.search_entity_documents:
-        entity_candidates = search_kind(
-            session, plan.source_model_id, "entity", query_vector, plan.top_k_per_kind, threshold
-        )
-    if plan.search_relationship_documents:
-        relationship_candidates = search_kind(
-            session,
-            plan.source_model_id,
-            "relationship",
-            query_vector,
-            plan.top_k_per_kind,
-            threshold,
-        )
+    # Opt-in trace (task13 §1). The query vector is a bound parameter, so the
+    # captured statement holds a placeholder — the embedding cannot be printed.
+    # No entity/relationship id list is recorded, only a bounded histogram.
+    with trace.trace_rag_search(
+        semantic_query=plan.semantic_query,
+        document_kinds=kinds,
+        top_k=plan.top_k_per_kind,
+        minimum_similarity=threshold,
+    ) as rec:
+        if plan.search_entity_documents:
+            entity_candidates = search_kind(
+                session,
+                plan.source_model_id,
+                "entity",
+                query_vector,
+                plan.top_k_per_kind,
+                threshold,
+            )
+        if plan.search_relationship_documents:
+            relationship_candidates = search_kind(
+                session,
+                plan.source_model_id,
+                "relationship",
+                query_vector,
+                plan.top_k_per_kind,
+                threshold,
+            )
+        retrieved = entity_candidates + relationship_candidates
+        rec.retrieved_count = len(retrieved)
+        rec.result_histogram = trace.histogram(c.document_type for c in retrieved)
+        if retrieved:
+            similarities = [c.similarity for c in retrieved]
+            rec.similarity_min = min(similarities)
+            rec.similarity_max = max(similarities)
 
     fused = []
     if plan.search_entity_documents and plan.search_relationship_documents:

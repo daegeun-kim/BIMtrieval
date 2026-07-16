@@ -113,8 +113,29 @@ mode=`single`, combination=`none`.
 
 `viewer_intent` ∈ {no_op, select_and_fit, select_only, clear_selection,
 await_user_confirmation}. Use `select_and_fit` when the user will want to see the results
-highlighted; `await_user_confirmation` for catalog model choices; `no_op` for pure
-explanation or counts.
+highlighted — including counts and aggregates, whose matching objects are highlighted too.
+Use `await_user_confirmation` for catalog model choices, and `no_op` only for pure
+explanation that involves no model objects.
+
+## Sample-detail intent
+
+Set `sample_detail_requested=true` ONLY when the user explicitly asks for the details of
+one example object or one specific component. The backend then picks a deterministic
+matching entity from the database and attaches its real details.
+
+```text
+true : "pick a sample door and show me the details"
+       "give me an example wall and its properties"
+       "what are the details of this component?"
+
+false: "how many doors are there?"     (a count)
+       "show me all the walls"         (a list/highlight)
+       "highlight the fire-rated doors" (a highlight)
+       "which doors are on level 2?"   (a filtered list)
+```
+
+Ordinary count/list/show/highlight/which questions are **not** sample-detail intent, even
+though they use verbs like "show". When in doubt, use `false`.
 
 ## Rules
 

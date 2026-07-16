@@ -192,3 +192,10 @@ class QueryPlan(_StrictModel):
     # A short internal note the answer model may use to focus the response.
     # Never surfaced verbatim; never authoritative (spec_v005 §11).
     answer_focus: str | None = Field(default=None, max_length=500)
+    # True ONLY when the user explicitly asked for a sample/example object's
+    # details ("pick a sample door and show me the details") or one specific
+    # component's details (task13 §3). Ordinary count/list/show/highlight
+    # questions are NOT sample-detail intent. When true, the backend picks one
+    # deterministic matching entity from the database and attaches its bounded
+    # details — the answer model never invents a sample.
+    sample_detail_requested: bool = False

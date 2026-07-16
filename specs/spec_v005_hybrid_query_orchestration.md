@@ -563,3 +563,103 @@ Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.m
 - Documented limitations (not defects): occasional semantic-vs-lexical route judgment,
   subjective ambiguity threshold, absent-class clarification, single-model/no-quantity
   corpus. All handled without hallucination.
+
+## 22. Task 13 Implementation Notes — tracing, compact answers, sample-detail intent
+
+Task 13 (`tasks/task13_done.md`) added opt-in observability and changed what the answer stage
+receives. The two-call planner/answer architecture (§2) is unchanged: tracing adds **no** OpenAI
+call and alters no query result.
+
+### 22.1 Opt-in developer trace mode
+
+`app/config/trace.py`, enabled only by `BIM_RAG_TRACE=1` (setting `bim_rag_trace`, default
+`False`, not required in `.env`, never auto-enabled in tests or production). It is local terminal
+observability and is **never** exposed through the public API. Built on the existing stdlib
+`logging` setup — no new dependency.
+
+Three record kinds, correlated by one request id per HTTP request, rendered as indented nested
+lists, and passed through the existing `config.logging.redact_secrets` choke point:
+
+- **API** (middleware in `api/app.py`) — request id, method, **route template**, status, and
+  `elapsed_s`. The route template rather than the raw URL means query strings carrying user data are
+  never logged; bodies, chat history, headers, and credentials never are either.
+- **SQL** (`sql/dispatch.py`) — operation, exact parameterized SQL, exact/row counts, per-class
+  histogram, `elapsed_s`.
+- **RAG** (`rag/search.py`) — semantic query, kinds, `top_k`, threshold, parameterized vector SQL,
+  retrieved count, similarity range, document-kind histogram, `elapsed_s`.
+
+**Timings are always seconds (`elapsed_s`), never milliseconds.**
+
+The no-leak property is structural, not cosmetic: a SQLAlchemy `after_cursor_execute` hook captures
+the `statement` text **only and never reads `parameters`**, so values are never collected rather
+than masked afterwards. Because the query embedding is a bound parameter, the vector SQL shows
+`%(embedding_1)s` and the 1024-dim vector cannot appear. Verified live:
+
+```text
+[trace] sql
+  operation: count_entities
+  sql:
+    - SELECT count(*) AS count_1
+      FROM ifc_entities
+      WHERE ifc_entities.source_model_id = %(source_model_id_1)s
+        AND ifc_entities.ifc_class IN (%(ifc_class_1_1)s)
+  exact_count: 205
+  row_count: 205
+  result_histogram: IfcDoor: 205
+  elapsed_s: 0.0046
+```
+
+### 22.2 Compact result summary (amends §10, §11)
+
+The answer-LLM evidence bounds (50/50/20) are unchanged and still apply. What changed is that the
+bounded entity lists are no longer the whole story sent to the answer model:
+`hybrid/evidence.build_result_summary()` adds a `result_summary` carrying the **exact total**, the
+viewer match count/total, a truncation flag, and exact per-IFC-class counts.
+
+`build_answer_payload()` includes it, and `prompts/answerer_v001.md` now instructs the model to lead
+with the exact total and compact class counts and **not to enumerate individual components** — the
+entity arrays are grounding/citation evidence and a *sample*, never a list to dump. The viewer match
+identities (up to 2,000) are **never** sent to the LLM.
+
+`result_summary` is additive on `QueryResponseEnvelope`, so a client that ignores it keeps working.
+
+### 22.3 Sample-detail intent
+
+New typed planner field `QueryPlan.sample_detail_requested` (default `False`), with planner-prompt
+guidance that ordinary count/list/show/highlight/which questions are **not** sample-detail intent.
+When true, `query/service.py` picks **one deterministic** entity from the ordered result set (before
+`apply_bounds`, so the choice is over the full set) and attaches its bounded details read from the
+database via the same centralized allowlist as the details endpoint — so the answer model cannot
+invent a sample or a property value.
+
+### 22.4 Viewer matches for every route
+
+`orchestrator._ensure_viewer_matches()` runs in the orchestrator **before** `apply_bounds`, so
+RAG/graph/hybrid results highlight their full match set rather than the 50 entities kept as LLM
+evidence. SQL entity operations supply an identity-only set directly (spec_v003 §19.1); other routes
+derive one from the full pre-bound evidence. `ViewerActions` gained `viewer_matches_total` and
+`viewer_matches_truncated`; §14's stable-shape guarantee is preserved.
+
+## 23. Task 15 Amendment — terminal output semantics (supersedes parts of §22.1)
+
+Task 15 (`tasks/task15_done.md`) restructured terminal output into two layers:
+
+**Always on (standard operational output, not gated on `BIM_RAG_TRACE`):**
+
+- Every SQL/RAG/vector statement actually submitted to PostgreSQL prints once, as the exact
+  parameterized SQL, labelled `[SQL]` or `[RAG]`. The `after_cursor_execute` hook emits on real
+  submission only (planned-but-unsubmitted SQL cannot print) and never reads parameters, so values
+  — including the pgvector embedding, which shows as `%(embedding_1)s` — structurally cannot leak.
+- One bounded `[API error]` record per HTTP **400–599** response (request id, method, route
+  template, status, `elapsed_s`; never bodies/history/credentials/paths/exception internals).
+  Successful 2xx/3xx/304 calls print **nothing** — uvicorn's own access lines are raised above
+  INFO too, so a successful call is fully silent.
+- One `[OpenAI usage]` block per user question that made OpenAI calls: the sums of API-reported
+  `prompt_tokens` / `completion_tokens` / `total_tokens` over every call for that question
+  (planner, one repair, answerer). No block for zero-OpenAI requests; no cumulative counter; no
+  cost estimate. Implemented as a call-log snapshot in `service._handle_question` with a `finally`,
+  so a failure after a completed planner call still prints the usage actually reported.
+
+**Opt-in (`BIM_RAG_TRACE=1`, unchanged otherwise):** the §22.1 summary records keep their timing,
+counts, and histograms but **no longer repeat the SQL statements** — statements print exactly once
+through the always-on layer (no duplication, verified by test).

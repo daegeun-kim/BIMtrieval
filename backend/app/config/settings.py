@@ -74,10 +74,19 @@ class Settings(BaseSettings):
     max_history_turns: int = 20
 
     # --- Hybrid evidence bounds (spec_v005 §10) ---
+    # These bound only what the ANSWER LLM sees. They are deliberately separate
+    # from the exact database count (uncapped) and from the viewer match set
+    # (max_viewer_match_ids) — see tasks/task13.md §2.
     max_primary_entities: int = 50
     max_context_entities: int = 50
     max_relationships: int = 20
     rag_rrf_constant: int = 60
+
+    # --- Viewer match identities (task13 §2) ---
+    # Identity-only retrieval for highlighting: how many matching GlobalIds a
+    # single response may carry. Independent of the 50-item LLM evidence bound
+    # and of the exact count, which is never capped by the application.
+    max_viewer_match_ids: int = 2000
 
     # --- Orchestration concurrency / timeouts (spec_v005 §8) ---
     path_timeout_s: float = 20.0
@@ -91,6 +100,11 @@ class Settings(BaseSettings):
     query_log_path: str = "logs/query_events.jsonl"
     failure_case_path: str = "logs/failure_cases.jsonl"
     enable_dev_endpoints: bool = False
+    # Opt-in local terminal tracing (task13 §1), enabled only by BIM_RAG_TRACE=1.
+    # Disabled by default, not required in .env, never enabled automatically in
+    # tests or production. It is developer observability, not a client feature:
+    # trace records are never returned through the public API.
+    bim_rag_trace: bool = False
 
     # --- Frontend viewer contract (spec_v006 §9, §10; Task 10) ---
     # Backend-owned root for prepared viewer artifacts

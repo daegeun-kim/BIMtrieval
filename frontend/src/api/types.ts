@@ -28,6 +28,18 @@ export type ResponseStatus = Schemas["ResponseStatus"];
 export type ModelAction = Schemas["ModelAction"];
 export type SelectionAction = Schemas["SelectionAction"];
 
+// Task 13 additions (spec_v006 §10.8, §10.9).
+export type ResultSummary = Schemas["ResultSummary"];
+export type SampleDetail = Schemas["SampleDetail"];
+export type EntityDetailsResponse = Schemas["EntityDetailsResponse"];
+export type InstanceDetails = Schemas["InstanceDetails"];
+export type TypeDetails = Schemas["TypeDetails"];
+export type FamilyDetails = Schemas["FamilyDetails"];
+export type DetailAvailability = Schemas["DetailAvailability"];
+export type DetailValue = Schemas["DetailValue"];
+export type HighlightScope = Schemas["HighlightScope"];
+export type HighlightGroupResponse = Schemas["HighlightGroupResponse"];
+
 // A displayable entity citation (primary or context) the chat can make clickable.
 export interface EntityCitation {
   entityId: number;

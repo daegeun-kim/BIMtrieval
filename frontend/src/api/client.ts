@@ -5,6 +5,9 @@
 import { API_BASE_URL } from "../config";
 import {
   ApiError,
+  type EntityDetailsResponse,
+  type HighlightGroupResponse,
+  type HighlightScope,
   type ModelListResponse,
   type QueryResponseEnvelope,
   type ResolveEntitiesResponse,
@@ -63,6 +66,38 @@ export class ApiClient {
 
   async query(request: SessionQueryRequest, signal?: AbortSignal): Promise<QueryResponseEnvelope> {
     return this.postJson<QueryResponseEnvelope>(`${this.baseUrl}/api/query`, request, signal);
+  }
+
+  /**
+   * Truthful bounded details for one component (spec_v006 §10.8). Deterministic
+   * and LLM-free: opening the panel never consumes OpenAI tokens.
+   */
+  async entityDetails(
+    sourceModelId: number,
+    globalId: string,
+    signal?: AbortSignal,
+  ): Promise<EntityDetailsResponse> {
+    return this.getJson<EntityDetailsResponse>(
+      `${this.baseUrl}/api/models/${sourceModelId}/entities/${encodeURIComponent(globalId)}/details`,
+      signal,
+    );
+  }
+
+  /**
+   * Deterministic instance/type/family match set for the component-panel
+   * buttons (spec_v006 §10.8). Creates no chat message and calls no LLM.
+   */
+  async highlightGroup(
+    sourceModelId: number,
+    selectedGlobalId: string,
+    scope: HighlightScope,
+    signal?: AbortSignal,
+  ): Promise<HighlightGroupResponse> {
+    return this.postJson<HighlightGroupResponse>(
+      `${this.baseUrl}/api/models/${sourceModelId}/entities/highlight-group`,
+      { selected_global_id: selectedGlobalId, scope },
+      signal,
+    );
   }
 
   /** Fetch the prepared artifact, mapping bounded statuses to typed errors. */

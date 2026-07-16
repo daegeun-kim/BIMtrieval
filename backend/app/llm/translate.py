@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.llm.schemas import CatalogPlan, PlanFieldRef, PlanFilter, QueryPlan, SqlPlan
 from app.llm.validation import PlanValidationError
+from app.query.sql.class_aliases import expand_entity_classes
 from app.query.sql.errors import AmbiguousFieldError, FieldNotFoundError
 from app.query.sql.field_registry import resolve_field
 from app.query.sql.schemas import (
@@ -265,7 +266,10 @@ def _translate_sql(
             f"operation {op.value!r} is a catalog operation; not valid in active-model scope"
         )
     sid = source_model_id
-    classes = plan.entity_classes
+    # Expand generic classes to every stored class that satisfies them — notably
+    # IfcWall -> {IfcWall, IfcWallStandardCase} (task13 §2). Explicit and central:
+    # every entity operation below inherits it, and unknown classes pass through.
+    classes = expand_entity_classes(plan.entity_classes)
     fg = _entity_filter_group(session, sid, plan.filters, plan.filter_bool_op)
     limit = plan.limit
 

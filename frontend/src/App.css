@@ -766,3 +766,360 @@
 .btn-ghost:hover {
   border-color: var(--line-2);
 }
+
+/* ===== Viewer top-left: Reset App (task14 §6) =====
+   Kept far from the bottom-left Home/Fit control and from Clear Chat in the
+   chat panel — three different actions, never adjacent. */
+.viewer-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 6;
+  display: flex;
+  gap: var(--sp-2);
+}
+.reset-app-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.reset-app-btn:hover {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 45%, var(--line));
+}
+.reset-app-btn:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ===== Component detail panel (task14 §5) =====
+   Floats immediately left of the chat panel; --chat-w is set by App from the
+   chat's live width. */
+.component-panel {
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  right: calc(20px + var(--chat-w, 0px) + var(--sp-3));
+  width: 320px;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  animation: cp-in 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes cp-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .component-panel {
+    animation: none;
+  }
+}
+
+.cp-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 12px 12px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.cp-head-text {
+  min-width: 0;
+  flex: 1;
+}
+.cp-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sub {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-chip);
+  cursor: pointer;
+}
+.cp-close:hover {
+  color: var(--ink);
+  border-color: var(--line);
+}
+.cp-close:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+/* Isolated preview */
+.cp-preview {
+  position: relative;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+.cp-preview-canvas {
+  /* height comes from ComponentPreview via viewerTheme's PREVIEW constant
+     (task15 §4) so the value stays centralized with the other preview knobs */
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background:
+    linear-gradient(var(--surface-2), var(--surface-2)),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 11px,
+      color-mix(in srgb, var(--line) 55%, transparent) 11px 12px
+    );
+  overflow: hidden;
+  cursor: grab;
+}
+.cp-preview-canvas:active {
+  cursor: grabbing;
+}
+.cp-preview-status {
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  text-align: center;
+  min-height: 12px;
+}
+
+/* Deterministic highlight actions */
+.cp-actions {
+  display: flex;
+  gap: 6px;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+.cp-action {
+  flex: 1;
+  padding: 6px 4px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+.cp-action:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--surface-3);
+}
+.cp-action-on {
+  color: var(--blue);
+  background: var(--blue-wash);
+  border-color: color-mix(in srgb, var(--blue) 40%, var(--line));
+}
+.cp-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.cp-action:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.cp-notice,
+.cp-reason {
+  margin: 8px var(--sp-3) 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.cp-notice {
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+}
+.cp-reason {
+  font-family: var(--font-body);
+  color: var(--ink-3);
+}
+
+/* Read-only nested detail list */
+.cp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3);
+}
+.cp-status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.cp-status-err {
+  color: var(--err);
+}
+.cp-group {
+  margin-bottom: var(--sp-3);
+}
+.cp-group-title {
+  margin: 0 0 5px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 3px;
+}
+.cp-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: 2px 0;
+}
+.cp-key {
+  flex: none;
+  width: 96px;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.cp-val {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.cp-unit {
+  color: var(--ink-3);
+}
+.cp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cp-tag {
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+}
+
+/* ===== Compact result summary (task14 §4) =====
+   States the outcome; the viewer shows which objects. Never a component dump. */
+.result-summary {
+  margin-top: var(--sp-2);
+}
+.rs-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.rs-total {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.rs-classes {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.rs-trunc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--warn);
+}
+.rs-sample {
+  margin-top: var(--sp-2);
+  padding: 9px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--blue);
+  border-radius: var(--r-card);
+}
+.rs-sample-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 4px;
+}
+.rs-sample-name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rs-sample-class {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.rs-sample-row {
+  display: flex;
+  gap: var(--sp-2);
+  margin: 1px 0;
+}
+.rs-k {
+  flex: none;
+  width: 84px;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.rs-v {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}

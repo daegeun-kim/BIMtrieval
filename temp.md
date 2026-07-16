@@ -1,13 +1,19 @@
 modifications:
 - I want below in the backend terminal:
   - exact SQL/RAG query retrieved from db
+  - components retrieved from the db (simplified, not a full list. eg: "5 doors, 3 windows")
+  - each api endpoint calls (with time)
 - 3d modeler color (put all color definition at the top of the document)
   - roof: dark grey
   - wall: light grey
   - all others: very light grey
-- motion change to: left click: pan (with hand cursor change), scroll wheel click: rotate
+- motion change to: left click: pan (with hand cursor change), scroll wheel click and move: rotate
 - limit zoom out level to an appropriate value
 - rotate: the rotate center point should be the location of the cursor
 - camera: angle too wide: make it 50mm fullframe distortion level
 - base plane: move to level 0 (currently the base plne goes through the center)
-- "how many doors are there in total?" tells me "There are 205 doors in total." , but the doors are not highlighted with transparent other components. I want this kind of query, when certain entities are retrieved through sql, the components are highlighted, with other components with high transparency (grey color).
+- What is the current standard of highlight? "how many doors are there in total?" tells me "There are 205 doors in total." , but the doors are not highlighted with transparent other components. ("show me all the doors" does) I want this kind of query, when certain entities are retrieved through sql, the components are highlighted, with other components with high transparency (grey color).
+- when I say "show me all the walls", it calls maximum 50 components, how much time would it take if do not set maximum limit? (i dont think several hundred rows of SQL query would take a long time)
+- when objects are retrieved, it currently lists out all the components details in the chat, but that is unnecessary. The chat only should show the summary and description. When user clicks a component in the 3D viewer panel, the component detail should be shown. 
+- When a component is clicked, I want it to generate another right panel next to the chat panel, showing the component's family, type, instance info, with the 3D model of the instance alone. and there are options for retrieving and highlighting the all the family, type, or instance of the selected entity.
+- keep the chat clear button at the current location, move the clear app button to the left top of the 3d viewer panel.

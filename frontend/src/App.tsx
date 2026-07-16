@@ -1,23 +1,39 @@
 import { useEffect, useState } from "react";
 
 import ChatPanel from "./chat/ChatPanel";
+import ComponentPanel from "./components/ComponentPanel";
 import ConfirmDialog from "./components/ConfirmDialog";
 import StatusReadout from "./components/StatusReadout";
+import ViewerControls from "./components/ViewerControls";
 import ViewerOverlay from "./components/ViewerOverlay";
 import { controller } from "./state/controller";
-import { useStore } from "./state/store";
+import { effectivePanelWidth, useStore } from "./state/store";
 import ViewerCanvas from "./viewer/ViewerCanvas";
+
+// Width of the collapsed chat restore tab, so the component panel still docks
+// beside it rather than under it.
+const COLLAPSED_CHAT_WIDTH = 40;
 
 export default function App() {
   const pendingConfirmId = useStore((s) => s.pendingConfirmModelId);
   const models = useStore((s) => s.models);
   const activeModel = useStore((s) => s.activeModel);
   const hasMessages = useStore((s) => s.messages.length > 0);
+  const storedWidth = useStore((s) => s.panelWidth);
+  const collapsed = useStore((s) => s.panelCollapsed);
+  const componentOpen = useStore((s) => s.componentGuid !== null);
   const [resetOpen, setResetOpen] = useState(false);
 
   useEffect(() => {
     void controller.bootstrap();
   }, []);
+
+  // The component panel docks immediately left of the chat panel, so it needs
+  // the chat's live width. One CSS variable keeps that in CSS rather than
+  // duplicating layout math in two components.
+  const chatWidth = collapsed
+    ? COLLAPSED_CHAT_WIDTH
+    : effectivePanelWidth(storedWidth, componentOpen);
 
   const pendingModel = models.find((m) => m.source_model_id === pendingConfirmId) ?? null;
   const isSwitch = activeModel !== null && activeModel.source_model_id !== pendingConfirmId;
@@ -28,11 +44,13 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app" style={{ "--chat-w": `${chatWidth}px` } as React.CSSProperties}>
       <ViewerCanvas />
       <ViewerOverlay />
+      <ViewerControls onResetApp={onResetApp} />
       <StatusReadout />
-      <ChatPanel onResetApp={onResetApp} />
+      <ComponentPanel />
+      <ChatPanel />
 
       {pendingModel && (
         <ConfirmDialog

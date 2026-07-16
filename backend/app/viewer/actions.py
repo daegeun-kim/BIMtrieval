@@ -54,6 +54,13 @@ class ViewerActions(BaseModel):
     # (spec_v005 §13): the viewer source the frontend should load.
     load_model_id: int | None = None
     viewer_source_location: str | None = None
+    # --- Viewer match truncation (task13 §2) ---
+    # `primary_global_ids` carries at most `max_viewer_match_ids` (2,000)
+    # identities. When more objects matched, `viewer_matches_total` still reports
+    # the true total and `viewer_matches_truncated` is True, so the frontend can
+    # disclose the difference. Truncation here never affects the exact count.
+    viewer_matches_total: int | None = None
+    viewer_matches_truncated: bool = False
 
 
 def build_viewer_actions(
@@ -64,6 +71,8 @@ def build_viewer_actions(
     context_global_ids: list[str] | None = None,
     load_model_id: int | None = None,
     viewer_source_location: str | None = None,
+    viewer_matches_total: int | None = None,
+    viewer_matches_truncated: bool = False,
 ) -> ViewerActions:
     """Build a stable ViewerActions payload.
 
@@ -84,6 +93,8 @@ def build_viewer_actions(
         ],
         load_model_id=load_model_id,
         viewer_source_location=viewer_source_location,
+        viewer_matches_total=viewer_matches_total,
+        viewer_matches_truncated=viewer_matches_truncated,
     )
 
 

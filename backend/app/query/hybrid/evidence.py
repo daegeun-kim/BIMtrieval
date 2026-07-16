@@ -19,15 +19,19 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from app.api.schemas.models import DetailValue
+from app.api.schemas.response import ResultSummary, SampleDetail
 from app.config.settings import Settings
 from app.db.models import DbIfcRelationship, IfcEntity
 from app.query.hybrid.schemas import EvidencePackage
+from app.query.sql import entities as entity_ops
 from app.query.sql.entities import entity_hydration_columns
 from app.query.sql.hydration import (
     hydrate_context_entity,
     hydrate_primary_entity,
     hydrate_relationship,
 )
+from app.viewer import details as detail_ops
 
 _ET = IfcEntity.__table__
 _RT = DbIfcRelationship.__table__
@@ -94,9 +98,70 @@ def apply_bounds(pkg: EvidencePackage, settings: Settings) -> None:
         )
 
 
+def build_sample_detail(
+    session: Session, source_model_id: int, global_id: str
+) -> SampleDetail | None:
+    """Bounded details for ONE deterministically chosen entity (task13 §3).
+
+    Called only on explicit sample-detail intent. The entity is chosen by the
+    backend from the ordered result set and every value is read from the stored
+    canonical JSON through the same centralized allowlist the details endpoint
+    uses — so the answer model cannot invent a sample or a property value.
+    """
+    row = entity_ops.get_entity_canonical(session, source_model_id, global_id)
+    if row is None:
+        return None
+    canonical = row.canonical_json if isinstance(row.canonical_json, dict) else {}
+    identity = canonical.get("identity") if isinstance(canonical.get("identity"), dict) else {}
+    storey_name, _ = detail_ops.storey_of(canonical)
+    return SampleDetail(
+        global_id=row.global_id,
+        ifc_class=row.ifc_class,
+        name=detail_ops.safe_str(identity.get("name")),
+        storey_name=storey_name,
+        materials=detail_ops.select_materials(canonical),
+        quantities=[
+            DetailValue(name=v.name, value=v.value, source_set=v.source_set, unit=v.unit)
+            for v in detail_ops.select_quantities(canonical)
+        ],
+        properties=[
+            DetailValue(name=v.name, value=v.value, source_set=v.source_set, unit=v.unit)
+            for v in detail_ops.select_properties(canonical)
+        ],
+    )
+
+
+def build_result_summary(pkg: EvidencePackage) -> ResultSummary:
+    """The compact, deterministic result description (task13 §3).
+
+    `exact_total` prefers the true match total over the evidence sample size, so
+    a count of 205 stays 205 no matter how the viewer/LLM caps applied.
+    """
+    exact_total = pkg.viewer_matches_total
+    if exact_total is None:
+        for key in ("sql_result", "primary_matches"):
+            if key in pkg.exact_totals:
+                exact_total = pkg.exact_totals[key]
+                break
+    return ResultSummary(
+        exact_total=exact_total,
+        viewer_match_count=len(pkg.viewer_global_ids),
+        viewer_matches_total=pkg.viewer_matches_total,
+        truncated=pkg.viewer_matches_truncated,
+        class_counts=dict(pkg.class_histogram),
+        sample_detail=pkg.sample_detail,
+    )
+
+
 def build_answer_payload(pkg: EvidencePackage) -> dict[str, Any]:
     """Compact, bounded, secret-free evidence for the grounded-answer call
-    (spec_v005 §11). RAG internal scores are intentionally excluded."""
+    (spec_v005 §11). RAG internal scores are intentionally excluded.
+
+    `result_summary` carries the exact total and compact per-class counts so the
+    answer model can state the outcome without enumerating components. The
+    entity lists remain bounded grounding evidence (50/50/20) — never the viewer
+    match set, which can be far larger and is never sent to the LLM (task13 §3).
+    """
 
     def _entity(e: Any) -> dict[str, Any]:
         return {
@@ -113,6 +178,7 @@ def build_answer_payload(pkg: EvidencePackage) -> dict[str, Any]:
         "source_model_id": pkg.source_model_id,
         "answer_basis": pkg.answer_basis.value,
         "combination": pkg.combination,
+        "result_summary": build_result_summary(pkg).model_dump(mode="json"),
         "exact_totals": pkg.exact_totals,
         "evidence_groups": pkg.evidence_groups,
         "sql_facts": pkg.sql_facts,

@@ -22,6 +22,8 @@ from app.api.schemas.response import (
     PrimaryEntityResult,
     RelationshipResult,
 )
+from app.config import trace
+from app.config.settings import get_settings
 from app.query.graph.hydration import hydrate_traversal
 from app.query.graph.traversal import traverse
 from app.query.sql import catalog as catalog_ops
@@ -30,6 +32,18 @@ from app.query.sql import relationships as rel_ops
 from app.query.sql.hydration import hydrate_primary_entity, hydrate_relationship
 from app.query.sql.schemas import SqlOperation
 from app.shared.types import ModelStatus
+
+# Entity operations whose matching set the viewer should be able to highlight
+# (task13 §2). Counts and aggregates previously produced no identities at all,
+# so "How many doors?" returned an exact number and highlighted nothing.
+_VIEWER_IDENTITY_OPS = frozenset(
+    {
+        SqlOperation.COUNT_ENTITIES,
+        SqlOperation.AGGREGATE_ENTITIES,
+        SqlOperation.LIST_ENTITIES,
+        SqlOperation.FILTER_ENTITIES,
+    }
+)
 
 
 @dataclass
@@ -43,6 +57,13 @@ class SqlExecResult:
     exact_total: int | None = None
     model_candidates: list[ModelCandidate] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # --- Viewer match identities (task13 §2) ---
+    # Independent of `primary_entities` (bounded to the 50-item LLM evidence
+    # limit) and of `exact_total` (never capped by the application).
+    viewer_global_ids: list[str] = field(default_factory=list)
+    viewer_matches_total: int | None = None
+    viewer_matches_truncated: bool = False
+    class_histogram: dict[str, int] = field(default_factory=dict)
 
 
 def _to_candidate(row: Any) -> ModelCandidate:
@@ -83,8 +104,69 @@ def execute_catalog(session: Session, operation: SqlOperation, plan: Any) -> Sql
     )
 
 
-def execute_sql(session: Session, operation: SqlOperation, plan: Any) -> SqlExecResult:
-    """Run one active-model SQL/relationship/traversal operation."""
+def _attach_viewer_identities(
+    session: Session, plan: Any, res: SqlExecResult, viewer_match_limit: int | None
+) -> None:
+    """Identity-only retrieval over the same filtered set (task13 §2).
+
+    Runs for counts/aggregates/lists alike so a count question highlights the
+    objects it counted. The exact total is never reduced by viewer truncation,
+    and the class summary is computed over the full matching set (not the
+    truncated slice), so both stay exact above the cap.
+    """
+    limit = (
+        viewer_match_limit
+        if viewer_match_limit is not None
+        else (get_settings().max_viewer_match_ids)
+    )
+    ident = entity_ops.select_viewer_identities(
+        session, plan.source_model_id, plan.entity_classes, plan.filters, limit
+    )
+    res.viewer_global_ids = [r.global_id for r in ident.rows]
+    res.viewer_matches_total = ident.exact_total
+    res.viewer_matches_truncated = ident.truncated
+    res.class_histogram = entity_ops.count_by_class(
+        session, plan.source_model_id, plan.entity_classes, plan.filters
+    )
+    if ident.truncated:
+        res.warnings.append(
+            f"{ident.exact_total} objects match; the viewer received the first "
+            f"{len(ident.rows)} (the exact total above is unaffected)"
+        )
+
+
+def execute_sql(
+    session: Session,
+    operation: SqlOperation,
+    plan: Any,
+    viewer_match_limit: int | None = None,
+    with_viewer_identities: bool = True,
+) -> SqlExecResult:
+    """Run one active-model SQL/relationship/traversal operation.
+
+    Wraps the operation in an opt-in trace record (task13 §1) and attaches
+    viewer match identities for entity operations (task13 §2).
+
+    `with_viewer_identities=False` is used by the hybrid orchestrator: there the
+    highlighted set is the *combined* SQL/RAG outcome, so this path's raw match
+    set would be both wasted work and a misleading truncation warning.
+    """
+    with trace.trace_sql_operation(operation.value) as rec:
+        res = _execute_sql_operation(session, operation, plan)
+        if with_viewer_identities and operation in _VIEWER_IDENTITY_OPS:
+            _attach_viewer_identities(session, plan, res, viewer_match_limit)
+        # Report the TRUE match total, not `exact_total` — for list/filter ops the
+        # latter is only the plan-limited evidence row count, which would make the
+        # trace understate the result (e.g. "50" for 880 matching walls).
+        rec.exact_count = (
+            res.viewer_matches_total if res.viewer_matches_total is not None else res.exact_total
+        )
+        rec.row_count = len(res.viewer_global_ids) or len(res.primary_entities) or None
+        rec.result_histogram = res.class_histogram
+        return res
+
+
+def _execute_sql_operation(session: Session, operation: SqlOperation, plan: Any) -> SqlExecResult:
     op = operation
     if op is SqlOperation.COUNT_ENTITIES:
         n = entity_ops.count_entities(session, plan)

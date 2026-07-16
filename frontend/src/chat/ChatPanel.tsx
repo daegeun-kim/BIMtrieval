@@ -1,9 +1,15 @@
 import { useRef } from "react";
 
 import { controller } from "../state/controller";
-import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, useStore } from "../state/store";
+import {
+  PANEL_MAX_WIDTH,
+  PANEL_MIN_WIDTH,
+  PANEL_PAIRED_MAX_WIDTH,
+  effectivePanelWidth,
+  useStore,
+} from "../state/store";
 import ModelSelector from "../components/ModelSelector";
-import { BroomIcon, CollapseIcon, ExpandIcon, ResetIcon } from "../components/icons";
+import { BroomIcon, CollapseIcon, ExpandIcon } from "../components/icons";
 import Composer from "./Composer";
 import MessageList from "./MessageList";
 
@@ -11,13 +17,23 @@ import MessageList from "./MessageList";
 // left edge is a drag handle; collapsing hands the viewport back to the viewer
 // and leaves a small accessible restore tab. Corner registration ticks in the
 // header are the "measured drawing" signature.
-export default function ChatPanel({ onResetApp }: { onResetApp: () => void }) {
-  const width = useStore((s) => s.panelWidth);
+//
+// Clear Chat stays here (task14 §6); Reset App lives at the viewer's top-left,
+// so the two are never adjacent and cannot be confused for one another.
+export default function ChatPanel() {
+  const storedWidth = useStore((s) => s.panelWidth);
   const collapsed = useStore((s) => s.panelCollapsed);
+  const componentOpen = useStore((s) => s.componentGuid !== null);
   const setPanelWidth = useStore((s) => s.setPanelWidth);
   const toggleCollapsed = useStore((s) => s.togglePanelCollapsed);
   const hasMessages = useStore((s) => s.messages.length > 0);
   const dragging = useRef(false);
+
+  // With the component panel open both panels take narrower defaults so the
+  // model stays usable (task14 §5). The user's stored preference is preserved
+  // and restored when the component panel closes.
+  const width = effectivePanelWidth(storedWidth, componentOpen);
+  const maxWidth = componentOpen ? PANEL_PAIRED_MAX_WIDTH : PANEL_MAX_WIDTH;
 
   const startResize = (e: React.PointerEvent) => {
     dragging.current = true;
@@ -27,7 +43,7 @@ export default function ChatPanel({ onResetApp }: { onResetApp: () => void }) {
       if (!dragging.current) return;
       // panel is anchored right, so dragging left (smaller clientX) widens it
       const next = startW + (startX - ev.clientX);
-      setPanelWidth(Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, next)));
+      setPanelWidth(Math.min(maxWidth, Math.max(PANEL_MIN_WIDTH, next)));
     };
     const onUp = () => {
       dragging.current = false;
@@ -61,9 +77,6 @@ export default function ChatPanel({ onResetApp }: { onResetApp: () => void }) {
             onClick={() => void controller.clearChat()}
           >
             <BroomIcon size={16} />
-          </button>
-          <button className="icon-btn" title="Reset app" aria-label="Reset app" onClick={onResetApp}>
-            <ResetIcon size={16} />
           </button>
           <button
             className="icon-btn"

@@ -24,11 +24,17 @@ def test_default_shape_has_both_role_groups_present_but_empty():
         "role_groups",
         "load_model_id",
         "viewer_source_location",
+        # Viewer match truncation contract (task13 §2).
+        "viewer_matches_total",
+        "viewer_matches_truncated",
     }
     assert dump["model_action"] == ModelAction.KEEP_CURRENT.value
     assert dump["selection_action"] == SelectionAction.NONE.value
     assert dump["primary_global_ids"] == []
     assert dump["context_global_ids"] == []
+    # A no-op action reports no match set at all, rather than a misleading zero.
+    assert dump["viewer_matches_total"] is None
+    assert dump["viewer_matches_truncated"] is False
     roles = {rg["role"] for rg in dump["role_groups"]}
     assert roles == {ViewerRole.PRIMARY_MATCH.value, ViewerRole.RELATIONSHIP_CONTEXT.value}
 

@@ -32,3 +32,24 @@ def test_limits_have_spec_defaults():
     assert settings.default_graph_depth == 1
     assert settings.max_graph_depth == 3
     assert settings.max_selected_entity_ids == 5
+
+
+def test_trace_is_off_by_default_and_not_required_in_env(monkeypatch):
+    """Tracing is opt-in developer observability (task13 §1): absent env var
+    must not fail construction and must leave it disabled."""
+    monkeypatch.delenv("BIM_RAG_TRACE", raising=False)
+    assert Settings(_env_file=None).bim_rag_trace is False
+
+
+def test_trace_is_enabled_by_the_documented_env_var(monkeypatch):
+    monkeypatch.setenv("BIM_RAG_TRACE", "1")
+    get_settings.cache_clear()
+    assert get_settings().bim_rag_trace is True
+
+
+def test_viewer_match_limit_is_independent_of_the_evidence_limit():
+    """The three limits in task13 §2 are separate knobs."""
+    settings = Settings(_env_file=None)
+    assert settings.max_viewer_match_ids == 2000
+    assert settings.max_primary_entities == 50
+    assert settings.max_viewer_match_ids != settings.max_list_limit
