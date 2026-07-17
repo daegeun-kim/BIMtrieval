@@ -13,7 +13,16 @@ single repair instruction (spec_v005 §6) — they contain no secrets or SQL.
 
 from __future__ import annotations
 
-from app.llm.schemas import CombinationOp, ExecutionMode, QueryPlan
+import hashlib
+
+from app.config.settings import Settings, get_settings  # noqa: F401 (Settings kept for signature)
+from app.llm.schemas import (
+    CombinationOp,
+    ExecutionMode,
+    QueryPlan,
+    RetrievalPolicy,
+    RetrievalPolicyPlan,
+)
 from app.shared.types import QueryRoute, QueryScope
 
 
@@ -26,7 +35,93 @@ class PlanValidationError(Exception):
         self.repairable = repairable
 
 
-def validate_plan_structure(plan: QueryPlan) -> list[str]:
+# ---------------------------------------------------------------------------
+# Task 17 — query-only retrieval policy validation
+# ---------------------------------------------------------------------------
+
+
+def frozen_policy(plan: RetrievalPolicyPlan) -> RetrievalPolicy:
+    """The authoritative, immutable modality policy = the union of the facets'
+    per-facet needs (Task 17 §2). This is what execution honors — never a value
+    derived later from semantic-resolution candidates."""
+    return RetrievalPolicy(
+        sql=any(f.needs_exact_structured for f in plan.facets),
+        rag_entity=any(f.needs_entity_rag for f in plan.facets),
+        rag_relationship=any(f.needs_relationship_rag for f in plan.facets),
+        graph=any(f.needs_graph for f in plan.facets),
+    )
+
+
+def policy_hash(policy: RetrievalPolicy) -> str:
+    bits = (policy.sql, policy.rag_entity, policy.rag_relationship, policy.graph)
+    blob = "".join(str(int(b)) for b in bits)
+    return hashlib.sha256(blob.encode()).hexdigest()[:12]
+
+
+def validate_policy_plan(plan: RetrievalPolicyPlan) -> list[str]:
+    """Structural validation of the query-only policy plan (Task 17 §11).
+
+    Enforces route/scope consistency and — for the active-model analysis route —
+    that the emitted `retrieval_policy` equals the union of the facets' needs, so
+    the frozen policy is unambiguous and reproducible."""
+    errors: list[str] = []
+
+    if plan.route is QueryRoute.HYBRID:
+        # Conversational active-model analysis.
+        if plan.scope is not QueryScope.ACTIVE_MODEL:
+            errors.append("route=hybrid (active analysis) requires scope=active_model")
+        if plan.source_model_id is None:
+            errors.append("active-model analysis requires source_model_id")
+        if not plan.facets:
+            errors.append("active-model analysis requires at least one facet")
+        if plan.catalog_plan is not None:
+            errors.append("active-model analysis must not carry catalog_plan")
+        ids = [f.facet_id for f in plan.facets]
+        if len(ids) != len(set(ids)):
+            errors.append("facet_id values must be unique")
+        for f in plan.facets:
+            if f.needs_entity_rag or f.needs_relationship_rag or f.needs_graph:
+                if not f.semantic_query.strip():
+                    errors.append(
+                        f"facet {f.facet_id!r} needs retrieval but has empty semantic_query"
+                    )
+        # The declared policy must equal the authoritative union of facet needs.
+        declared = plan.retrieval_policy
+        union = frozen_policy(plan)
+        if (
+            declared.sql != union.sql
+            or declared.rag_entity != union.rag_entity
+            or declared.rag_relationship != union.rag_relationship
+            or declared.graph != union.graph
+        ):
+            errors.append(
+                "retrieval_policy must equal the union of facet needs "
+                f"(union: sql={union.sql}, rag_entity={union.rag_entity}, "
+                f"rag_relationship={union.rag_relationship}, graph={union.graph})"
+            )
+    elif plan.route is QueryRoute.SQL:
+        # Catalog route.
+        if plan.scope is not QueryScope.MODEL_CATALOG:
+            errors.append("route=sql at policy stage is the catalog route; requires model_catalog")
+        if plan.catalog_plan is None:
+            errors.append("catalog route requires catalog_plan")
+        if plan.facets:
+            errors.append("catalog route must not carry facets")
+    elif plan.route is QueryRoute.EXPLAIN_GENERAL:
+        if plan.facets or plan.catalog_plan is not None:
+            errors.append("explain_general must not carry facets/catalog_plan")
+    elif plan.route is QueryRoute.CLARIFY:
+        if not plan.needs_clarification or not plan.clarification_question:
+            errors.append("clarify requires needs_clarification=true and a clarification_question")
+        if plan.facets:
+            errors.append("clarify must not carry facets")
+    else:
+        errors.append(f"policy route {plan.route.value!r} is not supported at Stage 2")
+
+    return errors
+
+
+def validate_plan_structure(plan: QueryPlan, settings: Settings | None = None) -> list[str]:
     errors: list[str] = []
     subplans = {
         "sql_plan": plan.sql_plan,

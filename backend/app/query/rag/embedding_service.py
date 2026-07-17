@@ -128,6 +128,45 @@ class EmbeddingService:
             )
         return result
 
+    def embed_documents(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
+        """Bounded batch document-embedding for ontology/model-profile indexing
+        (Task 16 §3 Embeddings).
+
+        Same model/dim/normalization as `embed_query` (BAAI/bge-m3, 1024,
+        L2-normalized cosine) so profile and query vectors are directly
+        comparable. Never persisted anywhere — the caller owns the returned
+        lists (an in-memory model-vocab cache, or the offline ontology index
+        build). Same conservative device controls and no-retry policy as the
+        single-query path. An empty input returns an empty list without loading
+        the model."""
+        if not texts:
+            return []
+        self.ensure_loaded()
+        import torch
+
+        try:
+            with torch.inference_mode():
+                vectors = self._model.encode(
+                    list(texts),
+                    batch_size=max(1, batch_size),
+                    show_progress_bar=False,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                )
+            if self._model.device.type == "cuda":
+                torch.cuda.synchronize()
+        except Exception as exc:
+            raise EmbeddingServiceUnavailableError(
+                f"document embedding failed: {exc}. Stopping — no automatic retry after a "
+                "device-stability failure."
+            ) from exc
+
+        if vectors.shape[1] != EMBEDDING_DIM:
+            raise EmbeddingServiceUnavailableError(
+                f"embedding dimension mismatch: got {vectors.shape[1]}, expected {EMBEDDING_DIM}"
+            )
+        return [row.tolist() for row in vectors]
+
 
 @lru_cache(maxsize=1)
 def get_embedding_service() -> EmbeddingService:

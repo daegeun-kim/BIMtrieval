@@ -26,11 +26,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.config.settings import Settings, get_settings
 from app.llm.prompts import (
     ANSWERER_PROMPT_VERSION,
+    GROUP_ANSWERER_PROMPT_VERSION,
     PLANNER_PROMPT_VERSION,
+    POLICY_PLANNER_PROMPT_VERSION,
     answerer_prompt,
+    group_answerer_prompt,
     planner_prompt,
+    policy_planner_prompt,
 )
-from app.llm.schemas import QueryPlan
+from app.llm.schemas import QueryPlan, RetrievalPolicyPlan
 from app.llm.serialization import dumps_context
 
 if TYPE_CHECKING:
@@ -77,18 +81,39 @@ class TokenUsage:
 
 
 class AnswerOutput(BaseModel):
-    """Structured answer envelope (spec_v005 §11, §16 general-knowledge flag)."""
+    """Structured answer envelope (spec_v005 §11, §16 + Task 16 §9).
+
+    The universal-hybrid answerer is a relevance judge: it explicitly accepts or
+    rejects each probe as a candidate reference and selects which probes drive
+    viewer highlights. The probe-decision fields default empty/false so the
+    legacy answer path (which does not use probes) stays valid."""
 
     model_config = ConfigDict(extra="forbid")
 
     answer: str = Field(min_length=1)
     used_general_knowledge: bool = False
     disclosed_conflicts: bool = False
+    model_evidence_sufficient: bool = True
+    inference_used: bool = False
+    # --- Group relevance decisions (Task 17 §8) ---
+    primary_group_ids: list[str] = Field(default_factory=list)
+    supporting_group_ids: list[str] = Field(default_factory=list)
+    context_group_ids: list[str] = Field(default_factory=list)
+    rejected_group_ids: list[str] = Field(default_factory=list)
+    viewer_primary_group_ids: list[str] = Field(default_factory=list)
+    viewer_context_group_ids: list[str] = Field(default_factory=list)
+    inference_basis_group_ids: list[str] = Field(default_factory=list)
 
 
 @dataclass
 class PlanResult:
     plan: QueryPlan
+    usage: TokenUsage
+
+
+@dataclass
+class PolicyResult:
+    plan: RetrievalPolicyPlan
     usage: TokenUsage
 
 
@@ -141,8 +166,23 @@ class OpenAIQueryClient:
         )
         return PlanResult(plan=parsed, usage=usage)
 
+    def plan_retrieval_policy(self, policy_context: dict[str, Any]) -> PolicyResult:
+        """Task 17 LLM call 1: the QUERY-ONLY retrieval policy + facet plan. The
+        input carries no active-model candidates/schema (see build_policy_context),
+        so modality selection cannot depend on model contents."""
+        model = self.settings.get_planner_model()
+        parsed, usage = self._structured_call(
+            model=model,
+            system=policy_planner_prompt(),
+            user_payload=policy_context,
+            response_format=RetrievalPolicyPlan,
+            prompt_version=POLICY_PLANNER_PROMPT_VERSION,
+            role="policy_planner",
+        )
+        return PolicyResult(plan=parsed, usage=usage)
+
     def generate_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
-        """OpenAI call 2: grounded answer from bounded evidence (spec_v005 §11)."""
+        """OpenAI call 2 (legacy path): grounded answer from bounded evidence."""
         model = self.settings.get_answer_model()
         parsed, usage = self._structured_call(
             model=model,
@@ -151,6 +191,20 @@ class OpenAIQueryClient:
             response_format=AnswerOutput,
             prompt_version=ANSWERER_PROMPT_VERSION,
             role="answerer",
+        )
+        return AnswerResult(output=parsed, usage=usage)
+
+    def generate_group_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
+        """Task 17 LLM call 2: group-level relevance judgment + answer from
+        accepted evidence groups (Task 17 §8)."""
+        model = self.settings.get_answer_model()
+        parsed, usage = self._structured_call(
+            model=model,
+            system=group_answerer_prompt(),
+            user_payload=evidence_payload,
+            response_format=AnswerOutput,
+            prompt_version=GROUP_ANSWERER_PROMPT_VERSION,
+            role="group_answerer",
         )
         return AnswerResult(output=parsed, usage=usage)
 

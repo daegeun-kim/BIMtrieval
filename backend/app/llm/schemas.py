@@ -52,6 +52,10 @@ __all__ = [
     "GraphPlan",
     "PlanExecution",
     "QueryPlan",
+    "RoleHint",
+    "Facet",
+    "RetrievalPolicy",
+    "RetrievalPolicyPlan",
 ]
 
 
@@ -170,6 +174,69 @@ class PlanExecution(_StrictModel):
 
     mode: ExecutionMode = ExecutionMode.SINGLE
     combination: CombinationOp = CombinationOp.NONE
+
+
+class RoleHint(str, Enum):
+    """Query-specific PRELIMINARY relevance hint for a facet (Task 17 §5). It is a
+    hypothesis, not a decision — the answerer assigns the final group role."""
+
+    DIRECT = "direct"
+    SUPPORTING = "supporting"
+    CONTEXT = "context"
+    UNCERTAIN = "uncertain"
+
+
+class Facet(_StrictModel):
+    """One conceptual sub-question of the query (Task 17 §1 Stage 2).
+
+    Emitted by the QUERY-ONLY policy planner: it carries a concept and its
+    per-facet retrieval information needs — never a final IFC class, property, or
+    raw SQL. The backend resolves the concept against the active model afterward
+    (Stage 3)."""
+
+    facet_id: str = Field(min_length=1, max_length=40)
+    question: str = Field(min_length=1, max_length=300)
+    role_hint: RoleHint = RoleHint.UNCERTAIN
+    semantic_query: str = Field(min_length=1, max_length=400)
+    needs_exact_structured: bool = False
+    needs_entity_rag: bool = False
+    needs_relationship_rag: bool = False
+    needs_graph: bool = False
+
+
+class RetrievalPolicy(_StrictModel):
+    """The immutable SQL/RAG/graph modality decision (Task 17 §2). Decided from
+    the query alone; the authoritative value is the union of the facets' needs."""
+
+    sql: bool = False
+    rag_entity: bool = False
+    rag_relationship: bool = False
+    graph: bool = False
+
+
+class RetrievalPolicyPlan(_StrictModel):
+    """LLM call 1 output (Task 17 Stage 2): the query-only retrieval policy and
+    conceptual facet plan. For a conversational active-model question it carries
+    `facets` + `retrieval_policy` (route=hybrid). Catalog/general/clarify are
+    preserved routes and carry no facets. NO active-model candidates, schema
+    fields, IFC classes, or raw SQL appear in the INPUT to this call."""
+
+    scope: QueryScope
+    route: QueryRoute
+    source_model_id: int | None = None
+
+    analysis_intent: str | None = Field(default=None, max_length=500)
+    facets: list[Facet] = Field(default_factory=list, max_length=6)
+    retrieval_policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
+
+    # Preserved non-analysis routes.
+    catalog_plan: CatalogPlan | None = None
+    needs_clarification: bool = False
+    clarification_question: str | None = Field(default=None, max_length=500)
+
+    viewer_intent: ViewerIntent = ViewerIntent.NO_OP
+    answer_focus: str | None = Field(default=None, max_length=500)
+    sample_detail_requested: bool = False
 
 
 class QueryPlan(_StrictModel):

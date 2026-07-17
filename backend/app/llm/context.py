@@ -30,6 +30,7 @@ from app.query.session import SessionState
 from app.query.sql import catalog as catalog_ops
 from app.query.sql.field_registry import build_schema_catalog
 from app.query.sql.schemas import FieldKind, ListModelsPlan, Operator
+from app.shared.types import QueryRoute
 
 _MAX_CLASSES = 80
 _MAX_SETS = 40
@@ -87,6 +88,59 @@ def _operation_vocab() -> dict[str, Any]:
         "viewer_intents": [v.value for v in ViewerIntent],
         "threshold_profiles": ["default_v001", "high_precision_v001"],
     }
+
+
+def build_policy_context(
+    session: Session,
+    request: SessionQueryRequest,
+    state: SessionState,
+    settings: Settings,
+) -> dict[str, Any]:
+    """QUERY-ONLY input for LLM call 1 — the retrieval-policy + facet planner
+    (Task 17 §1 Stage 1-2, §17).
+
+    Deliberately excludes ALL active-model semantic-resolution output and schema
+    field availability: no ontology/vocabulary candidates, no class/pset/qset
+    lists, no observed names/values, no RAG scores. Only the query, bounded
+    reference-resolving history, scope, active-model id, bounded selection, and
+    the output vocabularies. This is a structural guarantee that retrieval-mode
+    selection cannot depend on what the model happens to contain."""
+    active_id = request.active_source_model_id
+    scope = "active_model" if active_id is not None else "model_catalog"
+
+    selected: list[dict[str, Any]] = []
+    if active_id is not None and request.selected_entity_ids:
+        for s in hydrate_selected_entities(
+            session, active_id, request.selected_entity_ids[: settings.max_selected_entity_ids]
+        ):
+            # The user's own selection is an allowed policy input (§Stage 1); its
+            # ifc_class is part of the selection, not semantic-resolution output.
+            selected.append({"entity_id": s.entity_id, "ifc_class": s.ifc_class})
+
+    context: dict[str, Any] = {
+        "question": request.question,
+        "scope": scope,
+        "active_source_model_id": active_id,
+        "history": [
+            {"role": t.role, "content": t.content}
+            for t in request.history[-settings.max_history_turns :]
+        ],
+        "selected_entities": selected,
+        "previous_result_entity_ids": state.last_primary_entity_ids[:50],
+        "routes": [r.value for r in QueryRoute],
+        "role_hints": ["direct", "supporting", "context", "uncertain"],
+        "viewer_intents": [v.value for v in ViewerIntent],
+        "note": (
+            "Decide retrieval modes (sql/rag_entity/rag_relationship/graph) from THIS query "
+            "only. You do not know which IFC classes, fields, or values the model contains — "
+            "the backend resolves your conceptual facets against the model afterward."
+        ),
+    }
+    # The model catalog is not active-model semantic resolution — it is allowed
+    # so a catalog question can be routed/planned.
+    if active_id is None:
+        context["catalog"] = _catalog_context(session)
+    return context
 
 
 def build_planner_context(

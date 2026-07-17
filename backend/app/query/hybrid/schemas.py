@@ -20,6 +20,25 @@ from app.api.schemas.response import (
 )
 from app.shared.types import AnswerBasis
 
+# Probe-evidence authority + coverage vocabularies (Task 16 §8). Kept as string
+# constants (not enums) so they serialize cleanly into the answer payload.
+AUTHORITY_EXACT = "exact"
+AUTHORITY_STRUCTURED = "structured_candidate"
+AUTHORITY_SEMANTIC = "semantic_candidate"
+AUTHORITY_GENERAL = "general_context"
+AUTHORITIES = frozenset(
+    {AUTHORITY_EXACT, AUTHORITY_STRUCTURED, AUTHORITY_SEMANTIC, AUTHORITY_GENERAL}
+)
+
+COVERAGE_COMPLETE = "complete"
+COVERAGE_BOUNDED = "bounded"
+COVERAGE_UNKNOWN = "unknown"
+COVERAGE_UNAVAILABLE = "unavailable"
+COVERAGE_FAILED = "failed"
+COVERAGES = frozenset(
+    {COVERAGE_COMPLETE, COVERAGE_BOUNDED, COVERAGE_UNKNOWN, COVERAGE_UNAVAILABLE, COVERAGE_FAILED}
+)
+
 
 @dataclass
 class PathRun:

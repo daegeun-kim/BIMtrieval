@@ -12,8 +12,12 @@ from pathlib import Path
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
-PLANNER_PROMPT_VERSION = "planner_v001"
-ANSWERER_PROMPT_VERSION = "answerer_v001"
+# planner_v002 / answerer_v002: universal hybrid evidence pipeline (Task 16).
+PLANNER_PROMPT_VERSION = "planner_v002"
+ANSWERER_PROMPT_VERSION = "answerer_v002"
+# Task 17: query-only retrieval-policy planner (call 1) + group-aware answerer (call 2).
+POLICY_PLANNER_PROMPT_VERSION = "policy_planner_v001"
+GROUP_ANSWERER_PROMPT_VERSION = "group_answerer_v001"
 
 
 @lru_cache(maxsize=8)
@@ -30,3 +34,11 @@ def planner_prompt() -> str:
 
 def answerer_prompt() -> str:
     return load_prompt(ANSWERER_PROMPT_VERSION)
+
+
+def policy_planner_prompt() -> str:
+    return load_prompt(POLICY_PLANNER_PROMPT_VERSION)
+
+
+def group_answerer_prompt() -> str:
+    return load_prompt(GROUP_ANSWERER_PROMPT_VERSION)

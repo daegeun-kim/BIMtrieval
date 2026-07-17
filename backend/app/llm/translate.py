@@ -382,7 +382,10 @@ def _translate_rag(source_model_id: int, plan: QueryPlan) -> Any:
 
 
 def _translate_graph(source_model_id: int, plan: QueryPlan) -> TraverseRelationshipsPlan:
-    gp = plan.graph_plan
+    return _translate_graph_plan(source_model_id, plan.graph_plan)
+
+
+def _translate_graph_plan(source_model_id: int, gp: Any) -> TraverseRelationshipsPlan:
     assert gp is not None
     if not gp.start_entity_ids:
         raise PlanValidationError("graph plan requires start_entity_ids")

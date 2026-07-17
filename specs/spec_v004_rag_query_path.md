@@ -308,3 +308,30 @@ Query vectors persisted: NO
 OpenAI orchestration: NOT EXECUTED
 Hybrid path: NOT IMPLEMENTED
 ```
+
+---
+
+## Task 16 amendment — Threshold-free candidate retrieval
+
+Task 16 removes the hard similarity threshold as an **acceptance gate** for the universal hybrid
+pipeline. Where this conflicts with v004 §8 threshold behavior for the new probe path, this governs.
+
+- Every enabled semantic/RAG probe returns a bounded **top-k** set; no candidate is discarded for
+  being below `default_v001`/`high_precision_v001`. Similarity and per-kind rank remain **internal**
+  (ordering, diagnostics, evaluation, trace) and are never surfaced to the user.
+- `passed_threshold`/`sufficient_evidence` no longer control evidence inclusion in the probe path.
+  Evidence uses candidate/relevance concepts instead: `retrieved_candidate`, `rank`,
+  `candidate_evidence`, `accepted_by_answerer`, `rejected_by_answerer`. The old fields and
+  `thresholds.py` remain only for backward-compatible tests/diagnostics.
+- The answerer may reject every retrieved candidate and state that no relevant model evidence exists.
+- Embedding failure still degrades truthfully and leaves exact SQL usable; query/profile vectors are
+  never persisted.
+
+---
+
+## Task 17 amendment — RAG as bounded per-facet candidate groups
+
+Task 17 runs entity/relationship RAG per conceptual facet only when the query-only policy requested
+it (never because Stage-3 candidates are weak/strong). RAG enriches an exact class group with ranked
+representative examples, or forms a bounded `entity_id_set` RAG-only group (coverage=bounded) — never
+an exact total. SQL remains authoritative when both refer to the same canonical group (§4 dedup).

@@ -36,19 +36,40 @@ from app.config.settings import Settings, get_settings
 from app.db.session import session_scope
 from app.llm.answerer import answer_from_evidence, answer_general
 from app.llm.client import LLMError, LLMUnavailableError, OpenAIQueryClient, get_llm_client
-from app.llm.context import build_planner_context
-from app.llm.prompts import ANSWERER_PROMPT_VERSION, PLANNER_PROMPT_VERSION
-from app.llm.schemas import QueryPlan
+from app.llm.context import build_policy_context
+from app.llm.prompts import (
+    ANSWERER_PROMPT_VERSION,
+    GROUP_ANSWERER_PROMPT_VERSION,
+    PLANNER_PROMPT_VERSION,
+    POLICY_PLANNER_PROMPT_VERSION,
+)
+from app.llm.schemas import CatalogPlan, QueryPlan, RetrievalPolicyPlan
 from app.llm.translate import TranslatedPlan, translate_plan
-from app.llm.validation import PlanValidationError, validate_plan_structure
-from app.query.hybrid.evidence import apply_bounds, build_result_summary, build_sample_detail
+from app.llm.validation import (
+    PlanValidationError,
+    frozen_policy,
+    policy_hash,
+    validate_plan_structure,
+    validate_policy_plan,
+)
+from app.query.hybrid.evidence import (
+    apply_bounds,
+    build_group_answer_payload,
+    build_result_summary,
+    build_sample_detail,
+)
+from app.query.hybrid.groups.allocation import allocate_examples
+from app.query.hybrid.groups.builder import build_groups
+from app.query.hybrid.groups.decision import resolve_group_answer
+from app.query.hybrid.groups.viewer import hydrate_accepted_viewer_identities
 from app.query.hybrid.orchestrator import orchestrate
 from app.query.hybrid.schemas import EvidencePackage
 from app.query.rag.embedding_service import get_embedding_service
 from app.query.selection import SelectionConflictError, resolve_selection
+from app.query.semantic.resolution import resolve_facets
 from app.query.session import SessionState, get_session_store
 from app.query.sql import catalog as catalog_ops
-from app.query.sql.schemas import GetModelMetadataPlan
+from app.query.sql.schemas import GetModelMetadataPlan, SqlOperation
 from app.shared.errors import BimRagError, ModelNotFoundError
 from app.shared.types import AnswerBasis, QueryRoute, QueryScope, ResponseStatus
 from app.viewer.actions import (
@@ -201,32 +222,48 @@ class QueryService:
                     )
                 req = request.model_copy(update={"selected_entity_ids": selection.entity_ids})
 
-                context = build_planner_context(session, req, state, self.settings)
-                plan, translated, repaired, final_errors = self._plan_and_translate(
-                    client, context, session, req.selected_entity_ids
-                )
+                # Task 17 Stage 2: query-ONLY retrieval policy (LLM call 1). The
+                # context carries no active-model candidates/schema, so the
+                # SQL/RAG/graph decision cannot depend on model contents.
+                policy_context = build_policy_context(session, req, state, self.settings)
+                policy_plan, repaired, policy_errors = self._plan_policy(client, policy_context)
                 planner_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
-                if translated is None:
+                if policy_plan is None:
                     return _with_warnings(
-                        self._clarify_after_repair(
-                            req, request_id, scope, plan, final_errors, client, t0
-                        ),
+                        self._clarify_after_repair(req, request_id, scope, policy_errors, t0),
                         selection.warnings,
                     )
 
-                envelope = self._execute_and_answer(
-                    req,
-                    request_id,
-                    session,
-                    plan,
-                    translated,
-                    client,
-                    state,
-                    t0,
-                    repaired,
-                    planner_ms,
-                )
+                if (
+                    policy_plan.route is QueryRoute.HYBRID
+                    and req.active_source_model_id is not None
+                    and policy_plan.facets
+                ):
+                    envelope = self._execute_groups_and_answer(
+                        req,
+                        request_id,
+                        session,
+                        policy_plan,
+                        client,
+                        state,
+                        t0,
+                        repaired,
+                        planner_ms,
+                    )
+                else:
+                    envelope = self._answer_non_analysis(
+                        req,
+                        request_id,
+                        scope,
+                        session,
+                        policy_plan,
+                        client,
+                        state,
+                        t0,
+                        repaired,
+                        planner_ms,
+                    )
                 return _with_warnings(envelope, selection.warnings)
         except LLMUnavailableError as exc:
             self._log_failure(request, request_id, "llm_unavailable", str(exc))
@@ -328,7 +365,7 @@ class QueryService:
             self._log_event(request, request_id, plan, pkg, client, t0, repaired, True, stages)
             return _from_package(request, request_id, plan, pkg, ans.output.answer, viewer)
 
-        # retrieval routes
+        # retrieval routes (legacy single-path; used for the catalog route)
         t_exec = time.perf_counter()
         try:
             pkg, viewer = orchestrate(
@@ -386,14 +423,225 @@ class QueryService:
         )
         return _from_package(request, request_id, plan, pkg, ans.output.answer, viewer)
 
+    # -- Task 17 query-only policy + group pipeline --------------------------
+
+    def _plan_policy(
+        self, client: OpenAIQueryClient, context: dict[str, Any]
+    ) -> tuple[RetrievalPolicyPlan | None, bool, list[str]]:
+        """LLM call 1 + at most one repair (Task 17 Stage 2). The context is
+        query-only, so the returned policy cannot depend on model contents."""
+        result = client.plan_retrieval_policy(context)
+        plan = result.plan
+        errors = validate_policy_plan(plan)
+        if not errors:
+            return plan, False, []
+        repair_context = dict(context)
+        repair_context["repair_instruction"] = {
+            "your_previous_plan_was_invalid": errors,
+            "instruction": "Return one corrected plan that fixes exactly these problems.",
+        }
+        result2 = client.plan_retrieval_policy(repair_context)
+        plan2 = result2.plan
+        errors2 = validate_policy_plan(plan2)
+        if not errors2:
+            return plan2, True, []
+        return None, True, errors2
+
+    def _execute_groups_and_answer(
+        self,
+        request: SessionQueryRequest,
+        request_id: str,
+        session: Any,
+        policy_plan: RetrievalPolicyPlan,
+        client: OpenAIQueryClient,
+        state: SessionState,
+        t0: float,
+        repaired: bool,
+        planner_ms: float,
+    ) -> QueryResponseEnvelope:
+        """Task 17 Stages 3-9: resolve facets under the FROZEN policy, build
+        evidence groups, allocate examples, let the answerer judge groups, then
+        hydrate complete viewer identities for accepted groups."""
+        sid = policy_plan.source_model_id
+        policy = frozen_policy(policy_plan)  # immutable; resolution cannot change it
+        t_exec = time.perf_counter()
+        try:
+            facet_resolutions = resolve_facets(
+                session,
+                policy_plan.facets,
+                sid,
+                embedding_service_getter=get_embedding_service,
+                settings=self.settings,
+            )
+            groups = build_groups(
+                session,
+                facet_resolutions,
+                policy,
+                sid,
+                settings=self.settings,
+                embedding_service_getter=get_embedding_service,
+                selection_entity_ids=request.selected_entity_ids,
+            )
+        except (BimRagError, SQLAlchemyError) as exc:
+            self._log_failure(request, request_id, "group_execution_error", str(exc))
+            return _error_envelope(
+                request,
+                "I couldn't complete that analysis against the model. Could you rephrase it?",
+                request_id=request_id,
+                scope=QueryScope.ACTIVE_MODEL,
+            )
+        alloc_meta = allocate_examples(
+            groups, self.settings.max_answer_examples, self.settings.small_group_full_threshold
+        )
+        trace.emit(
+            "[trace] policy",
+            {
+                "route": policy_plan.route.value,
+                "policy_hash": policy_hash(policy),
+                "sql": policy.sql,
+                "rag_entity": policy.rag_entity,
+                "rag_relationship": policy.rag_relationship,
+                "graph": policy.graph,
+            },
+        )
+        trace.emit("[trace] groups", _group_trace(groups))
+        execute_ms = round((time.perf_counter() - t_exec) * 1000.0, 1)
+
+        # OpenAI call 2 — group-level relevance judgment + answer.
+        t_ans = time.perf_counter()
+        payload = build_group_answer_payload(
+            request.question, policy_plan.analysis_intent, sid, groups, self.settings
+        )
+        ans = client.generate_group_answer(payload)
+        answer_ms = round((time.perf_counter() - t_ans) * 1000.0, 1)
+
+        decision = resolve_group_answer(groups, ans.output)
+        hydration = hydrate_accepted_viewer_identities(session, decision, sid)
+
+        # Build the response package from accepted groups only (§9, §10).
+        plan = QueryPlan(
+            scope=QueryScope.ACTIVE_MODEL, route=QueryRoute.HYBRID, source_model_id=sid
+        )
+        pkg = EvidencePackage(
+            question=request.question,
+            route="hybrid",
+            scope="active_model",
+            source_model_id=sid,
+            answer_basis=decision.answer_basis,
+        )
+        pkg.primary_entities = _accepted_examples(decision, self.settings)
+        pkg.viewer_global_ids = hydration.primary_global_ids
+        pkg.viewer_matches_total = hydration.viewer_matches_total
+        pkg.viewer_matches_truncated = False  # complete hydration (§9)
+        pkg.class_histogram = _accepted_class_histogram(decision)
+        pkg.warnings = (list(decision.warnings) + list(hydration.warnings))[:20]
+        # Ambiguous concept totals are forbidden: only set an exact total when a
+        # single exact primary group is accepted (§10).
+        if (
+            len(decision.accepted_primary) == 1
+            and decision.accepted_primary[0].exact_count is not None
+        ):
+            pkg.exact_totals["sql_result"] = decision.accepted_primary[0].exact_count
+        if ans.output.disclosed_conflicts:
+            pkg.conflicts.append("model reported a conflict in the evidence")
+
+        stages = {"planner_ms": planner_ms, "execute_ms": execute_ms, "answer_ms": answer_ms}
+        self._finalize_group_state(state, sid, decision, hydration)
+        self._log_group_event(
+            request,
+            request_id,
+            policy_plan,
+            policy,
+            groups,
+            decision,
+            hydration,
+            alloc_meta,
+            pkg,
+            client,
+            t0,
+            ans.output.used_general_knowledge,
+            stages,
+            repaired,
+        )
+        return _from_package(
+            request, request_id, plan, pkg, ans.output.answer, hydration.viewer_actions()
+        )
+
+    def _answer_non_analysis(
+        self,
+        request: SessionQueryRequest,
+        request_id: str,
+        scope: QueryScope,
+        session: Any,
+        policy_plan: RetrievalPolicyPlan,
+        client: OpenAIQueryClient,
+        state: SessionState,
+        t0: float,
+        repaired: bool,
+        planner_ms: float,
+    ) -> QueryResponseEnvelope:
+        """Preserved routes (Task 17 §2): catalog / explain_general / clarify.
+        These reuse the legacy single-path execution via a compact QueryPlan."""
+        legacy = self._policy_to_legacy_plan(policy_plan)
+        try:
+            translated = translate_plan(session, legacy, request.selected_entity_ids)
+        except PlanValidationError as exc:
+            return self._clarify_after_repair(request, request_id, scope, [str(exc)], t0)
+        return self._execute_and_answer(
+            request,
+            request_id,
+            session,
+            legacy,
+            translated,
+            client,
+            state,
+            t0,
+            repaired,
+            planner_ms,
+        )
+
+    def _policy_to_legacy_plan(self, policy_plan: RetrievalPolicyPlan) -> QueryPlan:
+        if policy_plan.route is QueryRoute.SQL:  # catalog
+            return QueryPlan(
+                scope=QueryScope.MODEL_CATALOG,
+                route=QueryRoute.SQL,
+                catalog_plan=policy_plan.catalog_plan
+                or CatalogPlan(operation=SqlOperation.LIST_MODELS),
+            )
+        if policy_plan.route is QueryRoute.CLARIFY:
+            return QueryPlan(
+                scope=policy_plan.scope,
+                route=QueryRoute.CLARIFY,
+                source_model_id=policy_plan.source_model_id,
+                needs_clarification=True,
+                clarification_question=policy_plan.clarification_question
+                or "Could you clarify your question?",
+            )
+        return QueryPlan(
+            scope=policy_plan.scope,
+            route=QueryRoute.EXPLAIN_GENERAL,
+            source_model_id=policy_plan.source_model_id,
+        )
+
+    def _finalize_group_state(
+        self, state: SessionState, sid: int | None, decision: Any, hydration: Any
+    ) -> None:
+        """Store ONLY accepted-group evidence in follow-up state (Task 17 §8)."""
+        state.mode = QueryScope.ACTIVE_MODEL
+        state.active_source_model_id = sid
+        state.last_route = "hybrid"
+        state.last_primary_entity_ids = hydration.accepted_primary_entity_ids[:200]
+        state.last_context_entity_ids = []
+        state.last_relationship_ids = []
+        state.pending_candidate_model_ids = []
+        self.store.save(state)
+
     def _clarify_after_repair(
         self,
         request: SessionQueryRequest,
         request_id: str,
         scope: QueryScope,
-        plan: QueryPlan,
         errors: list[str],
-        client: OpenAIQueryClient,
         t0: float,
     ) -> QueryResponseEnvelope:
         self._log_failure(request, request_id, "plan_invalid_after_repair", "; ".join(errors))
@@ -424,6 +672,82 @@ class QueryService:
         state.last_relationship_ids = [r.relationship_id for r in pkg.relationships]
         state.pending_candidate_model_ids = [c.source_model_id for c in pkg.model_candidates]
         self.store.save(state)
+
+    def _log_group_event(
+        self,
+        request: SessionQueryRequest,
+        request_id: str,
+        policy_plan: RetrievalPolicyPlan,
+        policy: Any,
+        groups: list,
+        decision: Any,
+        hydration: Any,
+        alloc_meta: dict,
+        pkg: EvidencePackage,
+        client: OpenAIQueryClient,
+        t0: float,
+        used_general_knowledge: bool,
+        stages: dict,
+        repaired: bool,
+    ) -> None:
+        """Bounded diagnostic record for the group pipeline (Task 17 §14). No
+        prompts/vectors/canonical JSON/SQL params/full GlobalId lists."""
+        latency_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+        record = {
+            "event": "query",
+            "pipeline": "task17_groups",
+            "request_id": request_id,
+            "session_id": request.session_id,
+            "active_source_model_id": request.active_source_model_id,
+            "question": request.question,
+            "planner_model": self.settings.get_planner_model(),
+            "answer_model": self.settings.get_answer_model(),
+            "policy_planner_prompt_version": POLICY_PLANNER_PROMPT_VERSION,
+            "group_answerer_prompt_version": GROUP_ANSWERER_PROMPT_VERSION,
+            "route": policy_plan.route.value,
+            "retrieval_policy": {
+                "sql": policy.sql,
+                "rag_entity": policy.rag_entity,
+                "rag_relationship": policy.rag_relationship,
+                "graph": policy.graph,
+            },
+            "policy_hash": policy_hash(policy),
+            "facets": [
+                {"facet_id": f.facet_id, "role_hint": f.role_hint.value} for f in policy_plan.facets
+            ],
+            "groups": [
+                {
+                    "group_id": g.group_id,
+                    "authority": g.authority,
+                    "coverage": g.coverage,
+                    "exact_count": g.exact_count,
+                    "rag_candidate_count": g.rag_candidate_count,
+                    "examples": len(g.allocated_examples),
+                    "source_kinds": g.source_kinds,
+                }
+                for g in groups
+            ],
+            "allocation": alloc_meta,
+            "decision": {
+                "primary": [g.group_id for g in decision.accepted_primary],
+                "supporting": [g.group_id for g in decision.accepted_supporting],
+                "context": [g.group_id for g in decision.accepted_context],
+                "rejected": decision.rejected_ids,
+                "viewer_primary": [g.group_id for g in decision.viewer_primary],
+            },
+            "answer_basis": pkg.answer_basis.value,
+            "viewer_accepted_total": hydration.viewer_matches_total,
+            "viewer_returned_total": len(hydration.primary_global_ids)
+            + len(hydration.context_global_ids),
+            "missing_identity_count": hydration.missing_identity_count,
+            "general_knowledge_used": used_general_knowledge,
+            "repaired": repaired,
+            "warnings": pkg.warnings,
+            "token_usage": client.log.calls,
+            "latency_ms": latency_ms,
+            "stage_latency_ms": stages,
+        }
+        write_jsonl_event(record, Path(self.settings.query_log_path))
 
     def _log_event(
         self,
@@ -491,6 +815,49 @@ class QueryService:
 # ---------------------------------------------------------------------------
 # Envelope helpers
 # ---------------------------------------------------------------------------
+
+
+def _accepted_examples(decision: Any, settings: Settings) -> list:
+    """Grounding entities from accepted groups' allocated examples (Task 17 §7),
+    deduped by entity id and bounded to the answer-evidence limit."""
+    seen: set[int] = set()
+    out: list = []
+    for g in decision.accepted():
+        for e in g.allocated_examples:
+            if e.entity_id not in seen:
+                seen.add(e.entity_id)
+                out.append(e)
+                if len(out) >= settings.max_primary_entities:
+                    return out
+    return out
+
+
+def _accepted_class_histogram(decision: Any) -> dict[str, int]:
+    """Exact per-class counts of accepted PRIMARY groups (never summed into a
+    single concept total)."""
+    hist: dict[str, int] = {}
+    for g in decision.accepted_primary:
+        if len(g.predicate.ifc_classes) == 1 and g.exact_count is not None:
+            cls = g.predicate.ifc_classes[0]
+            hist[cls] = hist.get(cls, 0) + g.exact_count
+    return hist
+
+
+def _group_trace(groups: list) -> dict:
+    """Concise bounded group trace (no full profiles/predicates/ids lists)."""
+    return {
+        "groups": [
+            {
+                "group_id": g.group_id,
+                "authority": g.authority,
+                "coverage": g.coverage,
+                "exact_count": g.exact_count,
+                "rag_candidates": g.rag_candidate_count,
+                "examples": len(g.allocated_examples),
+            }
+            for g in groups[:24]
+        ]
+    }
 
 
 def _with_warnings(envelope: QueryResponseEnvelope, extra: list[str]) -> QueryResponseEnvelope:

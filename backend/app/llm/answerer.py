@@ -19,7 +19,7 @@ from app.query.hybrid.schemas import EvidencePackage
 
 
 def answer_from_evidence(client: OpenAIQueryClient, package: EvidencePackage) -> AnswerResult:
-    """Grounded answer from a bounded, retrieved evidence package."""
+    """Grounded answer from a bounded, retrieved evidence package (catalog/legacy path)."""
     payload = build_answer_payload(package)
     return client.generate_answer(payload)
 

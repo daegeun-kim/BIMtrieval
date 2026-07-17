@@ -476,3 +476,28 @@ canonical data with no schema change or re-ingestion.
 
 Contracts, routes, and validation results: `tasks/task13_done.md`; frontend-facing shape:
 `spec_v006_frontend_application.md` §10.8.
+
+---
+
+## Task 16 amendment — Structured verification of semantic candidates
+
+Task 16 reuses this typed SQL path for a new job: **automatic structured verification** of
+semantically discovered candidates (`backend/app/query/semantic/probes/verification.py`).
+
+- When a model-vocabulary candidate exposes a safe queryable predicate (class presence/count, a
+  normalized name substring, an exact/case-insensitive property value, or field coverage), it is
+  verified by constructing an **allowlisted `FILTER_ENTITIES`** plan and running it through the
+  existing typed executor — never raw SQL or fuzzy JSON matching.
+- Verification upgrades a `semantic_candidate` to a `structured_candidate` with an exact count and
+  bounded matching identities. It does **not** decide relevance — the answerer still judges whether
+  the verified fact answers the question.
+- An unresolvable predicate degrades to an unverified candidate rather than raising.
+
+---
+
+## Task 17 amendment — Complete viewer identities via typed predicates
+
+Task 17 removes the fixed 2,000-ID viewer cap: `entities._identities_for_where`/`select_viewer_identities`
+accept `limit=None` for complete, uncapped identity hydration of an accepted evidence group
+(`hybrid/groups/execute.all_identities`). A matched entity with no usable GlobalId is reported as a
+distinct missing-identity condition, never as truncation.

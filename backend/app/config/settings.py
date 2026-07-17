@@ -91,6 +91,37 @@ class Settings(BaseSettings):
     # --- Orchestration concurrency / timeouts (spec_v005 §8) ---
     path_timeout_s: float = 20.0
 
+    # --- Semantic vocabulary / ontology bounds (Task 16 §3, §4, §5, §8) ---
+    # Bound the model-specific vocabulary so profile generation is deterministic
+    # and the entire vocabulary/database is NEVER passed to the LLM.
+    vocab_max_values_per_profile: int = 20  # observed values per class/field profile
+    vocab_max_representative_examples: int = 5  # original examples kept per profile
+    vocab_max_profiles_to_planner: int = 30  # active-model profiles to one planner call
+    vocab_max_profile_excerpt_chars: int = 500  # per profile excerpt
+    vocab_max_facts_total: int = 1500  # internal cache cap on observed-fact profiles
+    vocab_min_fact_occurrences: int = 2  # drop per-instance singleton noise from value facts
+    # Pre-planner semantic resolution top-k (threshold-free, Task 16 §4).
+    semantic_resolution_top_k: int = 12  # ontology candidates surfaced to the planner
+    semantic_resolution_model_top_k: int = 15  # model vocab candidates surfaced
+
+    # --- Universal hybrid probe limits (Task 16 §5) ---
+    max_probes_total: int = 10
+    max_sql_probes: int = 4
+    max_semantic_probes: int = 4  # ontology + model_vocabulary combined
+    max_rag_probes: int = 4  # rag_entity + rag_relationship combined
+    max_graph_probes: int = 2
+    # Semantic candidates surfaced per probe into the evidence package (Task 16 §8).
+    max_semantic_candidates_per_probe: int = 10
+    max_semantic_candidates_per_probe_hard: int = 20
+    max_probe_summaries_to_answerer: int = 10
+
+    # --- Evidence groups + group-aware allocation (Task 17 §3, §6, §7) ---
+    max_evidence_groups: int = 24  # bounded groups built per question
+    group_construction_sample_limit: int = 8  # representative entities fetched per group
+    max_answer_examples: int = 50  # total detailed examples across all groups (LLM budget)
+    small_group_full_threshold: int = 12  # a direct group this small is included whole if it fits
+    rag_facet_top_k: int = 12  # threshold-free RAG candidates per facet
+
     # --- Logging / dev surface (spec_v005 §15, §16) ---
     # Runtime logs live under the gitignored backend/logs/ (experiment output,
     # kept out of git). Paths are relative to the backend/ working directory,

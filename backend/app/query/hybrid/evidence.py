@@ -153,6 +153,65 @@ def build_result_summary(pkg: EvidencePackage) -> ResultSummary:
     )
 
 
+def build_group_answer_payload(
+    question: str,
+    analysis_intent: str | None,
+    source_model_id: int | None,
+    groups: list[Any],
+    settings: Settings,
+) -> dict[str, Any]:
+    """Bounded, secret-free evidence for the group-aware answerer (Task 17 §7, §8).
+
+    Every bounded group gets a compact factual summary; each group's allocated
+    detailed examples (≤50 total across groups) are included. NO similarity
+    scores, raw predicates, plans, or database ids are surfaced."""
+    excerpt_cap = settings.vocab_max_profile_excerpt_chars
+
+    def _entity(e: Any) -> dict[str, Any]:
+        return {"ifc_class": e.ifc_class, "name": e.name, "global_id": e.global_id}
+
+    group_payloads = []
+    for g in groups:
+        group_payloads.append(
+            {
+                "group_id": g.group_id,
+                "facet_id": g.facet_id,
+                "label": g.label,
+                "role_hint": g.role_hint,  # PLANNER hypothesis, not a fact
+                "authority": g.authority,
+                "coverage": g.coverage,
+                "source_kinds": g.source_kinds,
+                "exact_count": g.exact_count,
+                "rag_candidate_count": g.rag_candidate_count,
+                "ontology_definition": (g.ontology_definition or "")[:excerpt_cap] or None,
+                "factual_profile": g.factual_profile,
+                "examples": [_entity(e) for e in g.allocated_examples],
+                "example_note": (
+                    "bounded sample" if g.allocation_truncated else "all members shown"
+                ),
+                "warnings": g.warnings[:3],
+            }
+        )
+
+    return {
+        "question": question,
+        "analysis_intent": analysis_intent,
+        "source_model_id": source_model_id,
+        "evidence_groups": group_payloads,
+        "guidance": (
+            "Each group is ONE independent semantic claim you may accept or reject. role_hint is "
+            "the planner's hypothesis, NOT a fact — judge relevance from the factual_profile and "
+            "the user's question. authority=exact is a precise database count for that predicate; "
+            "structured_candidate is a discovered predicate exactly counted (count real, relevance "
+            "yours); semantic_candidate is a bounded RAG candidate set (never an exact total). "
+            "NEVER sum associated groups into a concept total (e.g. do not add stairs + railings + "
+            "doors into one 'circulation' number). An exact count of 0 or an absent class means "
+            "'not explicitly represented', not that the feature is absent. Put only entity-bearing "
+            "groups you accept into viewer_primary_group_ids / viewer_context_group_ids."
+        ),
+    }
+
+
 def build_answer_payload(pkg: EvidencePackage) -> dict[str, Any]:
     """Compact, bounded, secret-free evidence for the grounded-answer call
     (spec_v005 §11). RAG internal scores are intentionally excluded.

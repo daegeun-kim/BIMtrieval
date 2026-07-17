@@ -663,3 +663,69 @@ Task 15 (`tasks/task15_done.md`) restructured terminal output into two layers:
 **Opt-in (`BIM_RAG_TRACE=1`, unchanged otherwise):** the §22.1 summary records keep their timing,
 counts, and histograms but **no longer repeat the SQL statements** — statements print exactly once
 through the always-on layer (no duplication, verified by test).
+
+---
+
+## Task 16 amendment — Probe array + answerer relevance judge
+
+Task 16 replaces the active-model planner's single exclusive `sql_plan`/`rag_plan`/`graph_plan`
+choice with a bounded **probe array**, and turns the answerer into an explicit relevance judge.
+Where this conflicts with the v005 exclusive-route/combination wording, this governs. Catalog,
+`explain_general`, and `clarify` paths are unchanged; `clarify` is now a last resort (§10).
+
+- **Planner (call 1)** emits `route=hybrid` + `probes[]` (`backend/app/llm/schemas.py::Probe`).
+  Probe kinds: `sql`, `model_vocabulary`, `ontology`, `rag_entity`, `rag_relationship`, `graph`.
+  Each probe has a unique `probe_id`, a `purpose`, a `facet`, and exactly one typed allowlisted
+  plan. Bounds (centralized in settings): ≤10 total, ≤4 sql, ≤4 ontology+model_vocabulary, ≤4
+  rag, ≤2 graph. The planner uses the fewest useful probes; a simple exact question may use one
+  sql probe.
+- **Execution** (`backend/app/query/semantic/probes/executor.py`): independent SQL probes run
+  concurrently on their own sessions; embedding-backed probes run sequentially. One probe failing
+  is an explicit per-probe partial failure and never zeroes the others. Semantic/RAG retrieval is
+  threshold-free (see v004 amendment).
+- **Independent evidence groups.** Analytical questions (e.g. circulation) preserve separate facts
+  (stair count, class absence, lift-related names, egress coverage, semantic candidates) as labeled
+  `ProbeEvidence` without forcing a single canonical-ID intersection/union. The legacy
+  intersection/union combinations remain for questions that truly need them.
+- **Evidence package** (`ProbeEvidence`, Task 16 §8): per probe — `authority` ∈ {exact,
+  structured_candidate, semantic_candidate, general_context}, `coverage` ∈ {complete, bounded,
+  unknown, unavailable, failed}, bounded candidate references (rank + provenance, similarity
+  internal), exact counts uncapped. Distinct states (exact zero vs absent class vs absent field vs
+  all-rejected vs failed vs bounded-sample) are never conflated.
+- **Answerer (call 2)** returns structured relevance decisions: `used_probe_ids`,
+  `rejected_probe_ids`, `viewer_probe_ids`, `model_evidence_sufficient`, `inference_used`,
+  `inference_basis_probe_ids`, plus `used_general_knowledge`/`disclosed_conflicts`. Unknown probe
+  ids are ignored with a bounded warning. Viewer highlights and follow-up session state are built
+  from **accepted** entity-bearing probes only. `answer_basis` stays evidence-dependent: a
+  hybrid-routed question answered only by one exact SQL count still reports `exact_sql`.
+- Prompts are versioned `planner_v002` / `answerer_v002`.
+
+---
+
+## Task 17 amendment — Evidence groups + group-level answerer
+
+Task 17 supersedes the Task 16 probe array for the active-model path with an evidence-group
+pipeline. The Task 16 probe modules are retired; catalog / explain_general / clarify are preserved.
+
+- **Stage 2 (call 1)** `RetrievalPolicyPlan` (`app/llm/schemas.py`): `facets[]` (facet_id, question,
+  role_hint, semantic_query, needs_exact_structured/entity_rag/relationship_rag/graph) +
+  `retrieval_policy`. The authoritative frozen policy = the union of facet needs
+  (`validation.frozen_policy`); the declared `retrieval_policy` must equal it (repairable).
+- **Stage 3** `resolution.resolve_facets` resolves each facet against the ontology + model
+  vocabulary; it cannot add/remove/cancel a retrieval mode.
+- **Stages 4-5** `hybrid/groups/builder.build_groups`: one group per class candidate and per
+  queryable fact candidate, deduped by predicate signature; a value predicate whose count equals its
+  class total is merged into the class group (§4). SQL verifies queryable groups (authoritative
+  count); RAG enriches representative examples and forms bounded `entity_id_set` RAG-only groups; it
+  never adds to a count. Never a mixed `IN(...)` group.
+- **Stage 6** deterministic factual profiles + `groups/allocation.allocate_examples`: ≤50 detailed
+  examples across groups, group-diverse round-robin, small high-priority direct groups included whole
+  (the 9 stairs), summaries kept for zero-example groups.
+- **Stage 7 (call 2)** group-aware answerer (`AnswerOutput` primary/supporting/context/rejected +
+  viewer group id lists). `groups/decision.resolve_group_answer` validates ids (unknown/contradictory
+  fail safe), derives `answer_basis` (one accepted exact group → exact_sql).
+- **Stages 8-9** `groups/viewer.hydrate_accepted_viewer_identities`: complete uncapped identity
+  hydration for accepted viewer groups; follow-up state stores accepted evidence only. Ambiguous
+  concept totals are forbidden — an exact total is set only when a single exact primary group is
+  accepted.
+- Prompts: `policy_planner_v001` / `group_answerer_v001`.

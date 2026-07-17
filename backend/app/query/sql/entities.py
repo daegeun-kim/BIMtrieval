@@ -74,20 +74,24 @@ class ViewerIdentityResult:
 
 
 def _identities_for_where(
-    session: Session, where: sa.ColumnElement, limit: int
+    session: Session, where: sa.ColumnElement, limit: int | None
 ) -> ViewerIdentityResult:
     """Identity-only rows + the exact total for an arbitrary scoped predicate.
 
     Selects only `global_id` + `ifc_class`; the exact total is counted over the
     full predicate so it is never reduced by `limit`. Ordered by `id` so
     truncation is stable and deterministic across calls.
+
+    `limit=None` returns EVERY matching identity with no cap (Task 17 §9 complete
+    viewer hydration) — `truncated` is then always False.
     """
     exact_total = session.execute(
         sa.select(sa.func.count()).select_from(_ET).where(where)
     ).scalar_one()
-    rows = session.execute(
-        sa.select(_ET.c.global_id, _ET.c.ifc_class).where(where).order_by(_ET.c.id).limit(limit)
-    ).all()
+    stmt = sa.select(_ET.c.global_id, _ET.c.ifc_class).where(where).order_by(_ET.c.id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    rows = session.execute(stmt).all()
     return ViewerIdentityResult(
         rows=list(rows),
         exact_total=exact_total,
@@ -117,7 +121,7 @@ def select_viewer_identities(
     source_model_id: int,
     entity_classes: list[str],
     filters,
-    limit: int,
+    limit: int | None,
 ) -> ViewerIdentityResult:
     """Deterministic identity-only retrieval over the *same* filtered set a
     count/list/aggregate matched (task13 §2).
