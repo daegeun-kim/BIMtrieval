@@ -25,6 +25,16 @@
 // therefore still runs asynchronously AFTER scene-ready, in yielded batches,
 // so it never blocks load or input — chunking adds a cheap grid-bucketing
 // step inline in that same loop, not a second pass.
+//
+// tasks/task20.md §1/§2 replaced task18's motion handling: camera motion used
+// to hide base edges by rewriting every non-highlighted vertex's ALPHA across
+// all chunks (still submitted to the GPU at alpha 0) and requesting a color
+// upload on every hide/restore. That regressed real-hardware interaction on
+// large models. Motion now toggles each chunk's `lines.visible` instead — a
+// bounded, cheap per-chunk boolean flip that actually removes the geometry
+// from the draw, with zero color-buffer writes. Selected/query-primary edges
+// stay visible via a small SEPARATE highlight overlay (below), maintained
+// only by recolor()'s existing role-diff loop, never by motion.
 import * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 
@@ -74,6 +84,19 @@ interface Chunk {
   /** Screen-size LOD hysteresis state (task18 §8): true once culled, cleared
    * only after growing past the (relaxed, if highlighted) exit threshold. */
   lodCulled: boolean;
+}
+
+/**
+ * A small, always-separate overlay of ONLY the currently highlighted
+ * (query-primary/manual) entities' edges (task20 §2), rebuilt exclusively by
+ * recolor()'s existing role-diff loop — never by camera motion. Positions and
+ * colors are sliced directly out of the owning base chunk's already-extracted
+ * typed arrays, so building it costs no worker round trip and never clones
+ * the full edge dataset.
+ */
+interface HighlightOverlay {
+  lines: THREE.LineSegments;
+  ranges: Map<number, VertexRange>;
 }
 
 interface GridDims {
@@ -152,6 +175,9 @@ export class EdgeOverlay {
   private vertexCount = 0;
   private motionHidden = false;
   private restoreTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Same object every chunk (and the highlight overlay) is mounted under. */
+  private parentObj: THREE.Object3D | null = null;
+  private highlight: HighlightOverlay | null = null;
   private thresholdDeg: number = EDGES.thresholdAngleDeg.balanced;
 
   isBuilt(): boolean {
@@ -176,6 +202,28 @@ export class EdgeOverlay {
   /** Populated spatial chunk count (tasks/task18.md §1/§7 instrumentation). */
   getChunkCount(): number {
     return this.chunks.length;
+  }
+
+  /** Base chunks currently submitted for rendering (tasks/task20.md §6 instrumentation) —
+   * 0 while motion-hidden, since chunks are toggled invisible, not alpha-zeroed. */
+  getVisibleChunkCount(): number {
+    return this.chunks.reduce((n, c) => n + (c.lines.visible ? 1 : 0), 0);
+  }
+
+  /** True while base chunks are hidden for camera motion (tasks/task20.md §2). */
+  isMotionHidden(): boolean {
+    return this.motionHidden;
+  }
+
+  /** Vertex count of the small always-separate highlight overlay, or 0 (tasks/task20.md §2/§6). */
+  getHighlightVertexCount(): number {
+    if (!this.highlight) return 0;
+    return (this.highlight.lines.geometry.getAttribute("position") as THREE.BufferAttribute).count;
+  }
+
+  /** Whether a highlight overlay drawable currently exists (tasks/task20.md §6). */
+  hasHighlightOverlay(): boolean {
+    return this.highlight !== null;
   }
 
   /**
@@ -204,6 +252,7 @@ export class EdgeOverlay {
   ): Promise<boolean> {
     if (this.disposed || this.building || this.chunks.length > 0) return this.isBuilt();
     this.building = true;
+    this.parentObj = parent;
     this.thresholdDeg = options?.thresholdDeg ?? EDGES.thresholdAngleDeg.balanced;
     const started = performance.now();
     try {
@@ -432,11 +481,19 @@ export class EdgeOverlay {
    * small per-chunk uploads (strictly less total work than the old single
    * whole-model envelope upload for the same scattered change), and a no-op
    * repaint costs nothing. Never any geometry work.
+   *
+   * Also maintains the small highlight overlay (task20 §2): whenever an
+   * entity's role enters or leaves `VISIBLE_DURING_MOTION`, its slot in
+   * `highlightRanges` is added/removed and `rebuildHighlightOverlay()` is
+   * called ONCE at the end if anything highlighted-related changed — never
+   * from camera motion, only from a real role diff right here.
    */
   recolor(roleOf: (localId: number) => EdgeRole): void {
     if (this.chunks.length === 0) return;
     const rgba = roleRgba();
     const dirtyByChunk = new Map<number, { start: number; end: number }>();
+    const highlightRanges = this.highlight?.ranges ?? new Map<number, VertexRange>();
+    let highlightDirty = false;
 
     for (const [localId, range] of this.ranges) {
       const role = roleOf(localId);
@@ -445,8 +502,10 @@ export class EdgeOverlay {
       this.lastRole.set(localId, role);
 
       const chunk = this.chunks[range.chunkIndex]!;
-      if (prevRole !== undefined && VISIBLE_DURING_MOTION.has(prevRole)) chunk.highlightCount -= 1;
-      if (VISIBLE_DURING_MOTION.has(role)) chunk.highlightCount += 1;
+      const wasHighlighted = prevRole !== undefined && VISIBLE_DURING_MOTION.has(prevRole);
+      const isHighlighted = VISIBLE_DURING_MOTION.has(role);
+      if (wasHighlighted) chunk.highlightCount -= 1;
+      if (isHighlighted) chunk.highlightCount += 1;
 
       const [r, g, b, a] = rgba[role];
       const end = (range.start + range.count) * 4;
@@ -462,8 +521,15 @@ export class EdgeOverlay {
         if (range.start * 4 < span.start) span.start = range.start * 4;
         if (end > span.end) span.end = end;
       }
+
+      if (isHighlighted) {
+        highlightRanges.set(localId, range);
+        highlightDirty = true;
+      } else if (wasHighlighted) {
+        highlightRanges.delete(localId);
+        highlightDirty = true;
+      }
     }
-    if (dirtyByChunk.size === 0) return; // nothing changed — no write, no upload
 
     for (const [chunkIndex, span] of dirtyByChunk) {
       const attr = this.chunks[chunkIndex]!.lines.geometry.getAttribute("color") as THREE.BufferAttribute;
@@ -471,56 +537,87 @@ export class EdgeOverlay {
       attr.addUpdateRange(span.start, span.end - span.start);
       attr.needsUpdate = true;
     }
+    if (highlightDirty) this.rebuildHighlightOverlay(highlightRanges);
   }
 
   /**
-   * Zero (or restore) the ALPHA channel only of every non-highlighted
-   * entity's edges (task18 §5). Touching only alpha — never geometry, and
-   * never `lastRole` — means this never fights `recolor()`'s diffing: a
-   * restore always re-reads the entity's CURRENT role color straight from
-   * the theme, so it stays correct even if a role changed while hidden.
-   * Selected/query-primary roles (`VISIBLE_DURING_MOTION`) are never touched.
+   * Rebuilds the small highlight overlay from the current `highlightRanges`
+   * (task20 §2). Positions and colors are sliced directly out of the owning
+   * base chunk's ALREADY-EXTRACTED typed arrays — no worker round trip, no
+   * whole-model clone, bounded by the (small) highlighted vertex count. Only
+   * called from `recolor()`'s diff above, never from `setMotion()`.
    */
-  private setBaseEdgeAlpha(hidden: boolean, roleOf: (localId: number) => EdgeRole): void {
-    if (this.chunks.length === 0) return;
-    const rgba = roleRgba();
-    const dirtyByChunk = new Map<number, { start: number; end: number }>();
-
-    for (const [localId, range] of this.ranges) {
-      const role = roleOf(localId);
-      if (VISIBLE_DURING_MOTION.has(role)) continue;
-      const chunk = this.chunks[range.chunkIndex]!;
-      const alpha = hidden ? 0 : rgba[role][3];
-      const end = (range.start + range.count) * 4;
-      for (let i = range.start * 4 + 3; i < end; i += 4) {
-        chunk.colors[i] = alpha;
+  private rebuildHighlightOverlay(ranges: Map<number, VertexRange>): void {
+    if (ranges.size === 0) {
+      if (this.highlight) {
+        this.highlight.lines.removeFromParent();
+        this.highlight.lines.geometry.dispose();
+        (this.highlight.lines.material as THREE.Material).dispose();
+        this.highlight = null;
       }
-      const span = dirtyByChunk.get(range.chunkIndex);
-      if (!span) dirtyByChunk.set(range.chunkIndex, { start: range.start * 4, end });
-      else {
-        if (range.start * 4 < span.start) span.start = range.start * 4;
-        if (end > span.end) span.end = end;
-      }
+      return;
     }
-    if (dirtyByChunk.size === 0) return;
 
-    for (const [chunkIndex, span] of dirtyByChunk) {
-      const attr = this.chunks[chunkIndex]!.lines.geometry.getAttribute("color") as THREE.BufferAttribute;
-      attr.clearUpdateRanges();
-      attr.addUpdateRange(span.start, span.end - span.start);
-      attr.needsUpdate = true;
+    let total = 0;
+    for (const r of ranges.values()) total += r.count;
+    const positions = new Float32Array(total * 3);
+    const colors = new Float32Array(total * 4);
+    let cursor = 0;
+    for (const r of ranges.values()) {
+      const chunk = this.chunks[r.chunkIndex]!;
+      const posArr = (chunk.lines.geometry.getAttribute("position") as THREE.BufferAttribute)
+        .array as Float32Array;
+      positions.set(posArr.subarray(r.start * 3, (r.start + r.count) * 3), cursor * 3);
+      colors.set(chunk.colors.subarray(r.start * 4, (r.start + r.count) * 4), cursor * 4);
+      cursor += r.count;
+    }
+
+    if (!this.highlight) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+      const material = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false });
+      const lines = new THREE.LineSegments(geometry, material);
+      // Highlighted results can be scattered across the whole building, so a
+      // bounding sphere here would be nearly as large as the model itself —
+      // frustum culling would be as meaningless as it was for the old
+      // whole-model object (task18 §7's reasoning applies identically).
+      lines.frustumCulled = false;
+      lines.renderOrder = 2; // draw after base chunks (renderOrder 1)
+      // Only shown WHILE base chunks are hidden — at rest the base chunks
+      // already draw these same vertices in the correct color, so keeping
+      // both visible would just be redundant overdraw (task20 §2).
+      lines.visible = this.motionHidden;
+      this.parentObj?.add(lines);
+      this.highlight = { lines, ranges };
+    } else {
+      const geometry = this.highlight.lines.geometry;
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+      this.highlight.ranges = ranges;
     }
   }
 
+  /** Derives a chunk's actual visibility from motion + LOD state so the two
+   * mechanisms can never fight each other (task20 §2). */
+  private applyChunkVisibility(chunk: Chunk): void {
+    chunk.lines.visible = !this.motionHidden && !chunk.lodCulled;
+  }
+
   /**
-   * Camera motion state (task18 §5): on movement start, base-model edges
-   * hide immediately; on rest, they restore after `EDGE_RESTORE_DELAY_MS` —
-   * cancelled and restarted if movement resumes before the delay elapses.
-   * `onDirty` is called (synchronously on hide, or from the delayed restore)
-   * so the caller can request a render frame without this class needing a
-   * scheduler reference.
+   * Camera motion state (task20 §1/§2 — replaces task18 §5's per-vertex alpha
+   * hiding). On movement start, EVERY populated base chunk is hidden via
+   * `lines.visible = false` — a bounded O(chunks) boolean write, never a
+   * per-vertex color rewrite, never a GPU color upload, never geometry work.
+   * On rest, after `EDGE_RESTORE_DELAY_MS` (cancelled/restarted if movement
+   * resumes first), chunks are restored through `applyChunkVisibility` so an
+   * LOD-culled chunk doesn't incorrectly reappear. The small highlight
+   * overlay (if any) is kept in lockstep so it is visible ONLY while base
+   * chunks are hidden. `onDirty` is called (synchronously on hide, or from
+   * the delayed restore) so the caller can request a render frame without
+   * this class needing a scheduler reference.
    */
-  setMotion(moving: boolean, roleOf: (localId: number) => EdgeRole, onDirty: () => void): void {
+  setMotion(moving: boolean, onDirty: () => void): void {
     if (this.restoreTimer !== null) {
       clearTimeout(this.restoreTimer);
       this.restoreTimer = null;
@@ -528,14 +625,16 @@ export class EdgeOverlay {
     if (moving) {
       if (this.motionHidden) return;
       this.motionHidden = true;
-      this.setBaseEdgeAlpha(true, roleOf);
+      for (const chunk of this.chunks) this.applyChunkVisibility(chunk);
+      if (this.highlight) this.highlight.lines.visible = true;
       onDirty();
     } else {
       this.restoreTimer = setTimeout(() => {
         this.restoreTimer = null;
         if (!this.motionHidden) return;
         this.motionHidden = false;
-        this.setBaseEdgeAlpha(false, roleOf);
+        for (const chunk of this.chunks) this.applyChunkVisibility(chunk);
+        if (this.highlight) this.highlight.lines.visible = false;
         onDirty();
       }, EDGE_RESTORE_DELAY_MS);
     }
@@ -573,14 +672,11 @@ export class EdgeOverlay {
       const exitPx = highlighted ? EDGES.lod.highlightFarExitPx : EDGES.lod.farExitPx;
 
       if (chunk.lodCulled) {
-        if (projectedPx > exitPx) {
-          chunk.lodCulled = false;
-          chunk.lines.visible = true;
-        }
+        if (projectedPx > exitPx) chunk.lodCulled = false;
       } else if (projectedPx < enterPx) {
         chunk.lodCulled = true;
-        chunk.lines.visible = false;
       }
+      this.applyChunkVisibility(chunk);
     }
   }
 
@@ -599,5 +695,12 @@ export class EdgeOverlay {
     this.ranges.clear();
     this.lastRole.clear();
     this.gridDimsCache = null;
+    if (this.highlight) {
+      this.highlight.lines.removeFromParent();
+      this.highlight.lines.geometry.dispose();
+      (this.highlight.lines.material as THREE.Material).dispose();
+      this.highlight = null;
+    }
+    this.parentObj = null;
   }
 }

@@ -133,38 +133,6 @@ export const EDGES = {
   },
 } as const;
 
-/**
- * Main-viewer pixel-ratio policy (task18 §3). Moving values are a range; the
- * live value is chosen deterministically by ViewerPerformanceController from
- * measured frame time (high end first, stepped down only under sustained
- * slow frames) and never exceeds the listed ceiling for the active profile.
- * Stationary values are fixed.
- */
-export const PIXEL_RATIO = {
-  moving: {
-    balanced: { high: 1.25, low: 1.0 },
-    largeModel: { high: 1.0, low: 0.85 },
-  },
-  stationary: {
-    balanced: 1.5,
-    largeModel: 1.25,
-  },
-} as const;
-
-/**
- * Fragments LOD/visibility update throttle (task18 §4), applied to
- * `fragments.core.settings.maxUpdateRate`. `restingMs` matches the library's
- * own default (100ms) so an at-rest forced update (e.g. a highlight change)
- * is never artificially delayed by a leftover large-model throttle window.
- */
-export const FRAGMENTS_THROTTLE_MS = {
-  moving: {
-    balanced: 120,
-    largeModel: 200,
-  },
-  restingMs: 100,
-} as const;
-
 /** Delay after camera rest before base-model edges reappear (task18 §5). */
 export const EDGE_RESTORE_DELAY_MS = 150;
 

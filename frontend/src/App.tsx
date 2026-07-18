@@ -9,7 +9,6 @@ import ViewerOverlay from "./components/ViewerOverlay";
 import { controller } from "./state/controller";
 import { effectivePanelWidth, effectiveViewportObstructionPx, useStore } from "./state/store";
 import ViewerCanvas from "./viewer/ViewerCanvas";
-import ViewerInstrumentationOverlay from "./viewer/ViewerInstrumentationOverlay";
 
 // Width of the collapsed chat restore tab, so the component panel still docks
 // beside it rather than under it.
@@ -55,7 +54,6 @@ export default function App() {
   return (
     <div className="app" style={{ "--chat-w": `${chatWidth}px` } as React.CSSProperties}>
       <ViewerCanvas />
-      <ViewerInstrumentationOverlay />
       <ViewerOverlay />
       <ViewerControls onResetApp={onResetApp} />
       <StatusReadout />

@@ -518,7 +518,7 @@ describe("edge overlay", () => {
     expect(await buildWith(135)).toBe(8); // shared 90° edge excluded: 4 boundary edges x 2 verts
   });
 
-  it("hides base edges on motion start, keeps primary/manual visible, restores after the delay (task18 §5)", async () => {
+  it("hides base chunks via visibility on motion start, restores after the delay (task20 §1/§2)", async () => {
     vi.useFakeTimers();
     try {
       const overlay = new EdgeOverlay();
@@ -530,45 +530,150 @@ describe("edge overlay", () => {
           ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
       };
       await overlay.build(model as never, parent);
-      // entity 1 is the query-primary, entity 2 is a dim base entity
+      // entity 1 is the query-primary, entity 2 is a dim base entity — both
+      // land in the SAME merged chunk (one grid cell for two nearby items).
       overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
-      const colors = (parent.children[0] as THREE.LineSegments).geometry.getAttribute(
-        "color",
-      ) as THREE.BufferAttribute;
-      const half = colors.count / 2;
-      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5);
-      expect(colors.getW(half)).toBeCloseTo(EDGES.alpha.dim, 5);
+      const baseChunk = parent.children.find((c) => c !== undefined) as THREE.LineSegments;
+      const colors = baseChunk.geometry.getAttribute("color") as THREE.BufferAttribute;
+      const colorsSnapshot = (colors.array as Float32Array).slice();
 
       const dirty = vi.fn();
-      const roleOf = (id: number): "primary" | "dim" => (id === 1 ? "primary" : "dim");
-
-      overlay.setMotion(true, roleOf, dirty);
+      overlay.setMotion(true, dirty);
       expect(dirty).toHaveBeenCalledTimes(1);
-      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5); // primary stays visible
-      expect(colors.getW(half)).toBe(0); // base edge hidden
+      expect(baseChunk.visible).toBe(false); // base chunk hidden via visibility, not alpha
+      expect(overlay.getVisibleChunkCount()).toBe(0);
+      // Objective 1: never rewrite alpha — the color buffer is byte-for-byte
+      // unchanged across the motion transition.
+      expect(colors.array as Float32Array).toEqual(colorsSnapshot);
 
       // A second "moving" call while already hidden is a no-op — no redundant dirty.
-      overlay.setMotion(true, roleOf, dirty);
+      overlay.setMotion(true, dirty);
       expect(dirty).toHaveBeenCalledTimes(1);
 
-      overlay.setMotion(false, roleOf, dirty);
+      overlay.setMotion(false, dirty);
       vi.advanceTimersByTime(100); // still within the 100-200ms window
-      expect(colors.getW(half)).toBe(0); // not restored yet
+      expect(baseChunk.visible).toBe(false); // not restored yet
 
       // Movement resumes before the delay elapses — cancels the pending restore.
-      overlay.setMotion(true, roleOf, dirty);
+      overlay.setMotion(true, dirty);
       vi.advanceTimersByTime(300);
-      expect(colors.getW(half)).toBe(0); // restore was cancelled, still hidden
+      expect(baseChunk.visible).toBe(false); // restore was cancelled, still hidden
 
-      overlay.setMotion(false, roleOf, dirty);
+      overlay.setMotion(false, dirty);
       vi.advanceTimersByTime(300); // past EDGE_RESTORE_DELAY_MS
-      expect(colors.getW(half)).toBeCloseTo(EDGES.alpha.dim, 5); // restored
-      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5); // primary untouched throughout
+      expect(baseChunk.visible).toBe(true); // restored
+      expect(overlay.getVisibleChunkCount()).toBe(1);
+      expect(colors.array as Float32Array).toEqual(colorsSnapshot); // still untouched throughout
 
       overlay.dispose();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("never calls addUpdateRange/marks color dirty during a motion transition (task20 §1)", async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      const model = {
+        getLocalIds: async () => [1, 2],
+        getItemsGeometry: async (ids: number[]) =>
+          ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
+      };
+      await overlay.build(model as never, parent);
+      overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
+
+      const spy = vi.spyOn(THREE.BufferAttribute.prototype, "addUpdateRange");
+      spy.mockClear(); // drop the recolor() call above — only motion matters here
+
+      const dirty = vi.fn();
+      overlay.setMotion(true, dirty);
+      overlay.setMotion(false, dirty);
+      vi.advanceTimersByTime(1000);
+      expect(spy).not.toHaveBeenCalled();
+
+      spy.mockRestore();
+      overlay.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("maintains a small separate highlight overlay from recolor() diffs, unaffected by motion alone (task20 §2)", async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      const model = {
+        getLocalIds: async () => [1, 2, 3],
+        getItemsGeometry: async (ids: number[]) =>
+          ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
+      };
+      await overlay.build(model as never, parent);
+      expect(overlay.hasHighlightOverlay()).toBe(false); // nothing highlighted yet
+
+      // entity 1 becomes primary — a highlight overlay appears with exactly its vertices.
+      overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
+      expect(overlay.hasHighlightOverlay()).toBe(true);
+      const oneEntityVerts = overlay.getHighlightVertexCount();
+      expect(oneEntityVerts).toBeGreaterThan(0); // exactly entity 1's own extracted edge vertices
+
+      const dirty = vi.fn();
+
+      // Camera motion alone must not reconstruct the highlight overlay: the
+      // geometry attribute array reference stays IDENTICAL across repeated
+      // motion transitions with no intervening recolor().
+      const positionsBefore = (
+        parent.children.find((c) => (c as THREE.LineSegments).geometry.getAttribute("position").count === oneEntityVerts) as THREE.LineSegments
+      ).geometry.getAttribute("position");
+      overlay.setMotion(true, dirty);
+      vi.advanceTimersByTime(0);
+      overlay.setMotion(false, dirty);
+      vi.advanceTimersByTime(300);
+      overlay.setMotion(true, dirty);
+      const positionsAfter = (
+        parent.children.find((c) => (c as THREE.LineSegments).geometry.getAttribute("position").count === oneEntityVerts) as THREE.LineSegments
+      ).geometry.getAttribute("position");
+      expect(positionsAfter).toBe(positionsBefore); // same object — no rebuild
+      expect(overlay.getHighlightVertexCount()).toBe(oneEntityVerts);
+
+      // Role changes DO update the highlight overlay, bounded to only the
+      // highlighted entities' own vertex counts (never the whole edge model).
+      overlay.recolor((id) => (id === 1 || id === 2 ? "primary" : "dim"));
+      expect(overlay.getHighlightVertexCount()).toBe(2 * oneEntityVerts);
+
+      // Clearing every highlighted role removes the overlay entirely.
+      overlay.recolor(() => "dim");
+      expect(overlay.hasHighlightOverlay()).toBe(false);
+      expect(overlay.getHighlightVertexCount()).toBe(0);
+
+      overlay.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dispose() releases both base chunks and the highlight overlay (task20 §2)", async () => {
+    const overlay = new EdgeOverlay();
+    const parent = new THREE.Object3D();
+    const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const model = {
+      getLocalIds: async () => [1, 2],
+      getItemsGeometry: async (ids: number[]) =>
+        ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
+    };
+    await overlay.build(model as never, parent);
+    overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
+    expect(overlay.hasHighlightOverlay()).toBe(true);
+    expect(parent.children.length).toBeGreaterThan(1); // at least one base chunk + the highlight overlay
+
+    overlay.dispose();
+    expect(parent.children).toHaveLength(0);
+    expect(overlay.hasHighlightOverlay()).toBe(false);
+    expect(overlay.getVisibleChunkCount()).toBe(0);
   });
 
   it("disposing while a restore is pending cancels the timer cleanly", async () => {
@@ -584,8 +689,8 @@ describe("edge overlay", () => {
       };
       await overlay.build(model as never, parent);
       const dirty = vi.fn();
-      overlay.setMotion(true, () => "dim", dirty);
-      overlay.setMotion(false, () => "dim", dirty);
+      overlay.setMotion(true, dirty);
+      overlay.setMotion(false, dirty);
       overlay.dispose();
       // Should not throw when the (cancelled) timer would otherwise have fired.
       expect(() => vi.advanceTimersByTime(1000)).not.toThrow();

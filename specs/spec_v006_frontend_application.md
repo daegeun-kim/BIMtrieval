@@ -1217,3 +1217,180 @@ models whose geometric minima differ from IFC elevation zero) is left to the own
 backend+browser environment, consistent with this project's existing pattern for real-hardware/
 real-model checks (§25.9's real-GPU validation). Database, vectors, and the prepared artifact format
 are unchanged.
+
+## 27. Implementation status (Task 20 — interaction-time regression fix)
+
+`tasks/task20_done.md` corrects an interaction-time regression the owner observed on the real RTX
+5080 Laptop GPU after Task 18: model 2 (27,388 items / 5,370,488 edge vertices / 71 spatial edge
+chunks) lagged more during orbit/pan/zoom than before Task 18, even though stationary GPU usage had
+improved. No backend, ingestion, database, or query-pipeline change. Every Task 18 stationary/hidden-
+tab power-saving mechanism is preserved unchanged; only interaction-time behavior is corrected.
+
+### 27.1 Edge motion-hide replaced with chunk visibility, not per-vertex alpha (amends §25.4)
+
+`EdgeOverlay.setMotion()` no longer calls a bulk per-vertex alpha rewrite (`setBaseEdgeAlpha`,
+removed) across all populated chunks on every motion start/stop. Camera motion now toggles each
+populated chunk's `THREE.LineSegments.visible` directly — a bounded O(chunks) (tens to ~160) boolean
+write that actually excludes the geometry from the draw, never a per-vertex color rewrite, never a
+GPU color-buffer upload (`BufferAttribute.addUpdateRange`/`needsUpdate` are never touched by motion —
+unit-tested by spying on `THREE.BufferAttribute.prototype.addUpdateRange` across a full
+hide/restore cycle and asserting zero calls). Screen-size LOD culling (§25.4/§25.8) and motion hiding
+now derive a chunk's final visibility through one shared `applyChunkVisibility()` helper
+(`visible = !motionHidden && !lodCulled`), so the two mechanisms can never fight each other — an
+LOD-culled chunk restored from motion-hidden state stays correctly culled rather than incorrectly
+reappearing. The existing `EDGE_RESTORE_DELAY_MS` cancel/restart timer semantics are unchanged.
+
+### 27.2 Selected/query-primary edges: a small separate highlight overlay (amends §25.4)
+
+Selected and query-primary edges no longer stay visible by being spared from an alpha-zero sweep
+inside the base chunks. `EdgeOverlay` now maintains a second, small, always-separate
+`THREE.LineSegments` object containing ONLY the current query-primary/manual/unfocused-primary
+entities' edges, built exclusively inside `recolor()`'s existing per-entity role-diff loop (no new
+full scan) whenever an entity's role enters or leaves the highlighted set. Its positions/colors are
+sliced directly out of the owning base chunk's already-extracted typed arrays — no additional worker
+round trip, no whole-model clone, one object total (never one per entity). The highlight overlay is
+visible ONLY while base chunks are motion-hidden (at rest the base chunks already draw these same
+vertices in the correct color, so showing both would be redundant overdraw) and is rebuilt only on a
+genuine highlighted-set/color change — unit-tested that repeated `setMotion(true)`/`setMotion(false)`
+transitions with no intervening `recolor()` leave the highlight geometry's attribute array reference
+byte-identical (no rebuild), while a role change updates it bounded to only the affected entities'
+vertex counts. `dispose()` releases both the base chunks and the highlight overlay.
+
+### 27.3 Fragments updates return to rest-only during motion (amends §25.3)
+
+The per-render-tick handler in `ViewerAdapter.init()` no longer calls an unforced
+`fragments.core.update()` every 120ms (balanced) / 200ms (large-model) while the camera moves — the
+diagnosed source of periodic worker/LOD frame stalls during interaction. The only remaining call site
+of `fragments.core.update()` anywhere in the viewer is the pre-existing `forceFragmentsUpdate()`,
+always invoked with `force = true` (model load, highlight change, camera rest, resize/visibility
+restoration) — verified by exhaustive grep, not merely by removing the call in isolation.
+`FRAGMENTS_THROTTLE_MS`/`applyFragmentsThrottle()` (the public `maxUpdateRate` configuration) are left
+in place as a harmless, inert safety net rather than removed, since they were not themselves the
+diagnosed cause.
+
+### 27.4 Pixel ratio frozen for the duration of one continuous interaction (amends §25.2)
+
+`ViewerAdapter` no longer re-applies the adaptive main-viewer pixel ratio on every
+`ViewerPerformanceController.onSustainedSlowChange` flip — that reactive subscription (the actual
+source of Task 18's mid-gesture drawing-buffer churn) is removed. `applyPixelRatio()` itself, and its
+existing high/low moving-range selection driven by `isSustainedSlow()`, are unchanged; it is now only
+invoked on a real motion or profile transition, so the chosen value is applied once when a gesture
+starts and once when it rests, never reallocated again inside the same continuous interaction. In
+practice this converges to the large-model moving low value (0.85) once sustained-slow has already
+been observed by the time a drag begins, matching the task's cited figure, while preserving Task 18's
+frame-time-driven adaptivity for the initial choice.
+
+### 27.5 Corrected frame-time sampling excludes idle gaps (amends §25.2's supporting mechanism)
+
+`ViewerPerformanceController` gained `recordTick(nowMs)`, which owns tick-timestamp bookkeeping
+internally instead of trusting a caller-computed delta: while resting, no sample is recorded and the
+internal timestamp resets; every real motion transition (`setMotion()`) also resets it, so the very
+first tick after a gesture starts is skipped rather than measured against a stale timestamp left over
+from an idle/stationary gap. `ViewerAdapter`'s per-tick handler was simplified to a single
+`this.perf.recordTick(performance.now())` call, replacing a local `lastTickAt` variable that
+previously fed every tick unconditionally into the rolling sample regardless of motion state. A new
+`getMovingFrameStats()` reuses the existing 30-sample ring to expose moving-only average/worst frame
+interval without duplicate storage. Unit-tested: an idle tick recorded before motion starts never
+contributes a sample; the first post-transition tick is skipped; a resting→moving→resting→moving
+sequence never bridges a stale cross-boundary delta.
+
+### 27.6 Focused instrumentation additions (§18's development-only overlay)
+
+`InstrumentationSnapshot` gained `movingFps`/`movingFrameIntervalAvgMs`/`movingFrameIntervalWorstMs`
+(from `ViewerPerformanceController.getMovingFrameStats()`), `baseEdgeChunksVisibleDuringMotion`/
+`highlightEdgeVertexCount`/`highlightEdgeDrawables` (from `EdgeOverlay`'s new getters), and
+`pixelRatioChangesThisInteraction` (a counter reset on every motion transition, incremented from
+`applyPixelRatio()` after a real `setPixelRatio()` call). All are assembled in
+`ViewerAdapter.getInstrumentationSnapshot()`, the only object with references to all three source
+classes, and merged onto `ViewerInstrumentation`'s existing base snapshot. "Edge color bytes uploaded
+because of motion transitions" is intentionally not added as a live counter (would require globally
+wrapping `THREE.BufferAttribute`, disproportionate to the task) — it is instead proven structurally
+by §27.1's unit test. Still dev-only (`import.meta.env.DEV` + `?perf=1`), still negligible cost when
+disabled.
+
+### 27.7 Validation
+
+Frontend unit suite green (**203 tests, 17 files** — up from the 196/17 baseline in §26.4: five new
+`EdgeOverlay` motion/highlight-overlay cases in `viewer-picking.test.tsx`, four new `recordTick`/
+`getMovingFrameStats` cases in `viewer-performance-controller.test.ts`); typecheck, lint, and
+production build all clean. Playwright critical-path: 1 of 2 specs green, same pre-existing unrelated
+`evidence-disclosure` failure recorded in §25.9/§26.4 (confirmed unrelated — this task's diff touches
+only `EdgeOverlay.ts`, `ViewerAdapter.ts`, `ViewerPerformanceController.ts`,
+`ViewerInstrumentation(Overlay)`, and their tests). Structural guarantees verified by code inspection:
+zero unforced `fragments.core.update()` call sites remain outside `forceFragmentsUpdate()`.
+
+**The real-hardware gate is PENDING OWNER CONFIRMATION.** Per task20 §8, headless Chromium software
+rendering cannot validate GPU interaction performance (documented gotcha, `task15_done.md`) — the
+owner must reproduce the same model 2 / viewport / camera path used for Task 18's baseline
+(`task18_done.md`) with `?perf=1` open and confirm: at least 30 FPS during orbit/pan/zoom, no visible
+periodic stutter, no visible freeze at motion start or the 150ms edge restoration, base edges absent
+during motion with blue query-primary/manual edges remaining legible, zero periodic Fragments updates
+during motion, and stationary rendering remaining near-zero after settlement. If the real-hardware
+result is still worse than the pre-Task-18 viewer, task20 §9 requires stopping and reporting the
+evidence rather than layering another optimization automatically — that decision remains the owner's.
+Database, vectors, and the prepared artifact format are unchanged.
+
+## 28. Implementation status (Task 22 — Task 18 main-viewer rollback)
+
+The owner confirmed on the real RTX 5080 Laptop hardware that model 2 still lagged during pan/orbit/
+zoom after Task 20, worse than the pre-Task-18 viewer. This is the exact decision point task20 §9
+reserved for the owner: revert the remaining Task 18 adaptive main-viewer machinery rather than layer
+another optimization. **The owner chose that full rollback.** Diagnosis: on this GPU the raw per-frame
+render cost was never the bottleneck; the per-gesture *transition* work Task 18/20 added — a forced
+`fragments.core.update(true)` on every camera rest, base-edge hide/restore on every wake/rest, and
+pixel-ratio reallocation on every motion transition — produced a visible hitch on every start/stop of
+a gesture. Natural navigation (many small start/stop nudges) hit that machinery constantly. The
+pre-Task-18 viewer had none of it: continuous fixed-quality rendering, uniformly heavier while idle
+but smooth during interaction.
+
+This section supersedes §25.1, §25.2, §25.3, §25.8, and §27.3–§27.5 for the main viewer. No backend,
+RAG, LLM, ingestion, or database change. No category/discipline/storey-based hiding.
+
+### 28.1 Removed (the adaptive main-viewer machinery)
+
+- `src/viewer/RenderScheduler.ts` (manual `RendererMode.MANUAL` + invalidation scheduling +
+  hidden-tab suspension) — the renderer returns to `SimpleRenderer`'s default **automatic continuous**
+  rendering. There is no longer a manual `needsUpdate` flow, render holds, or `requestFrame` call
+  sites. `document.hidden` suspension is dropped with it (the accepted trade-off: higher idle GPU, in
+  exchange for zero interaction-time scheduling overhead).
+- `src/viewer/ViewerPerformanceController.ts` (motion state machine, frame-time sampler, sustained-slow
+  verdict) — deleted.
+- `src/viewer/ViewerInstrumentation.ts` + `ViewerInstrumentationOverlay.tsx` (the dev-only `?perf=1`
+  overlay) — deleted, along with `ViewerAdapter.getInstrumentationSnapshot()` and the `App.tsx` mount.
+- Adaptive pixel ratio (`applyPixelRatio`, `PIXEL_RATIO`) — deleted; the library's own
+  `min(devicePixelRatio, 2)` default stands again.
+- Fragments update throttling (`applyFragmentsThrottle`, the `maxUpdateRate` juggling and forced-update
+  race guard, `FRAGMENTS_THROTTLE_MS`) — deleted. Fragments LOD/visibility now refreshes via one plain
+  `fragments.core.update(true)` (`ViewerAdapter.updateFragments`) on **model load, camera rest, and an
+  actual highlight/material change** — the exact pre-Task-18 cadence. No per-motion or per-tick update.
+- Camera-motion edge hiding — the `perf.onMotionChange -> EdgeOverlay.setMotion` wiring and the
+  rest-triggered `runEdgeLod` call are removed from `ViewerAdapter`. Base edges stay visible during
+  interaction (frustum culling still removes off-screen chunks).
+- The adaptive-profile status-readout button (§25.8) and its CSS — removed as a dead control.
+
+### 28.2 Kept (independently useful, not a transition-hitch source)
+
+- **Spatially chunked, frustum-culled edge overlay** (`EdgeOverlay.ts`, §25.4/§27.1/§27.2) — kept
+  unchanged and strictly better than the pre-Task-18 single whole-model `frustumCulled = false`
+  object, because off-screen chunks are now genuinely culled when zoomed in. Its `setMotion`/
+  `updateLod`/highlight-overlay code remains in the class but is simply no longer called by the
+  adapter; recoloring, disposal, and stale-build safety are unchanged.
+- **Task 19 UX** (§26): pick-through-transparency, `setViewOffset` centering within the unobstructed
+  region, and the base plane at the model's geometric minimum — all retained.
+- **Component preview power management** (`PreviewScene.ts`, §25.7) — retained; it is separate from the
+  main viewer and was never implicated in the pan/orbit lag. The `Profile` type and
+  `detectProfile()` (`profileDetection.ts`) are retained solely to size the preview's fps cap /
+  pixel ratio; `ViewerAdapter.getProfile()/setProfileOverride()` still expose it, but it no longer
+  influences any main-viewer rendering decision.
+
+### 28.3 Validation
+
+Frontend unit suite green (**178 tests, 15 files** — the 25-test drop is exactly the two deleted
+machinery test files, `render-scheduler.test.ts` and `viewer-performance-controller.test.ts`; the
+`EdgeOverlay` motion/highlight/LOD tests and the adapter profile-override tests remain and pass because
+those units are unchanged). `npm run typecheck`, `npm run lint`, and `npm run build` all clean.
+
+The interaction-smoothness gate is again the owner's to confirm on the real RTX 5080 — but the change
+is a removal, not a new mechanism, and restores the pre-Task-18 rendering path the owner remembers as
+smooth (plus the retained chunk culling). Database, vectors, and the prepared artifact format are
+unchanged.
