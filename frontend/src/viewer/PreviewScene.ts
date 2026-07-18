@@ -1,4 +1,5 @@
-// Isolated single-instance preview for the component panel (tasks/task14.md §5).
+// Isolated single-instance preview for the component panel (tasks/task14.md §5;
+// scheduling/visibility/lifetime rewritten by tasks/task18.md §10).
 //
 // Resource strategy: this renders ONLY the selected instance, from geometry
 // buffers extracted out of the model the main viewer already has loaded
@@ -11,9 +12,16 @@
 // the preview reads as a detail of the same drawing rather than a generic
 // thumbnail.
 //
+// Rendering is invalidation-driven (task18 §10): the RAF chain only runs while
+// there is an active reason to (a drag/wheel interaction, an in-lifetime
+// auto-rotation, or a pending render) and stops otherwise — an idle preview
+// does not keep re-rendering an unchanged frame. An IntersectionObserver and
+// `document.visibilitychange` fully pause it when off-screen or backgrounded,
+// re-arming with one correct render on return.
+//
 // Everything here is created lazily on open and fully disposed on close,
 // selection change, model switch, and Reset App: renderer, geometries,
-// materials, listeners, and the render loop.
+// materials, listeners, observers, and the render loop.
 import type * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 
@@ -23,6 +31,11 @@ const ORBIT_SPEED = 0.005; // rad per px dragged
 const ZOOM_STEP = 0.0015;
 const MIN_ZOOM = 1.15; // multiples of the fit radius
 const MAX_ZOOM = 6;
+/** How long after the last wheel tick the preview is still considered "moving"
+ * for pixel-ratio purposes — wheel has no discrete end event, unlike drag. */
+const WHEEL_SETTLE_MS = 150;
+
+export type PreviewProfile = "balanced" | "large-model";
 
 export class PreviewScene {
   private renderer: THREE.WebGLRenderer | null = null;
@@ -30,6 +43,8 @@ export class PreviewScene {
   private camera: THREE.PerspectiveCamera | null = null;
   private group: THREE.Group | null = null;
   private frame = 0;
+  private looping = false;
+  private needsRender = false;
   private disposed = false;
 
   private radius = 1;
@@ -44,6 +59,14 @@ export class PreviewScene {
   private reducedMotion = false;
   private cleanup: Array<() => void> = [];
 
+  private profile: PreviewProfile = "balanced";
+  private rotationDeadline = 0;
+  private lastAutoRotateFrameAt = 0;
+  private wheelSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  private io: IntersectionObserver | null = null;
+  private visible = true;
+  private hiddenDoc = typeof document !== "undefined" ? document.hidden : false;
+
   constructor(private readonly container: HTMLElement) {}
 
   /** True once a mesh is mounted — used by tests and the panel's empty state. */
@@ -51,15 +74,16 @@ export class PreviewScene {
     return this.group !== null && !this.disposed;
   }
 
-  mount(meshes: FRAGS.MeshData[], role: GeometryRole): boolean {
+  mount(meshes: FRAGS.MeshData[], role: GeometryRole, profile: PreviewProfile = "balanced"): boolean {
     if (this.disposed) return false;
     this.teardownScene();
+    this.profile = profile;
 
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(PREVIEW.pixelRatio.stationary);
     renderer.setSize(width, height, false);
     renderer.setClearAlpha(0); // transparent — the panel surface shows through
     this.container.appendChild(renderer.domElement);
@@ -117,7 +141,28 @@ export class PreviewScene {
     this.attachInteraction(renderer.domElement);
     this.reducedMotion = prefersReducedMotion();
     this.lastInteraction = 0;
-    this.loop();
+    this.rotationDeadline = now() + PREVIEW.autoRotateLifetimeMs;
+    this.lastAutoRotateFrameAt = 0;
+
+    // Visibility gating (task18 §10): pause fully off-screen or backgrounded.
+    this.io = new IntersectionObserver(
+      ([entry]) => {
+        const wasVisible = this.visible;
+        this.visible = entry?.isIntersecting ?? true;
+        if (this.visible && !wasVisible) this.requestRender();
+      },
+      { threshold: 0 },
+    );
+    this.io.observe(this.container);
+    const onVisibilityChange = () => {
+      const wasHidden = this.hiddenDoc;
+      this.hiddenDoc = document.hidden;
+      if (!this.hiddenDoc && wasHidden) this.requestRender();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    this.cleanup.push(() => document.removeEventListener("visibilitychange", onVisibilityChange));
+
+    this.requestRender();
     return true;
   }
 
@@ -164,6 +209,7 @@ export class PreviewScene {
       this.dragging = true;
       this.last = { x: e.clientX, y: e.clientY };
       this.touch();
+      this.applyPixelRatio(true);
       dom.setPointerCapture?.(e.pointerId);
     };
     const onMove = (e: PointerEvent) => {
@@ -175,18 +221,27 @@ export class PreviewScene {
       this.theta -= dx * ORBIT_SPEED;
       this.phi = clamp(this.phi - dy * ORBIT_SPEED, 0.05, Math.PI - 0.05);
       this.updateCamera();
+      this.requestRender();
     };
     const onUp = (e: PointerEvent) => {
       this.dragging = false;
       this.touch();
+      this.applyPixelRatio(false);
       dom.releasePointerCapture?.(e.pointerId);
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       this.touch();
+      this.applyPixelRatio(true);
+      if (this.wheelSettleTimer !== null) clearTimeout(this.wheelSettleTimer);
+      this.wheelSettleTimer = setTimeout(() => {
+        this.wheelSettleTimer = null;
+        this.applyPixelRatio(false);
+      }, WHEEL_SETTLE_MS);
       const next = this.distance * (1 + e.deltaY * ZOOM_STEP);
       this.distance = clamp(next, this.radius * MIN_ZOOM, this.radius * MAX_ZOOM);
       this.updateCamera();
+      this.requestRender();
     };
     const onEnter = () => this.touch();
 
@@ -210,23 +265,76 @@ export class PreviewScene {
   /** Mark a fresh interaction; auto-rotation stays paused until idle again. */
   private touch(): void {
     this.lastInteraction = now();
+    this.requestRender();
   }
 
-  /** Auto-rotation runs only when idle, not hovered/dragged, motion allowed. */
+  /** Preview renderer pixel ratio (task18 §10): 1.0 while actively dragging
+   * or wheel-zooming, 1.25 otherwise (including while auto-rotating — a slow
+   * ambient effect, not "motion" in the interaction sense the policy targets). */
+  private applyPixelRatio(moving: boolean): void {
+    if (!this.renderer) return;
+    const target = moving ? PREVIEW.pixelRatio.moving : PREVIEW.pixelRatio.stationary;
+    if (this.renderer.getPixelRatio() === target) return;
+    this.renderer.setPixelRatio(target);
+    this.requestRender();
+  }
+
+  /** Auto-rotation runs only when idle, not hovered/dragged, motion allowed,
+   * visible, and within its finite lifetime (task18 §10). */
   private shouldAutoRotate(): boolean {
     if (this.reducedMotion || this.dragging) return false;
+    if (!this.visible || this.hiddenDoc) return false;
+    if (now() > this.rotationDeadline) return false;
     if (this.lastInteraction === 0) return true;
     return now() - this.lastInteraction > PREVIEW.resumeIdleMs;
   }
 
-  private loop = (): void => {
-    if (this.disposed || !this.renderer || !this.scene || !this.camera) return;
-    if (this.shouldAutoRotate()) {
-      this.theta += PREVIEW.autoRotateSpeed * 0.01;
-      this.updateCamera();
-    }
-    this.renderer.render(this.scene, this.camera);
+  /** Request a render and (re)start the RAF chain if it isn't already running. */
+  private requestRender(): void {
+    this.needsRender = true;
+    if (this.looping || this.disposed || !this.renderer) return;
+    if (!this.visible || this.hiddenDoc) return; // re-armed by IO/visibilitychange callbacks
+    this.looping = true;
     this.frame = requestAnimationFrame(this.loop);
+  }
+
+  private loop = (): void => {
+    if (this.disposed || !this.renderer || !this.scene || !this.camera) {
+      this.looping = false;
+      return;
+    }
+    if (!this.visible || this.hiddenDoc) {
+      this.looping = false; // stop the chain entirely; re-armed on return
+      return;
+    }
+
+    const rotating = this.shouldAutoRotate();
+    if (rotating) {
+      const cap =
+        this.profile === "large-model" ? PREVIEW.autoRotateFpsCap.largeModel : PREVIEW.autoRotateFpsCap.balanced;
+      const minIntervalMs = 1000 / cap;
+      const nowTs = now();
+      if (nowTs - this.lastAutoRotateFrameAt >= minIntervalMs) {
+        this.theta += PREVIEW.autoRotateSpeed * 0.01;
+        this.updateCamera();
+        this.needsRender = true;
+        this.lastAutoRotateFrameAt = nowTs;
+      }
+    }
+
+    if (this.needsRender) {
+      this.renderer.render(this.scene, this.camera);
+      this.needsRender = false;
+    }
+
+    // Keep the chain alive only while there's an active reason to; otherwise
+    // stop (task18 §10 "no-motion renders once then stops") — requestRender()
+    // restarts it on the next real interaction/visibility change.
+    if (this.dragging || rotating || this.needsRender) {
+      this.frame = requestAnimationFrame(this.loop);
+    } else {
+      this.looping = false;
+    }
   };
 
   resize(): void {
@@ -237,12 +345,20 @@ export class PreviewScene {
     this.camera.aspect = width / height;
     this.camera.setFocalLength(VIEWER_CAMERA.focalLengthMm);
     this.camera.updateProjectionMatrix();
+    this.requestRender();
   }
 
-  /** Dispose geometries/materials/renderer/listeners and stop the render loop. */
+  /** Dispose geometries/materials/renderer/listeners/observers and stop the render loop. */
   private teardownScene(): void {
     if (this.frame) cancelAnimationFrame(this.frame);
     this.frame = 0;
+    this.looping = false;
+    if (this.wheelSettleTimer !== null) {
+      clearTimeout(this.wheelSettleTimer);
+      this.wheelSettleTimer = null;
+    }
+    this.io?.disconnect();
+    this.io = null;
     this.cleanup.forEach((fn) => {
       try {
         fn();

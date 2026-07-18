@@ -15,6 +15,25 @@
   outline: none;
 }
 
+/* Dev-only performance readout (tasks/task18.md §1) — never rendered in a
+   production build; see ViewerInstrumentation.instrumentationRequested(). */
+.viewer-instrumentation-overlay {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  margin: 0;
+  padding: 8px 10px;
+  background: rgba(20, 24, 28, 0.78);
+  color: #d7ffb0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: pre;
+}
+
 /* ===== Bottom-left CAD status readout ===== */
 .readout {
   position: absolute;
@@ -68,6 +87,25 @@
 }
 .readout-fit:hover {
   border-color: var(--line-2);
+}
+/* Adaptive-profile indicator/override (tasks/task18.md §11) — discoverable
+   but secondary: small mono text in the existing status readout, matching
+   its established CAD-label language rather than a new prominent control. */
+.readout-perf {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.readout-perf:hover {
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+.readout-perf[data-override="true"] {
+  color: var(--ink-2);
 }
 .sdot {
   width: 8px;

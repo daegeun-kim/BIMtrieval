@@ -897,12 +897,14 @@ Wall coloring works (880 walls). A future model carrying explicit roof data colo
 
 All inside `ViewerAdapter`. Left-drag pans, middle-drag orbits, wheel zooms (camera-controls
 defaults left to rotate, so this is set explicitly); a plain left click within a 4 px threshold
-selects, beyond it the gesture was a pan. Orbit pivot: cursor raycast → elevation-zero plane →
+selects, beyond it the gesture was a pan. Orbit pivot: cursor raycast → visual base plane →
 current target, never altering selection. Perspective uses three.js's own focal-length/film-gauge
 support (`filmGauge = 36`, `setFocalLength(50)`) ≈ 26.99° vertical, re-applied on resize. Zoom-out
-bound = `max(3 x bbox diagonal, 25 m)`, finite and recomputed per load. The base plane sits at IFC
-elevation **exactly 0**, derived from `getCoordinationMatrix()` — not the bbox centre/minimum — with
-`depthWrite = false` so below-zero geometry is never clipped or occluded.
+bound = `max(3 x bbox diagonal, 25 m)`, finite and recomputed per load. The base plane sits at the
+loaded model's own geometric minimum (`model.box.min.y`, scene-space, after the Fragments
+coordination transform) rather than IFC/world elevation 0 — amended by Task 19 (§26.3) because that
+elevation can sit above or below a model's actual geometry — with `depthWrite = false` so
+below-plane geometry is never clipped or occluded.
 
 ### 23.3 Highlighting, chat, and the component panel
 
@@ -964,15 +966,18 @@ cleanly. Gotcha for future work: yield with MessageChannel, not `setTimeout(0)` 
 timer clamping turned the ~1 s build into ~30 s; and headless-Chromium GL numbers are software
 rendering, not the real GPU.
 
-### 24.2 Picking under active query highlighting (amends §11.2/§11.3)
+### 24.2 Picking under active query highlighting (amends §11.2/§11.3; ray-through amended by Task 19 §26.1)
 
-While blue primary results are present, only they can be picked: clicks on dimmed non-results or
-ochre context entities do nothing (checked against the already-resolved local-id set BEFORE any
-selection state changes — no flicker, no replacement, no backend/LLM call). A plain click focuses a
-blue result and opens/updates the component panel; Ctrl/Shift additive selection stays primary-only
-and capped at five; empty-space clicks clear the focus. Focused results stay opaque `#1f6feb`;
-unfocused primaries drop to the same blue at 0.45 opacity (`primaryUnfocused`) — never teal;
-removing the last focus restores all primaries to opaque blue. Without query roles, §11.2 behavior
+While blue primary results are present, only they can be picked: a ray meeting only dimmed
+non-results or ochre context geometry is treated exactly like an empty-space click — it clears the
+current focus rather than silently no-oping — checked against the already-resolved local-id set
+BEFORE any selection state changes (no flicker, no replacement, no backend/LLM call). As of Task 19
+(§26.1), transparent/dimmed geometry in front of a blue result along the same ray no longer blocks
+it: picking considers every ordered ray intersection and selects the nearest blue result. A plain
+click focuses a blue result and opens/updates the component panel; Ctrl/Shift additive selection
+stays primary-only and capped at five; empty-space clicks clear the focus. Focused results stay
+opaque `#1f6feb`; unfocused primaries drop to the same blue at 0.45 opacity (`primaryUnfocused`) —
+never teal; removing the last focus restores all primaries to opaque blue. Without query roles, §11.2 behavior
 is unchanged (anything pickable, teal manual selection).
 
 ### 24.3 Component preview height
@@ -986,3 +991,229 @@ unchanged.
 Backend 366 tests / frontend 138 tests (117 + 21 new picking/edge/preview) / build / 2 e2e green;
 headed-browser screenshots verified base edges, 880-wall highlighting with edges, focused/unfocused
 appearance, and the 320 px preview. Database, vectors, and the prepared artifact unchanged.
+
+## 25. Implementation status (Task 18 — delivered)
+
+`tasks/task18_done.md` made the viewer's rendering adaptive and invalidation-driven instead of
+continuous, motion/profile-aware, and spatially culled, in response to measured lag and idle GPU
+power draw on the larger of the two test models ("model 2": 27,388 items, 5,370,488 edge vertices —
+substantially larger than the Schependomlaan reference §24.1 was measured against). No backend, RAG,
+LLM, ingestion, or database change; no category/discipline/storey-based hiding was introduced. All
+numbers below are from headless Chromium (software rendering — not the RTX 5080 Laptop the owner
+validated on; see the completion report for the machine-specific subjective pass) and are load-bearing
+only as *relative* before/after evidence, per §24.1's own documented gotcha about headless GL numbers.
+
+### 25.1 Manual, invalidation-driven main rendering
+
+`SimpleRenderer` runs in its supported MANUAL mode (`RendererMode.MANUAL`) instead of the library's
+default AUTO, driven by one centralized scheduler (`src/viewer/RenderScheduler.ts`) that flips
+`needsUpdate` on invalidation (camera motion, Fragments results, load/unload, highlight, edge
+changes, fit, pixel-ratio change, base-plane changes, resize, visibility resume) and coalesces
+same-tick requests into one frame. `document.hidden` suspends the entire `Components` tick loop
+(`Components.enabled = false`, not just the draw call — verified in the installed library source);
+resuming calls the library's own documented restart path (`Components.init()`) and renders one
+bounded frame. Measured on model 2: continuous idle rendering eliminated (**0 draw calls over a 3 s
+idle window**, versus continuous rendering every tick before); a hidden tab drops from ~91
+`requestAnimationFrame` calls/1.5 s to **0**, resuming at ~61/1 s with no accumulated burst.
+
+### 25.2 Adaptive main-viewer pixel ratio (amends the implicit `min(devicePixelRatio, 2)` default)
+
+Replaces the library's fixed ceiling of 2 with `PIXEL_RATIO` (`viewerTheme.ts`): moving
+1.0–1.25 (balanced) / 0.85–1.0 (large-model), stationary 1.5 (balanced) / 1.25 (large-model), always
+additionally capped at the display's own `devicePixelRatio`. The moving value steps to its low end
+only under a sustained-slow verdict from a hysteresis/cooldown-gated frame-time sampler
+(`ViewerPerformanceController`, 30-sample window, 1.5 s minimum between verdict flips) — never on one
+slow frame. Measured on model 2: stationary settles at 1.25 (large-model profile); moving
+sustained-slow correctly stepped to the 0.85 low end under real measured frame cost in this
+environment; CSS canvas size is unaffected by internal drawing-buffer changes (confirmed 1400×900
+unchanged across all pixel-ratio transitions); picking correctness is unaffected (verified after an
+orbit).
+
+### 25.3 Fragments LOD/visibility update throttle
+
+Drives the installed `FragmentsModels.settings.maxUpdateRate` (a public, pre-existing throttle —
+verified in the installed package source, already gating every `core.update()` call before its
+`force` branch) from motion/profile state instead of a duplicate hand-rolled throttle: 120 ms
+(balanced) / 200 ms (large-model) while moving, 100 ms (the library default) at rest. Highlight/load
+calls remain forced, wrapped in a guard that zeroes the rate for the duration of the call so a
+forced update can never be silently skipped by a throttle window set moments earlier during motion.
+Measured on model 2: throttled calls during a rapid drag settle to a couple per burst (not one per
+tick); exactly one forced call fires at rest.
+
+### 25.4 Spatially chunked edge overlay (supersedes §24.1's single-object design)
+
+§24.1's "ONE merged `THREE.LineSegments`... `frustumCulled` forced false" design is superseded.
+`EdgeOverlay.ts` now buckets each entity's edge-vertex centroid into a uniform 3D grid cell (sized
+from the model bounding box and item count) during the same yielded batch-extraction loop, and
+mounts one `LineSegments` per populated cell with a real computed bounding sphere/box and
+`frustumCulled = true`. Measured on model 2: **71 populated chunks** (within the 50–150 target),
+each independently frustum-culled; zooming into one facade dropped draw calls from 952 to ~410–422
+and triangles from ~1.03M to ~256–258k (both largely from Fragments' own LOD, compounded by edge
+culling) with average FPS rising from ~4 to ~55–56 in the same headless environment. A diagnostic
+(edges fully disabled) measured on the SAME model before this rewrite showed disabling the
+whole-model overlay alone roughly doubled stationary average FPS and cut the worst single
+main-thread long task from ~2.8 s to ~0.2 s — the strongest single piece of evidence motivating this
+rewrite. The `localId -> {chunkIndex, start, count}` index is retained for deterministic recoloring;
+`recolor()` uploads only the touched span of each touched chunk (not a global envelope). Disposal
+iterates every chunk's geometry/material; a build finishing after `dispose()` is ignored via the
+existing disposed-flag guard. Model-switch round-trip (model 2 → Schependomlaan → model 2) reproduced
+identical chunk/vertex/item counts with no console errors.
+
+Screen-size LOD culling (`EdgeOverlay.updateLod`, run at camera rest and on resize, not per frame
+during motion) hides a chunk once its bounding-sphere projected size drops below 2 px (4 px to
+restore, hysteresis), with a relaxed 0.75 px / 1.5 px pair for chunks containing a selected/query-
+primary entity (`highlightCount`, maintained incrementally by `recolor()`), so results stay legible
+farther from the camera than base context, per the "no public per-object LOD threshold API" finding
+below.
+
+Base-model edges hide on camera `wake` (zeroing only the ALPHA channel of non-highlighted vertex
+ranges — selected/query-primary edges are never touched) and restore 150 ms after `rest`, cancelled
+and restarted if motion resumes before the delay elapses.
+
+No public Fragments API exposes numeric per-object LOD screen-size thresholds (`screenSize` is a
+private method in the installed package's type declarations) — the surrounding update-frequency,
+pixel-ratio, and custom-edge-chunk LOD policies above stand in for it, as the task's own documented
+fallback allows; no private/minified internals were patched.
+
+### 25.5 Edge angle threshold (amends §24.1's fixed 25°)
+
+`EDGES.thresholdAngleDeg` is now `{ balanced: 25, largeModel: 40 }`, chosen by the model's
+provisional profile before the edge build starts (so a large model builds at the coarser angle on
+its first pass, never a rebuild). Evaluated 25°/38°/40° on model 2: **no measurable vertex-count
+difference across the range for this specific model** (5,370,488 vertices at every tested value) —
+most of its edges are either true ~90° corners (included at any threshold in this range) or
+coplanar-triangulation diagonals at ~0° (excluded at any threshold in this range), so the angle
+choice is not a performance lever for this artifact. `balanced` is kept at the unchanged, previously
+validated 25°; `largeModel` is set to 40° (the top of the accepted range) as a zero-measured-cost
+hedge for a future model with more curved/faceted geometry, where the threshold would matter more.
+
+### 25.6 Query-highlight transparency (amends §23.1's dim/context values)
+
+Benchmarked three candidates on model 2 with real query-primary roles applied (via direct
+client-side role application — no OpenAI/backend call): (1) the original 0.16 opacity plus
+motion-hidden edges; (2) fully opaque (1.0) light-neutral with edges disabled; (3) moderate 0.35
+opacity with edges disabled. **Candidate 2 was rejected after live testing**: with non-result
+geometry fully opaque, every sampled interior/hidden query-primary result was occluded from every
+external camera angle — a real, screenshotted failure of "primary and manual selections must remain
+clearly blue and legible," material for a query tool whose results are frequently interior elements
+(partition walls, MEP, doors), not just exterior-visible surfaces. Candidate 3 was selected:
+`VIEWER_OPACITY.dim = 0.35` (was 0.16), `EDGES.alpha.dim = 0` (was 0.4, i.e. non-result edges are now
+fully disabled rather than merely dimmed). This keeps every primary visible through the same
+transparency guarantee as the original while measurably reducing visual line density.
+
+### 25.7 Component preview scheduling (amends §24.3's implicit indefinite auto-rotation)
+
+`PreviewScene` now: gates rendering on an `IntersectionObserver` (pauses fully off-screen/obscured)
+and `document.visibilitychange` (pauses backgrounded), stopping the RAF chain entirely rather than
+skipping work inside it; caps auto-rotation at 30 fps (balanced) / 20 fps (large-model, matching the
+main viewer's profile); bounds auto-rotation to a **12 s lifetime** (previously indefinite
+pause/resume); and uses a dynamic pixel ratio (1.0 while actively dragging/wheel-zooming, 1.25
+otherwise, including while auto-rotating). Measured on model 2's component panel: ~72 draw calls
+during a 2 s auto-rotating window, **0 draw calls** in a 2 s window sampled after the 12 s lifetime
+expired while idle.
+
+### 25.8 Adaptive profiles and instrumentation
+
+`detectProfile()` (`src/viewer/profileDetection.ts`) classifies "balanced" vs "large-model" from
+artifact byte size, item count, and (once known) edge vertex count only — never model name, ID,
+category, discipline, or storey — with hysteresis against the previous verdict, called twice per
+load (provisional right after the artifact downloads, final once the edge build resolves). Model 2
+(27,388 items, 5,370,488 edge vertices) is automatically classified `large-model`; a small,
+discoverable-but-secondary control in the existing bottom-left status readout
+(`perf: <profile> (auto|manual)`, cycling Automatic → Balanced → Large model on click) lets the user
+override it, taking effect immediately via the same shared `ViewerPerformanceController` every
+adaptive system already subscribes to — no reload required.
+
+A dev-only, opt-in (`?perf=1`) instrumentation overlay (`ViewerInstrumentation.ts` +
+`ViewerInstrumentationOverlay.tsx`) reports FPS, frame time, draw calls/triangles/lines, canvas
+size and effective pixel ratio, long-task count, forced-vs-throttled Fragments update counts, edge
+build duration/vertex/chunk counts, model item count, and current motion/profile state. It is never
+constructed outside `import.meta.env.DEV` plus the explicit runtime opt-in, sends no telemetry
+externally, and adds no backend logging.
+
+### 25.9 Validation
+
+Frontend unit suite green (173 tests, 16 files, including new coverage for the scheduler,
+performance controller, profile detection, spatially chunked edge overlay, motion-hide/restore, and
+the profile-override adapter API); typecheck, lint, and production build all clean. One pre-existing
+Playwright e2e failure (`critical-path.spec.ts`'s evidence-disclosure assertion) was traced to
+already-uncommitted, unrelated work that removed `EvidenceDisclosure`/`ResultSummaryView` rendering
+from `Message.tsx` before this task began — not a regression introduced here, and out of this task's
+scope to fix. Baseline-vs-final measured comparison, selected numeric values, and the owner's
+real-hardware subjective validation are recorded in `tasks/task18_done.md`. Database, vectors, and
+the prepared artifact format are unchanged.
+
+## 26. Implementation status (Task 19 — delivered)
+
+`tasks/task19_done.md` corrected three viewer presentation defects — picking, camera centering, and
+the base plane. No backend, ingestion, database, IFC, or query-pipeline change; no source geometry,
+coordinate, or prepared-artifact mutation.
+
+### 26.1 Pick through transparent non-results to blue results (amends §24.2)
+
+`ViewerAdapter.resolvePickLocalId` branches only while query-primary roles are active and at least
+one blue result exists: it calls the Fragments-supported `model.raycastAll(...)` (one local worker
+round trip, no backend/LLM call), filters the ordered intersections to the already-resolved
+`queryPrimarySet`, and returns the nearest eligible hit by `distance`. Transparent/dimmed geometry is
+never hidden or given a per-entity picking mesh — it is simply excluded as an occluder for this
+filtered ray query, exactly as before for face rendering. A ray with no blue hit is treated
+identically to a total miss (the pre-existing empty-space-click path), which — as a deliberate
+behavior change from Task 15 — now clears a non-additive selection instead of silently no-oping,
+since dimmed geometry is meant to be transparent to picking rather than a rejecting wall. Without
+active roles, picking is unchanged (single nearest-hit `model.raycast`). Both focused and unfocused
+blue primaries stay eligible; the additive-selection cap and existing middle-button orbit-pivot
+raycast are untouched.
+
+### 26.2 Center within the unobstructed left region (amends §11.1, §23.2)
+
+`ViewerAdapter.setViewportObstruction(px)` — called from `App.tsx` via `effectiveViewportObstructionPx`
+(`state/store.ts`), which reuses the same live chat width and component-open state already driving
+the `--chat-w` CSS variable, never a hard-coded copy — stores the current right-side panel width and
+calls `applyViewOffset()`, the single method behind all camera centering. It uses three.js's own
+`camera.setViewOffset(leftWidth, canvasHeight, 0, 0, canvasWidth, canvasHeight)` (`leftWidth =
+canvasWidth - obstructionPx`, floored at `VIEWER_CAMERA.minEffectiveWidthFraction` of the canvas):
+passing the narrower `leftWidth` as the offset's `fullWidth` sets `camera.aspect =
+leftWidth / canvasHeight` for `CameraControls.fitToBox`'s synchronous distance calculation (so a fit
+sizes content to the visible region, not the full canvas), while the rendered `width`/`height`
+(`canvasWidth`/`canvasHeight`) keep the final image undistorted and content fit-centered on the look
+axis lands exactly at pixel `leftWidth / 2` — the visible-region centroid — with no extra shift term.
+Because this only edits the projection matrix, not camera position, Fragments' own
+camera+mouse+dom picking and the existing orbit-pivot raycast stay pixel-correct with no special
+casing. `fitBox` (the one method behind `fitAll`, query-result fit, citation fit, and component-panel
+group fit alike) calls `applyViewOffset()` before `fitToBox`, so every fit/focus operation shares
+identical viewport logic. `resize()` re-applies it from the fresh canvas size. Calling
+`setViewportObstruction` alone (a panel opening, closing, collapsing, or resizing) re-centers the
+already-framed view via the same offset math without moving the camera or calling `fitToBox` — no
+unexpected reset. The 50 mm lens, existing fit expansion/minimum-fit-size, and the finite zoom-out
+bound are all untouched (fov and the bbox-diagonal zoom bound are independent of this projection
+offset).
+
+### 26.3 Base plane at the model's geometric minimum (amends §23.2)
+
+`resolveGroundY` now sets `groundY = model.box.min.y` (scene-space, after the Fragments coordination
+transform — the same box already used for camera fitting and the zoom bound) instead of deriving it
+from `getCoordinationMatrix()`'s IFC/world elevation 0. A missing, empty, or non-finite box falls
+back to scene `0`. The value resets to `0` on `unloadModel()`/model switch and is recomputed on every
+successful load; `getGroundY()` (unchanged test seam) now returns this geometric-minimum value, which
+also backs the orbit-pivot fallback plane (`setPivotFromCursor`). The grid's material, opacity,
+extent, and non-occluding `depthWrite = false` behavior are unchanged; below-plane geometry is never
+clipped, hidden, or moved. This is a presentation-only reference value — never reported as an
+`IfcBuildingStorey` elevation or the IFC coordinate origin, and no IFC file, database row, or prepared
+artifact is read, translated, or rewritten to compute it.
+
+### 26.4 Validation
+
+Frontend unit suite green (**196 tests, 17 files** — up from the 173/16 baseline in §25.9: new
+picking-through-transparency and nearest-blue-hit cases in `viewer-picking.test.tsx`, new
+geometric-minimum/negative/positive/fallback/reset cases in `viewer-controls.test.ts`, and a new
+14-case `viewer-viewport-offset.test.ts`); typecheck, lint, and production build all clean.
+Playwright critical-path: 1 of 2 specs green; the other fails on
+the same pre-existing, unrelated `evidence-disclosure` assertion recorded in §25.9 (traced to
+already-uncommitted work that removed `EvidenceDisclosure` rendering before this task began) — not a
+regression from this task, and confirmed unrelated since none of the three fixes touch chat/evidence
+rendering. Manual validation against a real loaded model (§5 of `tasks/task19_done.md`: click-through
+selection, panel-driven recentering across chat/component-panel states, and base-plane placement on
+models whose geometric minima differ from IFC elevation zero) is left to the owner's local
+backend+browser environment, consistent with this project's existing pattern for real-hardware/
+real-model checks (§25.9's real-GPU validation). Database, vectors, and the prepared artifact format
+are unchanged.

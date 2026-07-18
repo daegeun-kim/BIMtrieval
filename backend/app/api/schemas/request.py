@@ -50,3 +50,14 @@ class SessionQueryRequest(BaseModel):
     reset: bool = False
     # Confirm loading a catalog model candidate the user clicked (spec_v005 §13).
     confirm_model_id: int | None = None
+
+
+class QueryRenderTimingRequest(BaseModel):
+    """Bounded client telemetry emitted after answer and 3D rendering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(min_length=1, max_length=128)
+    response_received_ms: float = Field(ge=0, le=3_600_000)
+    viewer_render_ms: float = Field(ge=0, le=3_600_000)
+    total_to_viewer_ms: float = Field(ge=0, le=3_600_000)

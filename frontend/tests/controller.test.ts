@@ -31,6 +31,8 @@ import { controller } from "../src/state/controller";
 import { useStore } from "../src/state/store";
 import type { QueryResponseEnvelope } from "../src/api/types";
 
+const renderTimingSpy = vi.spyOn(api, "reportQueryRenderTiming").mockResolvedValue();
+
 function envelope(partial: Partial<QueryResponseEnvelope> = {}): QueryResponseEnvelope {
   return {
     request_id: "r1",
@@ -91,6 +93,9 @@ describe("submitQuestion", () => {
     expect(req.active_source_model_id).toBe(1);
     expect(req.selected_global_ids).toEqual(["G1", "G2"]);
     expect(viewerStub.applyQueryRoles).toHaveBeenCalledWith(["G-P"], ["G-C"]);
+    expect(renderTimingSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ request_id: "r1" }),
+    );
     const msgs = useStore.getState().messages;
     expect(msgs.at(-1)?.evidence?.route).toBe("sql");
     expect(useStore.getState().pending).toBe(false);

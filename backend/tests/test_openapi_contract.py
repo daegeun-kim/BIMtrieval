@@ -14,6 +14,7 @@ def test_new_paths_are_documented(client):
     assert "/api/models/{source_model_id}/viewer-asset" in paths
     assert "/api/models/{source_model_id}/entities/resolve" in paths
     assert "/api/query" in paths
+    assert "/api/query/render-timing" in paths
 
 
 def test_request_and_response_schemas_present(client):

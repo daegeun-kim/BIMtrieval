@@ -135,6 +135,30 @@ def test_rejected_group_not_in_viewer():
     assert [x.group_id for x in dec.viewer_primary] == ["stairs"]  # windows excluded
 
 
+def test_supporting_group_cannot_become_viewer_primary():
+    stairs = _class_group("stairs", "IfcStair", 9)
+    walls = _class_group("walls", "IfcWall", 648)
+    dec = resolve_group_answer(
+        [stairs, walls],
+        _out(
+            primary_group_ids=["stairs"],
+            supporting_group_ids=["walls"],
+            viewer_primary_group_ids=["stairs", "walls"],
+        ),
+    )
+    assert [x.group_id for x in dec.viewer_primary] == ["stairs"]
+
+
+def test_unclassified_group_is_rejected_by_default():
+    stairs = _class_group("stairs", "IfcStair", 9)
+    walls = _class_group("walls", "IfcWall", 648)
+    dec = resolve_group_answer(
+        [stairs, walls],
+        _out(primary_group_ids=["stairs"], viewer_primary_group_ids=["stairs"]),
+    )
+    assert dec.rejected_ids == ["walls"]
+
+
 def test_rag_only_acceptance_is_semantic_basis():
     rag = EvidenceGroup(
         group_id="rag",

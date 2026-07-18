@@ -6,6 +6,7 @@ import {
   BASE_MATERIALS,
   CONTEXT_MATERIAL,
   DIM_MATERIAL,
+  EDGES,
   MANUAL_MATERIAL,
   PRIMARY_MATERIAL,
   VIEWER_CAMERA,
@@ -77,37 +78,36 @@ describe("semantic color roles", () => {
     expect(delta).toBeGreaterThan(0.01);
   });
 
-  it("keeps base geometry achromatic and every query role chromatic", () => {
+  it("uses only blue for matches/selections and gray for context/base geometry", () => {
     // This is the accessibility contract: role membership reads as presence of
     // color, not as one hue vs another.
     for (const gray of [VIEWER_COLORS.roof, VIEWER_COLORS.wall, VIEWER_COLORS.other]) {
       expect(chroma(gray)).toBeLessThan(0.15);
     }
-    for (const role of [VIEWER_COLORS.primary, VIEWER_COLORS.context, VIEWER_COLORS.manual]) {
+    for (const role of [VIEWER_COLORS.primary, VIEWER_COLORS.manual]) {
       expect(chroma(role)).toBeGreaterThan(0.45);
     }
+    expect(chroma(VIEWER_COLORS.context)).toBeLessThan(0.15);
+    expect(VIEWER_COLORS.manual).toBe(VIEWER_COLORS.primary);
+    expect(VIEWER_COLORS.context).toBe(VIEWER_COLORS.dim);
   });
 
-  it("keeps the three highlight roles distinct from each other", () => {
-    const hues = [VIEWER_COLORS.primary, VIEWER_COLORS.context, VIEWER_COLORS.manual].map((c) => {
-      const hsl = { h: 0, s: 0, l: 0 };
-      new THREE.Color(c).getHSL(hsl);
-      return hsl.h;
-    });
-    expect(new Set(hues).size).toBe(3);
-  });
-
-  it("dims non-results to a highly transparent gray", () => {
-    expect(VIEWER_OPACITY.dim).toBeLessThan(0.25);
+  it("dims non-results to a moderately translucent gray (task18 §9 candidate 3)", () => {
+    // Benchmarked on model 2: candidate 3 (0.3-0.4 translucent, non-result
+    // edges disabled) — not the original 0.16, and not fully opaque
+    // candidate 2, which occluded interior/hidden query-primary results.
+    expect(VIEWER_OPACITY.dim).toBeGreaterThanOrEqual(0.3);
+    expect(VIEWER_OPACITY.dim).toBeLessThanOrEqual(0.4);
     expect(DIM_MATERIAL.transparent).toBe(true);
     expect(chroma(VIEWER_COLORS.dim)).toBeLessThan(0.15);
+    expect(EDGES.alpha.dim).toBe(0); // non-result edges disabled, task18 §9
   });
 
   it("keeps the base plane quiet enough not to obscure underground geometry", () => {
     expect(VIEWER_OPACITY.plane).toBeLessThanOrEqual(0.35);
   });
 
-  it("builds opaque primary/manual and a muted translucent context material", () => {
+  it("builds opaque blue primary/manual and gray translucent context material", () => {
     expect(PRIMARY_MATERIAL.transparent).toBe(false);
     expect(MANUAL_MATERIAL.transparent).toBe(false);
     expect(CONTEXT_MATERIAL.opacity).toBeLessThan(1);

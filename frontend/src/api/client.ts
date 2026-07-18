@@ -19,6 +19,13 @@ export interface ViewerAssetResult {
   etag: string | null;
 }
 
+export interface QueryRenderTiming {
+  request_id: string;
+  response_received_ms: number;
+  viewer_render_ms: number;
+  total_to_viewer_ms: number;
+}
+
 function normalizeFetchError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
   if (err instanceof DOMException && err.name === "AbortError") {
@@ -66,6 +73,19 @@ export class ApiClient {
 
   async query(request: SessionQueryRequest, signal?: AbortSignal): Promise<QueryResponseEnvelope> {
     return this.postJson<QueryResponseEnvelope>(`${this.baseUrl}/api/query`, request, signal);
+  }
+
+  /** Best-effort local telemetry after the answer and 3D highlight finish. */
+  async reportQueryRenderTiming(timing: QueryRenderTiming): Promise<void> {
+    try {
+      await fetch(`${this.baseUrl}/api/query/render-timing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(timing),
+      });
+    } catch {
+      // Debug telemetry must never affect the answer or viewer.
+    }
   }
 
   /**

@@ -76,6 +76,29 @@ export function effectivePanelWidth(stored: number, componentOpen: boolean): num
   return Math.min(stored, PANEL_PAIRED_MAX_WIDTH, PANEL_PAIRED_WIDTH);
 }
 
+/**
+ * Outer margin between a floating right-side panel and the viewport edge, and
+ * the gap between the component panel and the chat panel it docks against
+ * (task19 §2) — mirrors `.panel`'s `right: 20px` and `.component-panel`'s
+ * `var(--sp-3)` gap in App.css, the single CSS source for the same numbers.
+ */
+export const VIEWER_EDGE_MARGIN_PX = 20;
+export const PANEL_GAP_PX = 12;
+
+/**
+ * Total width, in px, occupied by visible right-side panels — measured from
+ * the viewport's right edge to the left edge of the outermost visible panel
+ * (task19 §2). This is the single source of truth the viewer's effective
+ * visible-region centering reads; it is derived entirely from the same live
+ * chat width / component-open state App.tsx already uses for `--chat-w`,
+ * never a separate hard-coded copy.
+ */
+export function effectiveViewportObstructionPx(chatWidthPx: number, componentOpen: boolean): number {
+  const base = VIEWER_EDGE_MARGIN_PX + Math.max(0, chatWidthPx);
+  if (!componentOpen) return base;
+  return base + PANEL_GAP_PX + COMPONENT_PANEL_WIDTH;
+}
+
 function newSessionId(): string {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto

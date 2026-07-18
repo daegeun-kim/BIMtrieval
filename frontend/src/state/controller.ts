@@ -25,6 +25,10 @@ import {
 
 const RESOLVE_DEBOUNCE_MS = 150;
 
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 export class AppController {
   readonly viewer = new ViewerAdapter();
 
@@ -299,6 +303,7 @@ export class AppController {
   async submitQuestion(rawText: string): Promise<void> {
     const text = rawText.trim();
     if (!text || this.s.pending) return;
+    const queryStartedAt = nowMs();
 
     this.s.addMessage(this.userMessage(text));
     this.s.setPending(true);
@@ -318,9 +323,17 @@ export class AppController {
 
     try {
       const env = await api.query(request, this.queryAbort.signal);
+      const responseReceivedAt = nowMs();
       if (token !== this.queryToken) return; // superseded/stale
       this.s.setBackendReachable(true);
       await this.handleEnvelope(env);
+      const viewerRenderedAt = nowMs();
+      await api.reportQueryRenderTiming({
+        request_id: env.request_id,
+        response_received_ms: responseReceivedAt - queryStartedAt,
+        viewer_render_ms: viewerRenderedAt - responseReceivedAt,
+        total_to_viewer_ms: viewerRenderedAt - queryStartedAt,
+      });
     } catch (err) {
       if (this.isCanceled(err) || token !== this.queryToken) return;
       const apiErr = err instanceof ApiError ? err : null;

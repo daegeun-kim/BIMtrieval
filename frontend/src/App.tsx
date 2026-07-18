@@ -7,8 +7,9 @@ import StatusReadout from "./components/StatusReadout";
 import ViewerControls from "./components/ViewerControls";
 import ViewerOverlay from "./components/ViewerOverlay";
 import { controller } from "./state/controller";
-import { effectivePanelWidth, useStore } from "./state/store";
+import { effectivePanelWidth, effectiveViewportObstructionPx, useStore } from "./state/store";
 import ViewerCanvas from "./viewer/ViewerCanvas";
+import ViewerInstrumentationOverlay from "./viewer/ViewerInstrumentationOverlay";
 
 // Width of the collapsed chat restore tab, so the component panel still docks
 // beside it rather than under it.
@@ -35,6 +36,14 @@ export default function App() {
     ? COLLAPSED_CHAT_WIDTH
     : effectivePanelWidth(storedWidth, componentOpen);
 
+  // The viewer's camera-framing must center within the region actually left
+  // unobstructed by the floating panels (task19 §2) — reuses this same live
+  // chat width/component-open state as the single source of truth, never a
+  // separate hard-coded copy in the viewer.
+  useEffect(() => {
+    controller.viewer.setViewportObstruction(effectiveViewportObstructionPx(chatWidth, componentOpen));
+  }, [chatWidth, componentOpen]);
+
   const pendingModel = models.find((m) => m.source_model_id === pendingConfirmId) ?? null;
   const isSwitch = activeModel !== null && activeModel.source_model_id !== pendingConfirmId;
 
@@ -46,6 +55,7 @@ export default function App() {
   return (
     <div className="app" style={{ "--chat-w": `${chatWidth}px` } as React.CSSProperties}>
       <ViewerCanvas />
+      <ViewerInstrumentationOverlay />
       <ViewerOverlay />
       <ViewerControls onResetApp={onResetApp} />
       <StatusReadout />

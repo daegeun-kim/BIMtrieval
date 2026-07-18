@@ -38,13 +38,35 @@ describe("ViewerAdapter identity + roles", () => {
   it("reports GlobalIds missing from the artifact without crashing", async () => {
     const { adapter } = makeAdapter(new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1)));
     const res = await adapter.applyQueryRoles(["G-A", "G-MISSING"], ["G-B", "G-GONE"]);
-    expect(res.missing).toEqual(["G-MISSING", "G-GONE"]);
+    expect(res.missing).toEqual(["G-MISSING"]);
   });
 
   it("returns everything missing when no model is loaded", async () => {
     const adapter = new ViewerAdapter(5);
     const res = await adapter.applyQueryRoles(["G-A"], []);
     expect(res.missing).toEqual(["G-A"]);
+  });
+});
+
+describe("adaptive profile override (tasks/task18.md §11)", () => {
+  it("defaults to no override, and overriding takes effect immediately", () => {
+    const adapter = new ViewerAdapter(5);
+    expect(adapter.getProfileOverride()).toBeNull();
+    expect(adapter.getProfile()).toBe("balanced");
+
+    adapter.setProfileOverride("large-model");
+    expect(adapter.getProfileOverride()).toBe("large-model");
+    expect(adapter.getProfile()).toBe("large-model"); // no reload needed
+  });
+
+  it("reverts to the last automatically detected profile when cleared", () => {
+    const adapter = new ViewerAdapter(5);
+    adapter.setProfileOverride("large-model");
+    expect(adapter.getProfile()).toBe("large-model");
+
+    adapter.setProfileOverride(null);
+    expect(adapter.getProfileOverride()).toBeNull();
+    expect(adapter.getProfile()).toBe("balanced"); // the pre-load default, no model ever loaded
   });
 });
 

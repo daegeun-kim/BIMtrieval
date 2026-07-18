@@ -27,3 +27,4 @@ frontend_openapi_snapshot.json
 
 # Local dev launcher runtime record (Task 12) — ephemeral PIDs/ports, no secrets.
 .runtime/
+ingestion/ifc_original/FOJAB_Landsarkivet.ifc

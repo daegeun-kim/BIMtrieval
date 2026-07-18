@@ -24,6 +24,7 @@ vi.mock("../src/viewer/ViewerAdapter", () => ({ ViewerAdapter: vi.fn(() => viewe
 import { api } from "../src/api/client";
 import Composer from "../src/chat/Composer";
 import EvidenceDisclosure from "../src/chat/EvidenceDisclosure";
+import Message from "../src/chat/Message";
 import SelectionChips from "../src/chat/SelectionChips";
 import ModelSelector from "../src/components/ModelSelector";
 import { controller } from "../src/state/controller";
@@ -128,6 +129,41 @@ describe("EvidenceDisclosure", () => {
     fireEvent.click(screen.getByText("D1"));
     expect(viewerStub.fitToGuids).toHaveBeenCalledWith(["GP"]);
     expect(qspy).not.toHaveBeenCalled();
+  });
+});
+
+describe("assistant message", () => {
+  it("renders the answer without route, retrieval mode, or deterministic totals", () => {
+    render(
+      <Message
+        message={{
+          id: "m-answer",
+          role: "assistant",
+          content: "The requested doors are highlighted.",
+          kind: "text",
+          createdAt: 1,
+          evidence: {
+            route: "hybrid",
+            answerBasis: "hybrid_evidence",
+            scope: "active_model",
+            primaries: [],
+            contexts: [],
+            relationships: [],
+            notes: [],
+            warnings: [],
+          },
+          resultSummary: {
+            exact_total: 205,
+            viewer_match_count: 205,
+            class_counts: { IfcDoor: 205 },
+            truncated: false,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("The requested doors are highlighted.")).toBeInTheDocument();
+    expect(screen.queryByText("hybrid")).toBeNull();
+    expect(screen.queryByText("205")).toBeNull();
   });
 });
 

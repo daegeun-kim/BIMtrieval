@@ -23,6 +23,8 @@ Hard file modification boundary:
 Task/spec file management rules:
 
 - New task files must follow the existing standard naming convention: `tasks/taskNN.md` for active tasks and `tasks/taskNN_done.md` only after the task is complete.
+- Task numbers are sequential execution order. When the user asks to create `taskNN.md`, assume every lower-numbered task has already been completed. Do not add prerequisite lists, completion checks, or instructions telling Claude to verify earlier task files. If a genuinely necessary dependency is uncertain or appears inconsistent, ask the user for clarification before generating the new task instead of delegating that uncertainty to Claude in the task file.
+- Keep task handoffs limited to implementation intent, accepted decisions, necessary constraints, and validation directly relevant to the requested change. Do not add administrative checks that merely confirm earlier tasks were completed.
 - Do not add descriptive suffixes to task filenames unless explicitly requested.
 - Versioned spec files must follow the existing standard naming convention: `specs/spec_vNNN_short_name.md`.
 - Outdated spec files should be kept for now, including files explicitly marked outdated. They should only be removed when the overall project is over or when I explicitly ask for removal.

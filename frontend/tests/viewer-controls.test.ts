@@ -188,18 +188,18 @@ describe("rotation pivot (task14 §2)", () => {
   });
 });
 
-describe("elevation-zero base plane (task14 §2)", () => {
-  it("derives ground from the coordination matrix, not the bounding box", async () => {
-    // Model shifted down 8m in the scene: IFC elevation 0 is scene y = -8.
-    const coordination = new THREE.Matrix4().makeTranslation(0, -8, 0);
-    const { adapter } = makeAdapter({ coordination });
+describe("geometric-minimum base plane (task19 §3, amends task14 §2)", () => {
+  it("derives the plane from the model's bounding-box minimum, not IFC elevation zero", async () => {
+    // Coordination info is irrelevant now — a model whose scene-space geometry
+    // never crosses y=0 must still place the plane at its own lowest point.
+    const box = new THREE.Box3(new THREE.Vector3(0, 12, 0), new THREE.Vector3(30, 40, 40));
+    const { adapter } = makeAdapter({ box, coordination: new THREE.Matrix4().makeTranslation(0, -8, 0) });
     await priv(adapter).resolveGroundY();
-    expect(adapter.getGroundY()).toBeCloseTo(-8, 5);
+    expect(adapter.getGroundY()).toBeCloseTo(12, 5); // box.min.y, not -8 (coordination) or 0
   });
 
-  it("places the plane at elevation zero, not the bbox centre or minimum", async () => {
-    // A model whose geometry sits well above zero must NOT drag the plane up.
-    const box = new THREE.Box3(new THREE.Vector3(0, 20, 0), new THREE.Vector3(30, 40, 40));
+  it("places the plane at a negative geometric minimum when the model sits below IFC zero", async () => {
+    const box = new THREE.Box3(new THREE.Vector3(0, -15, 0), new THREE.Vector3(30, 5, 40));
     const { adapter, scene } = makeAdapter({ box });
     await priv(adapter).resolveGroundY();
     priv(adapter).createBasePlane();
@@ -207,10 +207,41 @@ describe("elevation-zero base plane (task14 §2)", () => {
     expect(adapter.hasBasePlane()).toBe(true);
     const grid = scene.children.find((c) => c.type === "GridHelper");
     expect(grid).toBeDefined();
-    expect(grid!.position.y).toBe(0); // not 20 (min), not 30 (centre)
+    expect(grid!.position.y).toBeCloseTo(-15, 5); // the model's own minimum, preserved below zero
   });
 
-  it("keeps the plane non-occluding so below-zero geometry stays visible", async () => {
+  it("places the plane at a positive geometric minimum when the model sits entirely above IFC zero", async () => {
+    // A model whose geometry sits well above zero must NOT drag the plane
+    // down to zero, nor up to the bbox centre.
+    const box = new THREE.Box3(new THREE.Vector3(0, 20, 0), new THREE.Vector3(30, 40, 40));
+    const { adapter, scene } = makeAdapter({ box });
+    await priv(adapter).resolveGroundY();
+    priv(adapter).createBasePlane();
+
+    const grid = scene.children.find((c) => c.type === "GridHelper");
+    expect(grid!.position.y).toBe(20); // box.min.y — not 0, not 30 (centre)
+  });
+
+  it("falls back to scene 0 for a missing or empty box, without failing", async () => {
+    const { adapter: missing } = makeAdapter();
+    (missing as unknown as { model: { box: THREE.Box3 | null } }).model.box = null;
+    await priv(missing).resolveGroundY();
+    expect(missing.getGroundY()).toBe(0);
+
+    const { adapter: empty } = makeAdapter({ box: new THREE.Box3() }); // empty by construction
+    await priv(empty).resolveGroundY();
+    expect(empty.getGroundY()).toBe(0);
+  });
+
+  it("recomputes on every load, resetting the stored height on unload/model switch", async () => {
+    const { adapter } = makeAdapter({ box: new THREE.Box3(new THREE.Vector3(0, 7, 0), new THREE.Vector3(1, 8, 1)) });
+    await priv(adapter).resolveGroundY();
+    expect(adapter.getGroundY()).toBeCloseTo(7, 5);
+    await adapter.unloadModel();
+    expect(adapter.getGroundY()).toBe(0);
+  });
+
+  it("keeps the plane non-occluding so below-plane geometry stays visible", async () => {
     const { adapter, scene } = makeAdapter();
     await priv(adapter).resolveGroundY();
     priv(adapter).createBasePlane();

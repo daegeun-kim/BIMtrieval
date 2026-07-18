@@ -28,7 +28,9 @@ export default function ComponentPreview({ guid }: { guid: string }) {
       const extracted = await controller.viewer.extractItemGeometry(guid);
       // Guard: the subject may have changed while we awaited the geometry.
       if (cancelled) return;
-      const ok = extracted ? scene.mount(extracted.meshes, extracted.role) : false;
+      const ok = extracted
+        ? scene.mount(extracted.meshes, extracted.role, controller.viewer.getProfile())
+        : false;
       if (!ok && statusRef.current) {
         statusRef.current.textContent = "No 3D geometry for this object.";
       }

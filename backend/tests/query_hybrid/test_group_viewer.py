@@ -66,7 +66,7 @@ def test_missing_global_ids_reported_separately(monkeypatch):
     assert any("no usable viewer GlobalId" in w for w in hyd.warnings)  # not called truncation
 
 
-def test_dedup_across_primary_and_context(monkeypatch):
+def test_context_groups_are_not_hydrated(monkeypatch):
     calls = {"n": 0}
 
     def fake(session, predicate, sid):
@@ -83,4 +83,5 @@ def test_dedup_across_primary_and_context(monkeypatch):
     dec.viewer_context.append(cg)
     hyd = viewer_mod.hydrate_accepted_viewer_identities(None, dec, 1)
     assert "shared" in hyd.primary_global_ids
-    assert "shared" not in hyd.context_global_ids  # deduped, primary keeps it
+    assert hyd.context_global_ids == []
+    assert calls["n"] == 1

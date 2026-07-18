@@ -27,10 +27,16 @@ vi.mock("../src/state/controller", () => ({
 // GUID -> localId: A/B/C are primary results, X is context, Z is dimmed.
 const KNOWN: Record<string, number> = { "G-A": 1, "G-B": 2, "G-C": 3, "G-X": 8, "G-Z": 9 };
 
+/** One simulated ray intersection: a local ID at a given distance along the ray. */
+interface Hit {
+  localId: number;
+  distance: number;
+}
+
 function makeAdapter() {
   const adapter = new ViewerAdapter(5);
   const highlight = vi.fn(async (_ids: number[] | undefined, _mat: unknown) => {});
-  let nextPick: number | null = null;
+  let nextHits: Hit[] | null = null;
 
   const model = {
     box: new THREE.Box3(new THREE.Vector3(), new THREE.Vector3(10, 10, 10)),
@@ -40,7 +46,17 @@ function makeAdapter() {
     getMergedBox: async () => new THREE.Box3(new THREE.Vector3(), new THREE.Vector3(1, 1, 1)),
     resetHighlight: vi.fn(async () => {}),
     highlight,
-    raycast: async () => (nextPick === null ? null : { localId: nextPick, point: new THREE.Vector3() }),
+    // Single-nearest-hit raycast, used when no query roles are active.
+    raycast: async () =>
+      nextHits && nextHits.length
+        ? { localId: nextHits[0]!.localId, distance: nextHits[0]!.distance, point: new THREE.Vector3() }
+        : null,
+    // Every ordered ray intersection, used to pick through transparent
+    // non-results while blue query-primary results are active (task19 §1).
+    raycastAll: async () =>
+      nextHits && nextHits.length
+        ? nextHits.map((h) => ({ localId: h.localId, distance: h.distance, point: new THREE.Vector3() }))
+        : null,
   };
   Object.assign(adapter as unknown as Record<string, unknown>, {
     model,
@@ -58,8 +74,15 @@ function makeAdapter() {
 
   const manualGuids = () =>
     [...(adapter as unknown as { manual: Map<string, number> }).manual.keys()];
-  const pick = async (localId: number | null, additive = false) => {
-    nextPick = localId;
+  // Accepts a single local ID (one hit), an ordered list of hits (nearest
+  // first unless distances say otherwise), or null (a total miss).
+  const pick = async (spec: number | Hit[] | null, additive = false) => {
+    nextHits =
+      spec === null
+        ? null
+        : typeof spec === "number"
+          ? [{ localId: spec, distance: 1 }]
+          : spec;
     await (
       adapter as unknown as { handlePick: (e: Partial<PointerEvent>) => Promise<void> }
     ).handlePick({ ctrlKey: additive, shiftKey: false, metaKey: false } as PointerEvent);
@@ -88,7 +111,7 @@ describe("picking with NO active query highlighting", () => {
     expect(manualGuids()).toHaveLength(5);
   });
 
-  it("manual selection renders teal when no roles are active", async () => {
+  it("manual selection renders blue when no roles are active", async () => {
     const { highlight, pick } = makeAdapter();
     highlight.mockClear();
     await pick(KNOWN["G-Z"]!);
@@ -113,17 +136,59 @@ describe("picking with active query highlighting", () => {
     expect(manualGuids()).toEqual(["G-A"]);
   });
 
-  it("a dimmed non-result cannot be selected and does not replace the selection", async () => {
+  // task19 §1: dimmed/transparent geometry no longer blocks or "rejects" a
+  // click — it is transparent to picking. A ray that meets only non-result
+  // geometry behaves exactly like a total miss (clears on a plain click),
+  // not like a no-op that preserves the current selection.
+  it("a ray meeting only a dimmed non-result clears the selection like an empty-space click", async () => {
     const { pick, manualGuids } = await withRoles();
     await pick(KNOWN["G-A"]!);
-    await pick(KNOWN["G-Z"]!); // dimmed
-    expect(manualGuids()).toEqual(["G-A"]); // unchanged, not cleared, not replaced
+    await pick(KNOWN["G-Z"]!); // dimmed, nothing blue behind it
+    expect(manualGuids()).toEqual([]);
   });
 
-  it("a context (yellow) entity cannot be selected", async () => {
+  it("an ignored context entity remains dim and cannot be selected", async () => {
     const { pick, manualGuids } = await withRoles();
     await pick(KNOWN["G-X"]!);
     expect(manualGuids()).toEqual([]);
+  });
+
+  it("a transparent non-result in front of a blue primary does not block selection", async () => {
+    const { pick, manualGuids } = await withRoles();
+    // G-Z (dimmed) is nearer the camera; the blue primary G-A sits behind it
+    // on the same ray. The dimmed hit must not occlude the pick.
+    await pick([
+      { localId: KNOWN["G-Z"]!, distance: 1 },
+      { localId: KNOWN["G-A"]!, distance: 5 },
+    ]);
+    expect(manualGuids()).toEqual(["G-A"]);
+  });
+
+  it("selects the nearest of several blue primaries intersected by the ray", async () => {
+    const { pick, manualGuids } = await withRoles();
+    await pick([
+      { localId: KNOWN["G-C"]!, distance: 8 },
+      { localId: KNOWN["G-A"]!, distance: 2 }, // nearest
+      { localId: KNOWN["G-B"]!, distance: 5 },
+    ]);
+    expect(manualGuids()).toEqual(["G-A"]);
+  });
+
+  it("a ray with no blue hit at all preserves the empty-space-click behavior", async () => {
+    const { pick, manualGuids } = await withRoles();
+    await pick(KNOWN["G-A"]!);
+    await pick([
+      { localId: KNOWN["G-Z"]!, distance: 1 },
+      { localId: KNOWN["G-X"]!, distance: 3 },
+    ]); // dimmed + context only — no blue result anywhere on the ray
+    expect(manualGuids()).toEqual([]);
+  });
+
+  it("both a focused and an unfocused blue primary remain eligible for picking", async () => {
+    const { pick, manualGuids } = await withRoles();
+    await pick(KNOWN["G-A"]!); // focus A
+    await pick(KNOWN["G-B"]!, true); // additively pick unfocused B — still eligible
+    expect(manualGuids().sort()).toEqual(["G-A", "G-B"]);
   });
 
   it("a rejected entity never transiently enters the selection", async () => {
@@ -224,6 +289,9 @@ describe("edge overlay", () => {
     expect(EDGES.enabled).toBe(true);
     expect(EDGES.darken).toBeGreaterThan(0);
     expect(EDGES.darken).toBeLessThanOrEqual(1);
+    // dim is the one deliberate exception (task18 §9 candidate 3 — non-result
+    // edges disabled to reduce visual line density); every other role keeps a
+    // positive edge alpha.
     for (const role of [
       "roof",
       "wall",
@@ -232,14 +300,14 @@ describe("edge overlay", () => {
       "primaryUnfocused",
       "context",
       "manual",
-      "dim",
     ] as const) {
       expect(EDGES.alpha[role]).toBeGreaterThan(0);
     }
+    expect(EDGES.alpha.dim).toBe(0);
   });
 
-  it("edges on transparent faces are more opaque than the face", () => {
-    expect(EDGES.alpha.dim).toBeGreaterThan(VIEWER_OPACITY.dim);
+  it("edges on transparent faces are more opaque than the face (except dim, disabled by task18 §9)", () => {
+    expect(EDGES.alpha.dim).toBe(0);
     expect(EDGES.alpha.primaryUnfocused).toBeGreaterThan(VIEWER_OPACITY.primaryUnfocused);
     expect(EDGES.alpha.context).toBeGreaterThanOrEqual(VIEWER_OPACITY.context);
   });
@@ -260,7 +328,7 @@ describe("edge overlay", () => {
 
     await adapter.applyQueryRoles(["G-A", "G-B"], ["G-X"]);
     expect(adapter.edgeRoleOf(KNOWN["G-B"]!)).toBe("primary");
-    expect(adapter.edgeRoleOf(KNOWN["G-X"]!)).toBe("context");
+    expect(adapter.edgeRoleOf(KNOWN["G-X"]!)).toBe("dim");
     expect(adapter.edgeRoleOf(KNOWN["G-Z"]!)).toBe("dim");
 
     await pick(KNOWN["G-A"]!); // focus one primary
@@ -299,6 +367,231 @@ describe("edge overlay", () => {
     overlay.dispose();
     expect(parent.children).toHaveLength(0);
     expect(overlay.isBuilt()).toBe(false);
+  });
+
+  it("spatially separates distant entities into different frustum-culled chunks (task18 §7)", async () => {
+    const overlay = new EdgeOverlay();
+    const parent = new THREE.Object3D();
+    const near = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const far = new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]);
+    const model = {
+      box: new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(100, 100, 100)),
+      getLocalIds: async () => [1, 2],
+      getItemsGeometry: async (ids: number[]) =>
+        ids.map((id) => [
+          { positions: id === 1 ? near : far, indices: undefined, transform: new THREE.Matrix4() },
+        ]),
+    };
+    const built = await overlay.build(model as never, parent);
+    expect(built).toBe(true);
+    expect(overlay.getChunkCount()).toBeGreaterThan(1); // never one whole-model object
+    expect(overlay.getChunkCount()).toBeLessThanOrEqual(160); // within the accepted bound
+    expect(parent.children).toHaveLength(overlay.getChunkCount());
+    for (const child of parent.children) {
+      const lines = child as THREE.LineSegments;
+      expect(lines.frustumCulled).toBe(true); // opposite of the old whole-model object
+      expect(lines.geometry.boundingSphere).not.toBeNull();
+      expect(lines.geometry.boundingBox).not.toBeNull();
+    }
+
+    // Recoloring one entity only touches its own chunk's color buffer.
+    overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
+    const nearChunk = parent.children.find(
+      (c) => (c as THREE.LineSegments).geometry.getAttribute("color").getW(0) > 0,
+    ) as THREE.LineSegments;
+    expect(nearChunk).toBeDefined();
+    const colors = nearChunk.geometry.getAttribute("color") as THREE.BufferAttribute;
+    expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5);
+
+    overlay.dispose();
+    expect(parent.children).toHaveLength(0);
+    expect(overlay.getChunkCount()).toBe(0);
+  });
+
+  it("updateLod culls a far/small chunk while a highlighted chunk of the same size stays visible (task18 §8)", async () => {
+    const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]); // bounding-sphere radius ≈0.707, center (0.5,0.5,0)
+    const buildOne = async (role: "primary" | "dim") => {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const model = {
+        getLocalIds: async () => [1],
+        getItemsGeometry: async () => [[{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]],
+      };
+      await overlay.build(model as never, parent);
+      overlay.recolor(() => role);
+      return overlay;
+    };
+
+    const baseOverlay = await buildOne("dim");
+    const highlightedOverlay = await buildOne("primary");
+
+    // At distance=400 with a 50° / 900px viewport, projectedPx ≈1.7px: below
+    // the base farEnterPx (2px, so it culls) but above the highlighted
+    // highlightFarEnterPx (0.75px, so it stays visible) — a real, computed
+    // behavioral difference driven by highlightCount, not a mocked threshold.
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10000);
+    camera.position.set(0.5, 0.5, -400);
+    camera.lookAt(0.5, 0.5, 0);
+    camera.updateMatrixWorld(true);
+
+    baseOverlay.updateLod(camera, 900);
+    highlightedOverlay.updateLod(camera, 900);
+
+    expect((baseOverlay as unknown as { chunks: { lines: THREE.LineSegments }[] }).chunks[0]!.lines.visible).toBe(
+      false,
+    );
+    expect(
+      (highlightedOverlay as unknown as { chunks: { lines: THREE.LineSegments }[] }).chunks[0]!.lines.visible,
+    ).toBe(true);
+
+    // Far enough away, even the highlighted chunk culls.
+    camera.position.set(0.5, 0.5, -5000);
+    camera.updateMatrixWorld(true);
+    highlightedOverlay.updateLod(camera, 900);
+    expect(
+      (highlightedOverlay as unknown as { chunks: { lines: THREE.LineSegments }[] }).chunks[0]!.lines.visible,
+    ).toBe(false);
+
+    // Hysteresis: moving back closer to distance=700 (projectedPx≈0.975) is
+    // ABOVE the highlighted enter threshold (0.75px, so a never-culled chunk
+    // would stay visible there) but still BELOW its exit threshold (1.5px),
+    // so an ALREADY-culled chunk must not restore yet — it needs to cross the
+    // farther exit threshold, not just clear the enter one again.
+    camera.position.set(0.5, 0.5, -700);
+    camera.updateMatrixWorld(true);
+    highlightedOverlay.updateLod(camera, 900);
+    expect(
+      (highlightedOverlay as unknown as { chunks: { lines: THREE.LineSegments }[] }).chunks[0]!.lines.visible,
+    ).toBe(false); // still culled — hysteresis band, not restored yet
+
+    // Close enough to clear the exit threshold: restored.
+    camera.position.set(0.5, 0.5, -100);
+    camera.updateMatrixWorld(true);
+    highlightedOverlay.updateLod(camera, 900);
+    expect(
+      (highlightedOverlay as unknown as { chunks: { lines: THREE.LineSegments }[] }).chunks[0]!.lines.visible,
+    ).toBe(true);
+
+    baseOverlay.dispose();
+    highlightedOverlay.dispose();
+  });
+
+  it("accepts precomputed localIds (task18 §6/§11) without calling getLocalIds again", async () => {
+    const overlay = new EdgeOverlay();
+    const parent = new THREE.Object3D();
+    const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const getLocalIds = vi.fn(async () => [99]); // would be wrong on purpose if called
+    const model = {
+      getLocalIds,
+      getItemsGeometry: async (ids: number[]) =>
+        ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
+    };
+    const built = await overlay.build(model as never, parent, { localIds: [1, 2, 3] });
+    expect(built).toBe(true);
+    expect(getLocalIds).not.toHaveBeenCalled();
+    expect(overlay.getItemCount()).toBe(3);
+  });
+
+  it("uses the profile-specific angle threshold passed via options (task18 §6)", async () => {
+    // Two triangles sharing the edge (0,0,0)-(1,0,0), folded at an exact 90°
+    // dihedral angle (one lies in the XY plane, the other in the XZ plane).
+    // A threshold at or below 90° keeps that shared edge (5 total edges: the
+    // shared one plus 2 boundary edges per triangle); a threshold above 90°
+    // drops it (4 boundary edges only) — a real, deterministic behavioral
+    // difference driven purely by the `thresholdDeg` option.
+    // prettier-ignore
+    const folded = new Float32Array([
+      0, 0, 0,  1, 0, 0,  0, 1, 0, // triangle A — XY plane
+      1, 0, 0,  0, 0, 0,  0, 0, 1, // triangle B — XZ plane, shared edge reversed for consistent winding
+    ]);
+    const buildWith = async (thresholdDeg: number) => {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const model = {
+        getLocalIds: async () => [1],
+        getItemsGeometry: async () => [[{ positions: folded, indices: undefined, transform: new THREE.Matrix4() }]],
+      };
+      await overlay.build(model as never, parent, { thresholdDeg });
+      return overlay.getVertexCount();
+    };
+    expect(await buildWith(45)).toBe(10); // shared 90° edge included: 5 edges x 2 verts
+    expect(await buildWith(135)).toBe(8); // shared 90° edge excluded: 4 boundary edges x 2 verts
+  });
+
+  it("hides base edges on motion start, keeps primary/manual visible, restores after the delay (task18 §5)", async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      const model = {
+        getLocalIds: async () => [1, 2],
+        getItemsGeometry: async (ids: number[]) =>
+          ids.map(() => [{ positions: tri, indices: undefined, transform: new THREE.Matrix4() }]),
+      };
+      await overlay.build(model as never, parent);
+      // entity 1 is the query-primary, entity 2 is a dim base entity
+      overlay.recolor((id) => (id === 1 ? "primary" : "dim"));
+      const colors = (parent.children[0] as THREE.LineSegments).geometry.getAttribute(
+        "color",
+      ) as THREE.BufferAttribute;
+      const half = colors.count / 2;
+      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5);
+      expect(colors.getW(half)).toBeCloseTo(EDGES.alpha.dim, 5);
+
+      const dirty = vi.fn();
+      const roleOf = (id: number): "primary" | "dim" => (id === 1 ? "primary" : "dim");
+
+      overlay.setMotion(true, roleOf, dirty);
+      expect(dirty).toHaveBeenCalledTimes(1);
+      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5); // primary stays visible
+      expect(colors.getW(half)).toBe(0); // base edge hidden
+
+      // A second "moving" call while already hidden is a no-op — no redundant dirty.
+      overlay.setMotion(true, roleOf, dirty);
+      expect(dirty).toHaveBeenCalledTimes(1);
+
+      overlay.setMotion(false, roleOf, dirty);
+      vi.advanceTimersByTime(100); // still within the 100-200ms window
+      expect(colors.getW(half)).toBe(0); // not restored yet
+
+      // Movement resumes before the delay elapses — cancels the pending restore.
+      overlay.setMotion(true, roleOf, dirty);
+      vi.advanceTimersByTime(300);
+      expect(colors.getW(half)).toBe(0); // restore was cancelled, still hidden
+
+      overlay.setMotion(false, roleOf, dirty);
+      vi.advanceTimersByTime(300); // past EDGE_RESTORE_DELAY_MS
+      expect(colors.getW(half)).toBeCloseTo(EDGES.alpha.dim, 5); // restored
+      expect(colors.getW(0)).toBeCloseTo(EDGES.alpha.primary, 5); // primary untouched throughout
+
+      overlay.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disposing while a restore is pending cancels the timer cleanly", async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = new EdgeOverlay();
+      const parent = new THREE.Object3D();
+      const tri = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      const model = {
+        getLocalIds: async () => [1],
+        getItemsGeometry: async (ids: number[]) =>
+          ids.map(() => [{ positions: tri, transform: new THREE.Matrix4() }]),
+      };
+      await overlay.build(model as never, parent);
+      const dirty = vi.fn();
+      overlay.setMotion(true, () => "dim", dirty);
+      overlay.setMotion(false, () => "dim", dirty);
+      overlay.dispose();
+      // Should not throw when the (cancelled) timer would otherwise have fired.
+      expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a build finishing after dispose mounts nothing (model-switch safety)", async () => {

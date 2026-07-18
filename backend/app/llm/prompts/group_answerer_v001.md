@@ -28,8 +28,12 @@ the original question and the group's `factual_profile`.
 
 Then write `answer` from accepted evidence only. Select entity-bearing groups for
 `viewer_primary_group_ids` and `viewer_context_group_ids`; both lists must be subsets of accepted
-groups. Primary viewer groups must represent the direct answer. Context viewer groups must add
-clear, useful spatial or semantic context.
+groups. The viewer is a visual form of the direct answer, not a visualization of every accepted
+piece of evidence. Include a group in `viewer_primary_group_ids` only when the group is classified
+as primary and every object matched by its predicate is directly responsive to what the user asked
+to see. Exclude broad or mixed predicates that would color unrelated objects, even when the group
+helps explain the answer. Always return an empty `viewer_context_group_ids` list; supporting and
+context evidence may inform the prose but must not be colored in the viewer.
 
 ## Semantic verdict rules
 

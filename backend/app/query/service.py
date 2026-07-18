@@ -464,7 +464,7 @@ class QueryService:
         hydrate complete viewer identities for accepted groups."""
         sid = policy_plan.source_model_id
         policy = frozen_policy(policy_plan)  # immutable; resolution cannot change it
-        t_exec = time.perf_counter()
+        t_retrieval = time.perf_counter()
         try:
             facet_resolutions = resolve_facets(
                 session,
@@ -490,6 +490,11 @@ class QueryService:
                 request_id=request_id,
                 scope=QueryScope.ACTIVE_MODEL,
             )
+        retrieval_ms = round((time.perf_counter() - t_retrieval) * 1000.0, 1)
+
+        # Build the bounded group descriptions submitted to the final LLM as a
+        # separately timed stage.
+        t_summary = time.perf_counter()
         alloc_meta = allocate_examples(
             groups, self.settings.max_answer_examples, self.settings.small_group_full_threshold
         )
@@ -505,18 +510,20 @@ class QueryService:
             },
         )
         trace.emit("[trace] groups", _group_trace(groups))
-        execute_ms = round((time.perf_counter() - t_exec) * 1000.0, 1)
-
-        # OpenAI call 2 — group-level relevance judgment + answer.
-        t_ans = time.perf_counter()
         payload = build_group_answer_payload(
             request.question, policy_plan.analysis_intent, sid, groups, self.settings
         )
+        group_summary_ms = round((time.perf_counter() - t_summary) * 1000.0, 1)
+
+        # OpenAI call 2 — group-level relevance judgment + answer.
+        t_ans = time.perf_counter()
         ans = client.generate_group_answer(payload)
         answer_ms = round((time.perf_counter() - t_ans) * 1000.0, 1)
 
+        t_viewer = time.perf_counter()
         decision = resolve_group_answer(groups, ans.output)
         hydration = hydrate_accepted_viewer_identities(session, decision, sid)
+        viewer_hydration_ms = round((time.perf_counter() - t_viewer) * 1000.0, 1)
 
         # Build the response package from accepted groups only (§9, §10).
         plan = QueryPlan(
@@ -545,7 +552,13 @@ class QueryService:
         if ans.output.disclosed_conflicts:
             pkg.conflicts.append("model reported a conflict in the evidence")
 
-        stages = {"planner_ms": planner_ms, "execute_ms": execute_ms, "answer_ms": answer_ms}
+        stages = {
+            "modality_policy_ms": planner_ms,
+            "sql_rag_graph_and_grouping_ms": retrieval_ms,
+            "group_summary_to_llm_ms": group_summary_ms,
+            "final_llm_response_ms": answer_ms,
+            "viewer_identity_hydration_ms": viewer_hydration_ms,
+        }
         self._finalize_group_state(state, sid, decision, hydration)
         self._log_group_event(
             request,
@@ -748,6 +761,7 @@ class QueryService:
             "stage_latency_ms": stages,
         }
         write_jsonl_event(record, Path(self.settings.query_log_path))
+        _emit_backend_timing(request_id, stages, latency_ms)
 
     def _log_event(
         self,
@@ -796,6 +810,7 @@ class QueryService:
             "stage_latency_ms": stages or {},
         }
         write_jsonl_event(record, Path(self.settings.query_log_path))
+        _emit_backend_timing(request_id, stages or {}, latency_ms)
 
     def _log_failure(
         self, request: SessionQueryRequest, request_id: str, kind: str, detail: str
@@ -900,6 +915,19 @@ def _emit_question_usage(calls: list[dict]) -> None:
         prompt_tokens=sum(int(c.get("prompt_tokens", 0) or 0) for c in calls),
         completion_tokens=sum(int(c.get("completion_tokens", 0) or 0) for c in calls),
         total_tokens=sum(int(c.get("total_tokens", 0) or 0) for c in calls),
+    )
+
+
+def _emit_backend_timing(request_id: str, stages: dict, total_ms: float) -> None:
+    """Always print bounded backend stage timing for one completed query."""
+    trace.emit(
+        "[Query backend timing]",
+        {
+            "request_id": request_id,
+            "stages_ms": stages,
+            "backend_total_ms": total_ms,
+        },
+        force=True,
     )
 
 

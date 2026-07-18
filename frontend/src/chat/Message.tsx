@@ -1,8 +1,6 @@
 import type { ChatMessage } from "../state/store";
-import EvidenceDisclosure from "./EvidenceDisclosure";
 import Markdown from "./Markdown";
 import ModelCandidates from "./ModelCandidates";
-import ResultSummaryView from "./ResultSummaryView";
 
 // One conversation entry. User messages are compact right-aligned cards;
 // assistant answers read like response records (document-like), per the design
@@ -33,11 +31,9 @@ export default function Message({ message }: { message: ChatMessage }) {
         ) : (
           <Markdown text={message.content} />
         )}
-        {message.resultSummary && <ResultSummaryView summary={message.resultSummary} />}
         {message.candidates && message.candidates.length > 0 && (
           <ModelCandidates candidates={message.candidates} />
         )}
-        {message.evidence && <EvidenceDisclosure evidence={message.evidence} />}
       </div>
     </div>
   );

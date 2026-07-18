@@ -20,12 +20,21 @@ import fragmentsWorkerUrl from "@thatopen/fragments/worker?url";
 import * as THREE from "three";
 
 import { EdgeOverlay, type EdgeRole } from "./EdgeOverlay";
+import { type Profile, detectProfile } from "./profileDetection";
+import { RenderScheduler } from "./RenderScheduler";
+import { ViewerPerformanceController } from "./ViewerPerformanceController";
+import {
+  type InstrumentationSnapshot,
+  ViewerInstrumentation,
+  instrumentationRequested,
+} from "./ViewerInstrumentation";
 import {
   BASE_MATERIALS,
-  CONTEXT_MATERIAL,
   DIM_MATERIAL,
   EDGES,
+  FRAGMENTS_THROTTLE_MS,
   MANUAL_MATERIAL,
+  PIXEL_RATIO,
   PLANE_COLOR,
   PLANE_OPACITY,
   PRIMARY_MATERIAL,
@@ -67,11 +76,9 @@ export class ViewerAdapter {
 
   private manual = new Map<string, number>(); // guid -> localId
   private queryPrimary: number[] = [];
-  private queryContext: number[] = [];
   // Resolved local-id sets for picking eligibility and edge recoloring
   // (task15 §3): membership checks never call the backend or an LLM.
   private queryPrimarySet = new Set<number>();
-  private queryContextSet = new Set<number>();
   private rolesActive = false;
   private selectionEnabled = true;
   private edgeOverlay: EdgeOverlay | null = null;
@@ -81,10 +88,22 @@ export class ViewerAdapter {
   private callbacks: ViewerCallbacks = {};
 
   private basePlane: THREE.Object3D | null = null;
-  /** Scene-space Y of IFC/world elevation 0 (task14 §2). */
+  /** Scene-space Y of the visual base plane — the model's lowest geometric point (task19 §3). */
   private groundY = 0;
+  /**
+   * Width, in CSS px, occupied by visible right-side panels — from the App
+   * layer, the single source of truth for panel geometry (task19 §2). Read by
+   * `applyViewOffset` on every fit and every panel-geometry change.
+   */
+  private rightObstructionPx = 0;
   private classification: BaseClassification = { roof: [], wall: [] };
   private disposers: Array<() => void> = [];
+  private instrumentation: ViewerInstrumentation | null = null;
+  private scheduler: RenderScheduler | null = null;
+  private readonly perf = new ViewerPerformanceController();
+  private lastThrottledFragmentsUpdateAt = 0;
+  private profileOverride: Profile | null = null;
+  private lastDetectedProfile: Profile = "balanced";
 
   constructor(maxSelection = 5) {
     this.maxSelection = maxSelection;
@@ -102,7 +121,10 @@ export class ViewerAdapter {
     return this.model !== null;
   }
 
-  /** Scene-space Y of elevation zero — exposed for tests (task14 §2). */
+  /**
+   * Scene-space Y of the visual base plane, i.e. the loaded model's lowest
+   * geometric point — exposed for tests (task19 §3). Not an IFC elevation.
+   */
   getGroundY(): number {
     return this.groundY;
   }
@@ -126,24 +148,129 @@ export class ViewerAdapter {
     const fragments = components.get(OBC.FragmentsManager);
     fragments.init(fragmentsWorkerUrl);
 
-    // Attach camera + add to scene when a model is registered, and refresh LOD
-    // whenever the camera comes to rest.
+    this.scheduler = new RenderScheduler(components, world.renderer);
+    const scheduler = this.scheduler;
+
+    // Motion detection (task18 §2): 'wake' fires when the camera STARTS
+    // moving (drag, wheel, or a programmatic fitToBox transition all go
+    // through it — unlike 'controlstart'/'controlend', which wheel never
+    // emits), 'rest' when damped motion settles. Both drive the render hold
+    // and the shared motion state that pixel-ratio/Fragments-throttle/edge
+    // motion-hiding all read (ViewerPerformanceController).
+    world.camera.controls.addEventListener("wake", () => {
+      scheduler.hold("camera-motion");
+      this.perf.setMotion("moving");
+    });
     world.camera.controls.addEventListener("rest", () => {
-      void fragments.core.update(true);
+      scheduler.release("camera-motion");
+      this.perf.setMotion("resting");
+      // Final forced update at rest (task18 §4): waits for completion, then
+      // restores stationary resolution/base edges and renders the settled
+      // frame — the pixel-ratio and edge-restore subscribers below already
+      // react to the "resting" motion change above; this adds the render.
+      // Screen-size LOD (task18 §8) is re-evaluated here too — a bounded,
+      // rest-triggered rate, never a per-frame cost during motion.
+      void this.forceFragmentsUpdate().then(() => {
+        this.runEdgeLod();
+        this.scheduler?.requestFrame("fit");
+      });
     });
     fragments.list.onItemSet.add(({ value: model }) => {
       model.useCamera(world.camera.three as THREE.PerspectiveCamera);
       world.scene.three.add(model.object);
-      void fragments.core.update(true);
+      void this.forceFragmentsUpdate();
+      scheduler.requestFrame("load");
     });
+
+    // document.hidden (task18 §2): stop scheduling main-viewer frames while
+    // hidden — never dispose the model — and on return, do one bounded
+    // Fragments refresh followed by exactly one correct render.
+    const onVisibility = () => {
+      if (document.hidden) {
+        scheduler.suspend();
+      } else {
+        scheduler.resume();
+        void this.forceFragmentsUpdate().then(() => scheduler.requestFrame("visibility-resume"));
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    this.disposers.push(() => document.removeEventListener("visibilitychange", onVisibility));
+
+    // Mirror motion/profile into instrumentation when it exists (optional
+    // chaining makes this a harmless no-op while instrumentation is disabled).
+    const offMotion = this.perf.onMotionChange((s) => this.instrumentation?.setMotion(s));
+    const offProfile = this.perf.onProfileChange((p) => this.instrumentation?.setProfile(p));
+    this.disposers.push(offMotion, offProfile);
+
+    // Adaptive pixel ratio (task18 §3): re-evaluate on every motion/profile
+    // transition and on a real sustained-slow flip (never on one slow frame).
+    const offPixelRatioMotion = this.perf.onMotionChange(() => this.applyPixelRatio());
+    const offPixelRatioProfile = this.perf.onProfileChange(() => this.applyPixelRatio());
+    const offPixelRatioSlow = this.perf.onSustainedSlowChange(() => this.applyPixelRatio());
+    this.disposers.push(offPixelRatioMotion, offPixelRatioProfile, offPixelRatioSlow);
+    this.applyPixelRatio(); // stationary/balanced default before any model loads
+
+    // Fragments update throttle (task18 §4): re-evaluate maxUpdateRate on
+    // every motion/profile transition.
+    const offThrottleMotion = this.perf.onMotionChange(() => this.applyFragmentsThrottle());
+    const offThrottleProfile = this.perf.onProfileChange(() => this.applyFragmentsThrottle());
+    this.disposers.push(offThrottleMotion, offThrottleProfile);
+    this.applyFragmentsThrottle();
+
+    // Base-model edge motion-hide/restore (task18 §5) — delegated to the
+    // overlay itself, which owns the cancel/restart delay timer.
+    const offEdgeMotion = this.perf.onMotionChange((state) => {
+      this.edgeOverlay?.setMotion(
+        state === "moving",
+        (localId) => this.edgeRoleOf(localId),
+        () => this.scheduler?.requestFrame("edges"),
+      );
+    });
+    this.disposers.push(offEdgeMotion);
+
+    // Feed per-tick timing into the shared frame-time sampler (which stretches
+    // under a heavy render, the signal the pixel-ratio policy needs), and,
+    // while moving, request an unforced Fragments update at the configured
+    // throttle rate — cheap even every tick since the library's own gate
+    // (mirrored here only for accurate instrumentation counts) makes most
+    // calls a no-op between intervals.
+    let lastTickAt: number | null = null;
+    const onTickForFrameTime = () => {
+      const now = performance.now();
+      if (lastTickAt !== null) this.perf.recordFrameTime(now - lastTickAt);
+      lastTickAt = now;
+
+      if (this.perf.getMotion() === "moving" && this.fragments) {
+        const rate = this.fragments.core.settings.maxUpdateRate;
+        if (now - this.lastThrottledFragmentsUpdateAt >= rate) {
+          this.lastThrottledFragmentsUpdateAt = now;
+          const started = now;
+          void this.fragments.core.update().then(() => {
+            this.instrumentation?.recordThrottledFragmentsUpdate(Math.round(performance.now() - started));
+          });
+        }
+      }
+    };
+    const renderer = world.renderer;
+    renderer.onAfterUpdate.add(onTickForFrameTime);
+    this.disposers.push(() => renderer.onAfterUpdate.remove(onTickForFrameTime));
 
     this.components = components;
     this.world = world;
     this.fragments = fragments;
 
+    // Dev-only, opt-in instrumentation (tasks/task18.md §1). import.meta.env.DEV
+    // dead-code-eliminates this branch from production builds entirely.
+    if (import.meta.env.DEV && instrumentationRequested()) {
+      this.instrumentation = new ViewerInstrumentation(world.renderer);
+    }
+
     this.configureControls();
     this.applyLens();
     this.attachPointer(container);
+    // Catches an obstruction set via setViewportObstruction before init
+    // finished (task19 §2) — a no-op re-application otherwise.
+    this.applyViewOffset();
   }
 
   // -------------------------------------------------------------------------
@@ -181,6 +308,99 @@ export class ViewerAdapter {
     perspective.filmGauge = VIEWER_CAMERA.filmGaugeMm;
     perspective.setFocalLength(VIEWER_CAMERA.focalLengthMm);
     perspective.updateProjectionMatrix();
+  }
+
+  /**
+   * Width, in CSS px, currently occupied by visible right-side panels
+   * (task19 §2) — called by the App layer whenever a panel opens, closes,
+   * collapses, or resizes, reusing its own live panel width/component-open
+   * state rather than a hard-coded copy in the viewer. Only updates the
+   * camera's projection offset (`applyViewOffset`); never moves, refits, or
+   * resets the camera on its own, so panel changes never unexpectedly jump
+   * the user's current view.
+   */
+  setViewportObstruction(px: number): void {
+    const next = Math.max(0, px);
+    if (next === this.rightObstructionPx) return;
+    this.rightObstructionPx = next;
+    this.applyViewOffset();
+    this.scheduler?.requestFrame("viewport-offset");
+  }
+
+  /**
+   * Shifts/scopes the camera's projection matrix, via three.js's own
+   * `setViewOffset`, so that fitted content centers within the unobstructed
+   * left region rather than the full canvas (task19 §2) — a pure
+   * camera-framing calculation; the model is never translated.
+   *
+   * `setViewOffset(fullWidth, fullHeight, x, y, width, height)` sets
+   * `camera.aspect = fullWidth / fullHeight` and renders a `width x height`
+   * window of that virtual frustum. Passing `fullWidth = leftWidth` (the
+   * visible region) with `width = canvasWidth` (the full, unshrunk render
+   * target) means: (a) `camera.aspect` becomes `leftWidth / canvasHeight`,
+   * exactly what `CameraControls.fitToBox` needs to size a fit so content
+   * fits the NARROWER visible region rather than the full canvas — the fix
+   * only centers, per the task's required behavior, this sizing side-effect
+   * is what keeps a fit-to-full-width object from being clipped once
+   * recentered; and (b) the rendered width/height ratio is provably
+   * `width/height = canvasWidth/canvasHeight` regardless of `fullWidth`, so
+   * the final image is never stretched. With `offsetX = 0`, content
+   * `fitToBox` centered on the look axis lands exactly at pixel
+   * `leftWidth / 2` — the visible-region centroid — with no extra shift term
+   * needed. Because this only edits the projection matrix (not camera
+   * position), THREE's raycasting — and therefore Fragments' own
+   * camera+mouse+dom picking — stays pixel-correct automatically. Applied
+   * before every `fitToBox` call (so the fit distance itself uses the
+   * correct aspect) and re-applied standalone on any panel/resize change
+   * (which reshapes/repositions the SAME already-framed view without moving
+   * the camera).
+   */
+  private applyViewOffset(): void {
+    const cam = this.world?.camera.three as THREE.PerspectiveCamera | undefined;
+    const dom = this.rendererDom();
+    if (!cam || !cam.isPerspectiveCamera || !dom) return;
+    const canvasW = dom.clientWidth || 1;
+    const canvasH = dom.clientHeight || 1;
+    const minLeftWidth = canvasW * VIEWER_CAMERA.minEffectiveWidthFraction;
+    const leftWidth = Math.max(canvasW - this.rightObstructionPx, minLeftWidth);
+    if (leftWidth >= canvasW - 0.5) {
+      cam.clearViewOffset();
+      return;
+    }
+    cam.setViewOffset(leftWidth, canvasH, 0, 0, canvasW, canvasH);
+  }
+
+  /** Dev-only instrumentation snapshot, or null when disabled (tasks/task18.md §1). */
+  getInstrumentationSnapshot(): InstrumentationSnapshot | null {
+    return this.instrumentation?.snapshot() ?? null;
+  }
+
+  /** Current adaptive performance profile (tasks/task18.md §11) — read by the
+   * component preview so it applies the same profile's fps cap/pixel ratio. */
+  getProfile(): Profile {
+    return this.perf.getProfile();
+  }
+
+  /**
+   * User profile override (tasks/task18.md §11) — secondary to automatic
+   * detection. `null` means automatic. Setting a value takes effect
+   * immediately (no reload) by re-applying it to the shared performance
+   * controller, which every adaptive system (pixel ratio, Fragments
+   * throttle) already reacts to via subscription.
+   */
+  setProfileOverride(profile: Profile | null): void {
+    this.profileOverride = profile;
+    this.perf.setProfile(profile ?? this.lastDetectedProfile);
+  }
+
+  getProfileOverride(): Profile | null {
+    return this.profileOverride;
+  }
+
+  /** Applies an automatically DETECTED profile, unless a user override is active. */
+  private applyDetectedProfile(profile: Profile): void {
+    this.lastDetectedProfile = profile;
+    if (this.profileOverride === null) this.perf.setProfile(profile);
   }
 
   /** Current vertical FOV — exposed for tests (task14 §8). */
@@ -224,6 +444,10 @@ export class ViewerAdapter {
 
     const onDown = (e: PointerEvent) => {
       this.pointerDown = { x: e.clientX, y: e.clientY, button: e.button };
+      // Hold a render frame from the moment a drag COULD start, slightly
+      // ahead of camera-controls' own 'wake' event, so the first frame of a
+      // drag/orbit never waits on that event's own latency (task18 §2).
+      this.scheduler?.hold("pointer-drag");
       if (e.button === 1) {
         // Middle button starts an orbit: set the pivot from what is under the
         // cursor before camera-controls begins rotating.
@@ -238,6 +462,7 @@ export class ViewerAdapter {
       const start = this.pointerDown;
       this.pointerDown = null;
       this.setCursor(dom, "grab");
+      this.scheduler?.release("pointer-drag");
       if (!start || !this.selectionEnabled) return;
       if (start.button !== 0) return; // only a plain left click selects
       const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
@@ -275,7 +500,7 @@ export class ViewerAdapter {
   /**
    * Orbit pivot resolution (task14 §2):
    *   1. raycast under the cursor against visible model geometry;
-   *   2. otherwise intersect the elevation-zero base plane;
+   *   2. otherwise intersect the visual base plane (task19 §3);
    *   3. otherwise retain the current orbit target.
    *
    * Never alters selection to establish a pivot.
@@ -303,7 +528,7 @@ export class ViewerAdapter {
       }
     }
 
-    // 2. elevation-zero plane
+    // 2. visual base plane
     const point = this.intersectGroundPlane(event, camera, dom);
     if (point) {
       controls.setOrbitPoint(point.x, point.y, point.z);
@@ -338,24 +563,62 @@ export class ViewerAdapter {
     return three?.domElement ?? null;
   }
 
+  /**
+   * Resolves the local ID a click should select, or null for "no pick" (task19
+   * §1).
+   *
+   * While one or more blue query-primary results exist, transparent/dimmed
+   * non-result geometry must not block the ray: this branch collects EVERY
+   * intersection along the ray (`raycastAll`, one local worker round trip, no
+   * backend/LLM call), sorts by distance, and returns the nearest hit whose
+   * local ID is already in `queryPrimarySet` — never mutating visibility or
+   * building a per-entity picking mesh. A ray with no blue hit returns null,
+   * which `handlePick` treats exactly like a total miss (the existing
+   * empty-space-clears-selection path), since non-results are meant to be
+   * transparent to picking, not a wall that merely no-ops.
+   *
+   * Without active roles, behavior is unchanged: a single nearest-hit raycast
+   * against whatever is visible.
+   */
+  private async resolvePickLocalId(event: PointerEvent, dom: HTMLCanvasElement): Promise<number | null> {
+    if (!this.model || !this.world) return null;
+    const camera = this.world.camera.three;
+    const mouse = new THREE.Vector2(event.clientX, event.clientY);
+
+    if (this.rolesActive && this.queryPrimarySet.size > 0) {
+      let hits: FRAGS.RaycastResult[] | null = null;
+      try {
+        hits = await this.model.raycastAll({ camera, mouse, dom });
+      } catch {
+        hits = null;
+      }
+      if (!hits || hits.length === 0) return null;
+      let nearest: FRAGS.RaycastResult | null = null;
+      for (const hit of hits) {
+        if (!this.queryPrimarySet.has(hit.localId)) continue;
+        if (!nearest || hit.distance < nearest.distance) nearest = hit;
+      }
+      return nearest?.localId ?? null;
+    }
+
+    let result: FRAGS.RaycastResult | null = null;
+    try {
+      result = await this.model.raycast({ camera, mouse, dom });
+    } catch {
+      result = null;
+    }
+    return result?.localId ?? null;
+  }
+
   private async handlePick(event: PointerEvent): Promise<void> {
     if (!this.model || !this.world) return;
     const dom = this.rendererDom();
     if (!dom) return;
     const additive = event.ctrlKey || event.shiftKey || event.metaKey;
 
-    let result: FRAGS.RaycastResult | null = null;
-    try {
-      result = await this.model.raycast({
-        camera: this.world.camera!.three,
-        mouse: new THREE.Vector2(event.clientX, event.clientY),
-        dom,
-      });
-    } catch {
-      result = null;
-    }
+    const localId = await this.resolvePickLocalId(event, dom);
 
-    if (!result) {
+    if (localId === null) {
       if (!additive && this.manual.size > 0) {
         this.manual.clear();
         this.emitManual();
@@ -364,16 +627,6 @@ export class ViewerAdapter {
       return;
     }
 
-    const localId = result.localId;
-    // Query-result-only picking (task15 §3): while blue primary results are
-    // present, dimmed non-results and yellow context entities are not
-    // selectable. The check runs BEFORE any selection state changes, so a
-    // rejected entity never flickers into a selected state, and the current
-    // selection is never replaced by clicking one. Eligibility comes from the
-    // already-resolved local-id set — never a backend or LLM call.
-    if (this.rolesActive && this.queryPrimarySet.size > 0 && !this.queryPrimarySet.has(localId)) {
-      return;
-    }
     const guids = await this.model.getGuidsByLocalIds([localId]);
     const guid = guids[0];
     if (!guid) return; // element without a stable GlobalId — ignore
@@ -427,21 +680,55 @@ export class ViewerAdapter {
     const model = await this.fragments.core.load(bytes, { modelId });
     this.model = model;
     this.modelId = modelId;
-    await this.fragments.core.update(true);
+    await this.forceFragmentsUpdate();
 
     await this.resolveGroundY();
     this.classification = await this.classifyGeometry();
     await this.renderHighlights();
     this.createBasePlane();
+
+    // Provisional adaptive profile (task18 §11): geometric/runtime signals
+    // ONLY (artifact bytes + item count) — never model name/ID/category/
+    // discipline/storey. Decided now, before the edge build, so the correct
+    // profile-specific edge-angle threshold (task18 §6) and pixel-ratio/
+    // Fragments-throttle defaults apply from the first frame, not after a
+    // second pass. One `getLocalIds()` call is shared with the edge build
+    // below via `options.localIds` so this never costs a second worker
+    // round trip.
+    let localIds: number[] = [];
+    try {
+      localIds = await model.getLocalIds();
+    } catch {
+      // profile detection is best-effort; an empty list just yields "balanced"
+    }
+    let profile: Profile = detectProfile({ artifactBytes: bytes.byteLength, itemCount: localIds.length }, null);
+    this.applyDetectedProfile(profile);
+
     // Optional edge overlay (task15 §2): built asynchronously AFTER the scene
     // is ready and usable, in yielded batches, so it never delays load or
     // blocks input. When it finishes it paints itself from the current roles.
     if (EDGES.enabled) {
       const overlay = new EdgeOverlay();
       this.edgeOverlay = overlay;
-      void overlay.build(model, model.object).then((built) => {
+      const thresholdDeg =
+        profile === "large-model" ? EDGES.thresholdAngleDeg.largeModel : EDGES.thresholdAngleDeg.balanced;
+      void overlay.build(model, model.object, { thresholdDeg, localIds }).then((built) => {
         // Ignore a build that finished after the model changed underneath it.
-        if (built && this.edgeOverlay === overlay) this.recolorEdges();
+        if (built && this.edgeOverlay === overlay) {
+          this.recolorEdges();
+          const vertexCount = overlay.getVertexCount();
+          this.instrumentation?.recordEdgeBuild(overlay.getBuildMs() ?? 0, vertexCount, overlay.getChunkCount());
+          this.instrumentation?.setModelItemCount(overlay.getItemCount());
+          // Final profile (task18 §11): adds edge vertex count, the last of
+          // the three signals. A single controlled upgrade from provisional —
+          // detectProfile's hysteresis prevents this from flip-flopping.
+          profile = detectProfile(
+            { artifactBytes: bytes.byteLength, itemCount: localIds.length, edgeVertexCount: vertexCount },
+            profile,
+          );
+          this.applyDetectedProfile(profile);
+          this.scheduler?.requestFrame("edges");
+        }
       });
     }
 
@@ -456,24 +743,27 @@ export class ViewerAdapter {
   }
 
   /**
-   * Scene-space Y of IFC/world elevation 0 (task14 §2).
-   *
-   * Derived from the model's own coordination matrix — the transform Fragments
-   * applied to the original IFC coordinates — NOT from the bounding box. Using
-   * the bbox centre or minimum would put the plane at an arbitrary height and
-   * would move with the model's contents.
+   * Visual base-plane Y: the loaded model's lowest geometric point (task19 §3),
+   * `model.box.min.y` in the same scene-space coordinates used to render the
+   * model — i.e. AFTER the Fragments coordination transform, never derived
+   * from it directly. Previously this used the coordination matrix's IFC/world
+   * elevation 0, which could sit above or below the model's actual geometry;
+   * that reading is a presentation-only choice for where the reference plane
+   * touches, and must never be reported as an `IfcBuildingStorey` elevation or
+   * the IFC coordinate origin. Falls back to scene 0 when the box is missing,
+   * empty, or non-finite — the model itself is never translated or rebased to
+   * make this true.
    */
   private async resolveGroundY(): Promise<void> {
     this.groundY = 0;
     if (!this.model) return;
     try {
-      const matrix = await this.model.getCoordinationMatrix();
-      if (matrix) {
-        const origin = new THREE.Vector3(0, 0, 0).applyMatrix4(matrix);
-        if (Number.isFinite(origin.y)) this.groundY = origin.y;
+      const box = this.model.box;
+      if (box && !box.isEmpty() && Number.isFinite(box.min.y)) {
+        this.groundY = box.min.y;
       }
     } catch {
-      // no coordination info — elevation 0 is scene 0
+      // a missing/broken box falls back to scene 0
     }
   }
 
@@ -541,14 +831,13 @@ export class ViewerAdapter {
   async unloadModel(): Promise<void> {
     this.manual.clear();
     this.queryPrimary = [];
-    this.queryContext = [];
     this.queryPrimarySet = new Set();
-    this.queryContextSet = new Set();
     this.rolesActive = false;
     this.classification = { roof: [], wall: [] };
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
     this.removeBasePlane();
+    this.groundY = 0; // stored plane height resets on unload/model switch (task19 §3)
     if (this.fragments && this.modelId) {
       try {
         await this.fragments.core.disposeModel(this.modelId);
@@ -558,16 +847,20 @@ export class ViewerAdapter {
     }
     this.model = null;
     this.modelId = null;
+    this.perf.reset();
+    this.scheduler?.requestFrame("unload");
   }
 
   // -------------------------------------------------------------------------
-  // Base plane at elevation zero (task14 §2)
+  // Base plane at the model's geometric minimum (task19 §3, amends task14 §2)
   // -------------------------------------------------------------------------
 
   /**
-   * Quiet drafting grid at IFC/world elevation exactly 0, transformed into
-   * scene coordinates. Below-zero geometry stays visible and unclipped: the
-   * grid is a thin, transparent, non-depth-writing overlay, not a clip plane.
+   * Quiet drafting grid at the loaded model's lowest geometric point
+   * (`groundY`, resolved in `resolveGroundY`), a presentation-only reference —
+   * never a redefinition of IFC level/elevation semantics. Below-plane
+   * geometry stays visible and unclipped: the grid is a thin, transparent,
+   * non-depth-writing overlay, not a clip plane.
    */
   private createBasePlane(): void {
     this.removeBasePlane();
@@ -589,6 +882,7 @@ export class ViewerAdapter {
 
       this.world.scene.three.add(grid);
       this.basePlane = grid;
+      this.scheduler?.requestFrame("base-plane");
     } catch {
       // the plane is decorative; never fail a load over it
     }
@@ -605,10 +899,83 @@ export class ViewerAdapter {
       // ignore
     }
     this.basePlane = null;
+    this.scheduler?.requestFrame("base-plane");
   }
 
   hasBasePlane(): boolean {
     return this.basePlane !== null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Adaptive main-viewer pixel ratio (task18 §3)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Replaces the library's fixed `min(devicePixelRatio, 2)` ceiling with a
+   * motion/profile-adaptive policy from `PIXEL_RATIO` (viewerTheme.ts). The
+   * moving range steps down to its `low` value only under a sustained-slow
+   * verdict (ViewerPerformanceController's hysteresis/cooldown-gated frame-time
+   * sampler) — never on one individual slow frame. The chosen value is always
+   * additionally capped by the display's own devicePixelRatio: the policy
+   * values are a ceiling, not a mandate to upscale past native resolution.
+   */
+  private applyPixelRatio(): void {
+    const three = this.world?.renderer?.three as THREE.WebGLRenderer | undefined;
+    if (!three) return;
+    const profileKey = this.perf.getProfile() === "large-model" ? "largeModel" : "balanced";
+    let target: number;
+    if (this.perf.getMotion() === "moving") {
+      const range = PIXEL_RATIO.moving[profileKey];
+      target = this.perf.isSustainedSlow() ? range.low : range.high;
+    } else {
+      target = PIXEL_RATIO.stationary[profileKey];
+    }
+    const nativeDpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const ratio = Math.min(target, nativeDpr);
+    if (three.getPixelRatio() === ratio) return; // avoid a redundant setSize
+    three.setPixelRatio(ratio);
+    this.scheduler?.requestFrame("pixel-ratio");
+  }
+
+  // -------------------------------------------------------------------------
+  // Fragments LOD/visibility update throttle (task18 §4)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Drives the installed `FragmentsModels.settings.maxUpdateRate` (a public,
+   * built-in throttle — verified in
+   * node_modules/@thatopen/fragments/dist/index.mjs — that already gates
+   * every `core.update()` call, forced or not, before the force branch runs)
+   * from the current motion/profile state, instead of hand-rolling a
+   * duplicate throttle.
+   */
+  private applyFragmentsThrottle(): void {
+    if (!this.fragments) return;
+    const profileKey = this.perf.getProfile() === "large-model" ? "largeModel" : "balanced";
+    this.fragments.core.settings.maxUpdateRate =
+      this.perf.getMotion() === "moving"
+        ? FRAGMENTS_THROTTLE_MS.moving[profileKey]
+        : FRAGMENTS_THROTTLE_MS.restingMs;
+  }
+
+  /**
+   * Guaranteed-to-execute forced update. The library's own `maxUpdateRate`
+   * gate runs BEFORE the force check, so calling `core.update(true)` moments
+   * after a throttled call could otherwise be silently skipped — zeroing the
+   * rate for the duration of this call removes that race, then restores
+   * whatever rate was active (moving or resting) afterward.
+   */
+  private async forceFragmentsUpdate(): Promise<void> {
+    if (!this.fragments) return;
+    const started = performance.now();
+    const rate = this.fragments.core.settings.maxUpdateRate;
+    this.fragments.core.settings.maxUpdateRate = 0;
+    try {
+      await this.fragments.core.update(true);
+    } finally {
+      this.fragments.core.settings.maxUpdateRate = rate;
+    }
+    this.instrumentation?.recordForcedFragmentsUpdate(Math.round(performance.now() - started));
   }
 
   // -------------------------------------------------------------------------
@@ -627,6 +994,11 @@ export class ViewerAdapter {
     // resize failed — otherwise a transient error silently drops the 50 mm
     // equivalence for the rest of the session.
     this.applyLens();
+    // Canvas dimensions changed — the view-offset centering math must use the
+    // fresh size, without moving the camera (task19 §2).
+    this.applyViewOffset();
+    this.runEdgeLod(); // viewport height changed — re-evaluate projected chunk sizes
+    this.scheduler?.requestFrame("resize");
   }
 
   async fitAll(): Promise<void> {
@@ -652,6 +1024,16 @@ export class ViewerAdapter {
       Math.max((size.z * VIEWER_CAMERA.fitExpand) / 2, VIEWER_CAMERA.minFitSize),
     );
     const framed = new THREE.Box3(center.clone().sub(half), center.clone().add(half));
+    // Sets camera.aspect from the current unobstructed left region BEFORE
+    // fitToBox reads it synchronously to compute fit distance (task19 §2) —
+    // every fit/focus call (fitAll, query-result fit, citation fit, component
+    // fit) funnels through this one method, so all share the same effective
+    // viewport logic.
+    this.applyViewOffset();
+    // The transition drives its own 'wake'/'rest' pair once camera-controls
+    // picks it up, but request an immediate frame too so the FIRST frame of
+    // the animation doesn't wait on that event's latency (task18 §2).
+    this.scheduler?.requestFrame("fit");
     await this.world.camera.controls.fitToBox(framed, true);
   }
 
@@ -680,23 +1062,19 @@ export class ViewerAdapter {
   async applyQueryRoles(primaryGuids: string[], contextGuids: string[]): Promise<RoleApplyResult> {
     if (!this.model) return { missing: [...primaryGuids, ...contextGuids] };
     const primary = await this.resolveGuids(primaryGuids);
-    const context = await this.resolveGuids(contextGuids);
+    // Context evidence can inform the answer but is intentionally not colored.
+    void contextGuids;
     this.queryPrimary = primary.localIds;
-    this.queryContext = context.localIds;
     this.queryPrimarySet = new Set(primary.localIds);
-    this.queryContextSet = new Set(context.localIds);
-    this.rolesActive = primary.localIds.length > 0 || context.localIds.length > 0;
+    this.rolesActive = primary.localIds.length > 0;
     await this.renderHighlights();
     if (primary.localIds.length > 0) await this.fitToLocalIds(primary.localIds);
-    else if (context.localIds.length > 0) await this.fitToLocalIds(context.localIds);
-    return { missing: [...primary.missing, ...context.missing] };
+    return { missing: primary.missing };
   }
 
   async clearQueryRoles(): Promise<void> {
     this.queryPrimary = [];
-    this.queryContext = [];
     this.queryPrimarySet = new Set();
-    this.queryContextSet = new Set();
     this.rolesActive = false;
     await this.renderHighlights();
   }
@@ -718,10 +1096,10 @@ export class ViewerAdapter {
    *
    * With query roles active, non-results are dimmed so the matches carry the
    * only saturated color on screen; manually focused results stay opaque blue
-   * while the remaining primaries drop to translucent blue — never teal
+   * while the remaining primaries drop to translucent blue
    * (task15 §3). With roles cleared, the semantic roof/wall/other base colors
    * are restored — NOT one uniform material (task14 §1) — and manual picks are
-   * drawn teal, last, so they stay distinct.
+   * drawn blue.
    */
   private async renderHighlights(): Promise<void> {
     if (!this.model || !this.fragments) return;
@@ -729,9 +1107,6 @@ export class ViewerAdapter {
       await this.model.resetHighlight();
       if (this.rolesActive) {
         await this.model.highlight(undefined, DIM_MATERIAL);
-        if (this.queryContext.length) {
-          await this.model.highlight(this.queryContext, CONTEXT_MATERIAL);
-        }
         await this.paintPrimaries();
       } else {
         await this.applyBaseColors();
@@ -739,7 +1114,8 @@ export class ViewerAdapter {
         if (manualIds.length) await this.model.highlight(manualIds, MANUAL_MATERIAL);
       }
       this.recolorEdges();
-      await this.fragments.core.update(true);
+      await this.forceFragmentsUpdate();
+      this.scheduler?.requestFrame("highlight");
     } catch {
       // a highlight failure must never crash the viewer (spec_v006 §11.3, §15)
     }
@@ -833,7 +1209,7 @@ export class ViewerAdapter {
         const anyFocused = manualIds.some((id) => this.queryPrimarySet.has(id));
         return !anyFocused || manualIds.includes(localId) ? "primary" : "primaryUnfocused";
       }
-      return this.queryContextSet.has(localId) ? "context" : "dim";
+      return "dim";
     }
     return manualIds.includes(localId) ? "manual" : this.roleOfLocalId(localId);
   }
@@ -841,6 +1217,20 @@ export class ViewerAdapter {
   private recolorEdges(): void {
     if (!this.edgeOverlay?.isBuilt()) return;
     this.edgeOverlay.recolor((localId) => this.edgeRoleOf(localId));
+  }
+
+  /**
+   * Screen-size LOD pass (task18 §8) over the edge overlay's spatial chunks.
+   * Called at a bounded rate (camera rest, resize) — never per frame during
+   * motion. A no-op for a non-perspective camera or before the overlay build
+   * resolves.
+   */
+  private runEdgeLod(): void {
+    if (!this.world || !this.edgeOverlay?.isBuilt()) return;
+    const camera = this.world.camera.three;
+    if (!(camera as THREE.PerspectiveCamera).isPerspectiveCamera) return;
+    const viewportHeightPx = this.rendererDom()?.clientHeight || 1;
+    this.edgeOverlay.updateLod(camera as THREE.PerspectiveCamera, viewportHeightPx);
   }
 
   dispose(): void {
@@ -852,6 +1242,11 @@ export class ViewerAdapter {
       }
     });
     this.disposers = [];
+    this.instrumentation?.dispose();
+    this.instrumentation = null;
+    this.scheduler?.dispose();
+    this.scheduler = null;
+    this.perf.reset();
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
     this.removeBasePlane();

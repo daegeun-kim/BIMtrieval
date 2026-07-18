@@ -5,10 +5,10 @@
 // Design language: "measured drawing" (spec_v006 §7). The organizing rule here
 // is deliberate and load-bearing:
 //
-//     Base model geometry is ACHROMATIC. Every semantic role is CHROMATIC.
+//     Base model geometry and context are gray. Matches and manual picks are blue.
 //
-// Roof/wall/other are pure cool grays; primary/context/manual are saturated
-// blueprint blue / ochre / teal. So "is this object a query result?" is answered
+// Roof/wall/other/context are cool grays; primary/manual use blueprint blue. So
+// "is this object a query result?" is answered
 // by the *presence of color*, not by discriminating one hue from another — which
 // stays legible under any color-vision deficiency and over the varied grey/beige
 // materials typical of BIM models. The gray ladder (roof L*~49, wall L*~79,
@@ -40,10 +40,10 @@ export const VIEWER_COLORS = {
    * (task15 §3): the same blueprint blue, lowered opacity — never teal.
    */
   primaryUnfocused: "#1f6feb",
-  /** Relationship/context match: distinct but muted — ochre. */
-  context: "#e8a94f",
-  /** Manual selection: distinct from both query roles — teal. */
-  manual: "#0fb5c9",
+  /** Context is intentionally uncolored and recedes with non-results. */
+  context: "#c7ced6",
+  /** Manual selection uses the same blue as a query match. */
+  manual: "#1f6feb",
 
   /** Non-result geometry while query highlighting is active. */
   dim: "#c7ced6",
@@ -61,11 +61,25 @@ export const VIEWER_OPACITY = {
   primary: 1,
   /** Unfocused primaries recede while a result is focused, but stay clearly blue. */
   primaryUnfocused: 0.45,
-  /** Slightly translucent so context reads as secondary to primary. */
-  context: 0.92,
+  /** Context is not a colored result. */
+  context: 0.16,
   manual: 1,
-  /** Highly transparent: non-results recede but keep spatial context. */
-  dim: 0.16,
+  /**
+   * Query-highlight transparency (task18 §9). Benchmarked on model 2 against
+   * 3 candidates: (1) the original 0.16 + motion-hidden edges; (2) fully
+   * opaque (1.0) light-neutral with edges disabled; (3) moderate 0.3-0.4 with
+   * edges disabled. Candidate 2 was REJECTED after live testing: opaque
+   * non-result geometry occluded every sampled interior/hidden query-primary
+   * result from every external camera angle, violating "primary and manual
+   * selections must remain clearly blue and legible" — a real risk for a
+   * query tool where results are frequently interior elements (partition
+   * walls, MEP, doors), not just exterior-visible surfaces. Candidate 3 (this
+   * value) was selected: it keeps every primary visible through the
+   * translucency (same guarantee as the original), while disabling non-result
+   * edges (`EDGES.alpha.dim` below) measurably reduces visual line density
+   * versus the original 0.16 treatment.
+   */
+  dim: 0.35,
   /** Light enough never to obscure underground geometry. */
   plane: 0.3,
 } as const;
@@ -82,8 +96,17 @@ export const EDGES = {
   enabled: true,
   /** Multiplier applied to the current face color (1 = identical color). */
   darken: 0.72,
-  /** Feature-edge angle threshold in degrees (THREE.EdgesGeometry). */
-  thresholdAngleDeg: 25,
+  /**
+   * Feature-edge angle threshold in degrees (THREE.EdgesGeometry), profile-
+   * adaptive (task18 §6). A higher threshold keeps fewer, stricter edges —
+   * chosen once per model load from the provisional profile (bytes + item
+   * count, before the edge build starts) so a genuinely large model builds
+   * its overlay at the coarser angle from the first pass, not a second one.
+   */
+  thresholdAngleDeg: {
+    balanced: 25,
+    largeModel: 40,
+  },
   /** Edge alpha per role. Where the face is transparent, the edge is more opaque. */
   alpha: {
     roof: 0.9,
@@ -91,11 +114,59 @@ export const EDGES = {
     other: 0.85,
     primary: 1,
     primaryUnfocused: 0.75, // face 0.45
-    context: 1, //             face 0.92
+    context: 0.4, //           face 0.16
     manual: 1,
-    dim: 0.4, //               face 0.16
+    dim: 0, //                 face 0.35 (candidate 3, task18 §9) — context edges disabled
+  },
+  /**
+   * Projected screen-size hysteresis for base-model edge chunk culling
+   * (task18 §8). Below `farEnterPx` a chunk stops rendering custom edges;
+   * it must grow past `farExitPx` before edges return, so borderline chunks
+   * don't flicker. Selected/query-primary chunks use a stricter, closer pair
+   * so they stay legible farther from the camera than base context.
+   */
+  lod: {
+    farEnterPx: 2,
+    farExitPx: 4,
+    highlightFarEnterPx: 0.75,
+    highlightFarExitPx: 1.5,
   },
 } as const;
+
+/**
+ * Main-viewer pixel-ratio policy (task18 §3). Moving values are a range; the
+ * live value is chosen deterministically by ViewerPerformanceController from
+ * measured frame time (high end first, stepped down only under sustained
+ * slow frames) and never exceeds the listed ceiling for the active profile.
+ * Stationary values are fixed.
+ */
+export const PIXEL_RATIO = {
+  moving: {
+    balanced: { high: 1.25, low: 1.0 },
+    largeModel: { high: 1.0, low: 0.85 },
+  },
+  stationary: {
+    balanced: 1.5,
+    largeModel: 1.25,
+  },
+} as const;
+
+/**
+ * Fragments LOD/visibility update throttle (task18 §4), applied to
+ * `fragments.core.settings.maxUpdateRate`. `restingMs` matches the library's
+ * own default (100ms) so an at-rest forced update (e.g. a highlight change)
+ * is never artificially delayed by a leftover large-model throttle window.
+ */
+export const FRAGMENTS_THROTTLE_MS = {
+  moving: {
+    balanced: 120,
+    largeModel: 200,
+  },
+  restingMs: 100,
+} as const;
+
+/** Delay after camera rest before base-model edges reappear (task18 §5). */
+export const EDGE_RESTORE_DELAY_MS = 150;
 
 /** Camera / framing constants (task14 §2). */
 export const VIEWER_CAMERA = {
@@ -113,6 +184,14 @@ export const VIEWER_CAMERA = {
   minFitSize: 2.5,
   /** px of pointer travel that separates a click-select from a left-drag pan. */
   clickMoveTolerance: 4,
+  /**
+   * Floor on the effective (unobstructed) viewport width, as a fraction of
+   * the full canvas width (task19 §2). Guards the camera-view-offset centering
+   * math against a degenerate near-zero or negative visible region — e.g. a
+   * very narrow window with both panels open — rather than letting the fit
+   * distance blow up toward infinity.
+   */
+  minEffectiveWidthFraction: 0.35,
 } as const;
 
 /** Isolated component preview (task14 §5; height doubled by task15 §4). */
@@ -125,6 +204,18 @@ export const PREVIEW = {
   /** Preview viewport height; the canvas uses min(this, 36vh) to stay
    * responsive on short application viewports. */
   viewportHeightPx: 320,
+  /** Finite auto-rotation lifetime (task18 §10) — replaces indefinite pause/resume. */
+  autoRotateLifetimeMs: 12000,
+  /** Auto-rotation frame-rate cap by profile (task18 §10). */
+  autoRotateFpsCap: {
+    balanced: 30,
+    largeModel: 20,
+  },
+  /** Preview renderer pixel ratio by motion state (task18 §10). */
+  pixelRatio: {
+    moving: 1.0,
+    stationary: 1.25,
+  },
 } as const;
 
 // ===========================================================================

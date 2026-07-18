@@ -68,22 +68,18 @@ def resolve_group_answer(groups: list[EvidenceGroup], output: Any) -> GroupDecis
                 continue  # a group can't hold two roles; first wins
             accepted_ids.append(gid)
             bucket.append(by_id[gid])
+    # Retrieval groups are candidates. Anything the answerer omitted is
+    # rejected by default, so silence can never become implicit acceptance.
+    classified = set(primary) | set(supporting) | set(context) | rejected
+    rejected.update(set(by_id) - classified)
     decision.rejected_ids = sorted(rejected)
 
-    accepted_set = set(accepted_ids)
+    primary_set = {g.group_id for g in decision.accepted_primary}
     # Viewer groups must be a subset of accepted, entity-bearing groups (§9).
     for vid in _known(output.viewer_primary_group_ids, "viewer_primary"):
         g = by_id[vid]
-        if vid in accepted_set and g.predicate_queryable:
+        if vid in primary_set and g.predicate_queryable:
             decision.viewer_primary.append(g)
-    for vid in _known(output.viewer_context_group_ids, "viewer_context"):
-        g = by_id[vid]
-        if (
-            vid in accepted_set
-            and g.predicate_queryable
-            and vid not in {x.group_id for x in decision.viewer_primary}
-        ):
-            decision.viewer_context.append(g)
 
     decision.inference_used = bool(output.inference_used)
     decision.answer_basis = _derive_basis(output, decision.accepted())

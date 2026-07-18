@@ -8,6 +8,8 @@ request schema is enforced before any handler/LLM/DB work happens.
 
 from __future__ import annotations
 
+import logging
+
 
 def test_missing_question_is_rejected(client):
     resp = client.post("/api/query", json={"session_id": "s1"})
@@ -54,3 +56,19 @@ def test_selected_global_ids_without_active_model_returns_bounded_error(client):
     body = resp.json()
     assert body["status"] == "error"
     assert "active model" in body["answer"].lower()
+
+
+def test_render_timing_accepts_bounded_browser_telemetry(client, caplog):
+    caplog.set_level(logging.INFO, logger="bim_rag_backend")
+    resp = client.post(
+        "/api/query/render-timing",
+        json={
+            "request_id": "r-timing",
+            "response_received_ms": 1200.5,
+            "viewer_render_ms": 42.2,
+            "total_to_viewer_ms": 1242.7,
+        },
+    )
+    assert resp.status_code == 204
+    assert "[Query render timing]" in caplog.text
+    assert "total_query_to_viewer_ms: 1242.7" in caplog.text

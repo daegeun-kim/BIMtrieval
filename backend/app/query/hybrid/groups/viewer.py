@@ -1,8 +1,9 @@
 """Complete post-answer viewer-identity hydration (Task 17 §9).
 
-After the answerer accepts viewer groups, deterministically retrieve EVERY
-identity of each accepted viewer group (no 2,000-ID cap), deduplicate with
-primary/context roles, and build the viewer action. Genuinely missing GlobalIds
+After the answerer accepts direct primary viewer groups, deterministically
+retrieve EVERY identity of each accepted viewer group (no 2,000-ID cap) and
+build the viewer action. Supporting/context groups remain answer evidence but
+are not highlighted. Genuinely missing GlobalIds
 (a matched entity with no usable GlobalId) are reported separately — that is not
 truncation. This is read-only DB work, not another LLM call.
 """
@@ -58,15 +59,7 @@ def hydrate_accepted_viewer_identities(
             if gid not in seen:
                 seen.add(gid)
                 result.primary_global_ids.append(gid)
-    for g in decision.viewer_context:
-        ident = all_identities(session, g.predicate, source_model_id)
-        missing += ident.missing_count
-        for gid in ident.global_ids:
-            if gid not in seen:
-                seen.add(gid)
-                result.context_global_ids.append(gid)
-
-    result.viewer_matches_total = len(result.primary_global_ids) + len(result.context_global_ids)
+    result.viewer_matches_total = len(result.primary_global_ids)
     result.missing_identity_count = missing
     # Follow-up state stores accepted primary group representative entity ids.
     for g in decision.accepted_primary:
