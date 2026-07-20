@@ -61,6 +61,7 @@ from app.query.hybrid.evidence import (
 from app.query.hybrid.groups.allocation import allocate_examples
 from app.query.hybrid.groups.builder import build_groups
 from app.query.hybrid.groups.decision import resolve_group_answer
+from app.query.hybrid.groups.schemas import PredicateKind
 from app.query.hybrid.groups.viewer import hydrate_accepted_viewer_identities
 from app.query.hybrid.orchestrator import orchestrate
 from app.query.hybrid.schemas import EvidencePackage
@@ -481,6 +482,7 @@ class QueryService:
                 settings=self.settings,
                 embedding_service_getter=get_embedding_service,
                 selection_entity_ids=request.selected_entity_ids,
+                facets=policy_plan.facets,
             )
         except (BimRagError, SQLAlchemyError) as exc:
             self._log_failure(request, request_id, "group_execution_error", str(exc))
@@ -491,6 +493,14 @@ class QueryService:
                 scope=QueryScope.ACTIVE_MODEL,
             )
         retrieval_ms = round((time.perf_counter() - t_retrieval) * 1000.0, 1)
+
+        # A filtered question whose required constraints could not be resolved
+        # must clarify — never fall through to the broader unfiltered result
+        # (Task 23 §1). Only blocks when NO constrained group survived, so a
+        # question that resolved against one candidate class still answers.
+        blocked = _unresolved_constraint_reasons(groups)
+        if blocked:
+            return self._clarify_unresolved_constraints(request, request_id, blocked)
 
         # Build the bounded group descriptions submitted to the final LLM as a
         # separately timed stage.
@@ -541,7 +551,12 @@ class QueryService:
         pkg.viewer_matches_total = hydration.viewer_matches_total
         pkg.viewer_matches_truncated = False  # complete hydration (§9)
         pkg.class_histogram = _accepted_class_histogram(decision)
-        pkg.warnings = (list(decision.warnings) + list(hydration.warnings))[:20]
+        # How each conceptual condition was actually resolved against this model
+        # (e.g. which storeys a floor band covers). Reported so the user can see
+        # — and correct — the interpretation rather than having to trust it
+        # (Task 23 §1).
+        interpretations = _accepted_interpretations(decision)
+        pkg.warnings = (interpretations + list(decision.warnings) + list(hydration.warnings))[:20]
         # Ambiguous concept totals are forbidden: only set an exact total when a
         # single exact primary group is accepted (§10).
         if (
@@ -648,6 +663,33 @@ class QueryService:
         state.last_relationship_ids = []
         state.pending_candidate_model_ids = []
         self.store.save(state)
+
+    def _clarify_unresolved_constraints(
+        self, request: SessionQueryRequest, request_id: str, reasons: list[str]
+    ) -> QueryResponseEnvelope:
+        """A required user constraint could not be resolved against this model.
+
+        Returning the unconstrained result would silently answer a different
+        question, so this asks instead — and says exactly what it could not
+        resolve, so the user can rephrase precisely (Task 23 §1)."""
+        self._log_failure(request, request_id, "unresolved_required_constraint", "; ".join(reasons))
+        detail = reasons[0]
+        answer = (
+            f"I couldn't apply part of that request to this model: {detail}. "
+            "I haven't answered it without that condition, because that would "
+            "describe a different set of objects. Could you rephrase that part?"
+        )
+        return _envelope(
+            request,
+            scope=QueryScope.ACTIVE_MODEL,
+            route=QueryRoute.CLARIFY,
+            basis=AnswerBasis.INSUFFICIENT_EVIDENCE,
+            answer=answer,
+            active_source_model_id=request.active_source_model_id,
+            viewer_actions=build_default_viewer_actions(),
+            request_id=request_id,
+            warnings=reasons[:5],
+        )
 
     def _clarify_after_repair(
         self,
@@ -845,6 +887,38 @@ def _accepted_examples(decision: Any, settings: Settings) -> list:
                 if len(out) >= settings.max_primary_entities:
                     return out
     return out
+
+
+def _accepted_interpretations(decision: Any) -> list[str]:
+    """Interpretation notes from the groups the answer actually used."""
+    notes: list[str] = []
+    for g in decision.accepted():
+        for note in getattr(g, "interpretation_notes", []) or []:
+            if note not in notes:
+                notes.append(note)
+    return notes[:6]
+
+
+def _unresolved_constraint_reasons(groups: list) -> list[str]:
+    """Reasons a filtered request cannot be answered at all (Task 23 §1).
+
+    Constrained facets are grouped by facet: a facet is blocked only when EVERY
+    one of its candidate result classes failed to resolve its required
+    conditions. If any candidate resolved, the question is answerable and the
+    answerer picks between them as usual."""
+    by_facet: dict[str, list] = {}
+    for g in groups:
+        if g.predicate.kind == PredicateKind.COMPOUND.value:
+            by_facet.setdefault(g.facet_id, []).append(g)
+    reasons: list[str] = []
+    for facet_groups in by_facet.values():
+        if any(not g.unresolved_conditions for g in facet_groups):
+            continue
+        for g in facet_groups:
+            for reason in g.unresolved_conditions:
+                if reason not in reasons:
+                    reasons.append(reason)
+    return reasons
 
 
 def _accepted_class_histogram(decision: Any) -> dict[str, int]:

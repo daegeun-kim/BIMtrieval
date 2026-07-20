@@ -501,3 +501,63 @@ Task 17 removes the fixed 2,000-ID viewer cap: `entities._identities_for_where`/
 accept `limit=None` for complete, uncapped identity hydration of an accepted evidence group
 (`hybrid/groups/execute.all_identities`). A matched entity with no usable GlobalId is reported as a
 distinct missing-identity condition, never as truncation.
+
+## Task 23 amendment — Compound predicates and model-independent storey resolution
+
+### 1. Compound group predicates
+
+`GroupPredicate` gains a `COMPOUND` kind carrying `filters`: a hashable `PredicateGroup` /
+`PredicateCondition` tree mirroring the typed `FilterGroup` it compiles to. `compile_predicate_group`
+is the ONLY place these become filters, and it reuses the existing field registry, operator
+allowlist, and recursive `FilterGroup` — there is no parallel compiler and no LLM-generated SQL.
+
+- Negation maps only through an explicit inverse-operator table; an operator with no allowlisted
+  inverse raises rather than being approximated by a weaker condition.
+- An unsupported operator or field kind raises. Failing loudly is required: silently dropping the
+  condition would widen the result set.
+- The predicate signature includes the filter tree, so a filtered and an unfiltered predicate for
+  the same class can never dedupe together.
+- `select_scope_entity_ids` exposes the compound scope's entity ids using the same `_entity_where`
+  compilation as the count and the viewer identities, so all three describe one identical set.
+
+### 2. Storey/floor resolution (`query/semantic/spatial.py`)
+
+Floor language resolves to concrete `IfcBuildingStorey` GlobalIds using ONLY IFC spatial data
+already in canonical JSON: the storey entities, `placement.elevation`, and per-entity
+`storey.global_id` containment. It never reads storey names, never applies a per-model rule, and
+never assumes a naming convention. Names are carried only so the interpretation can be reported.
+
+**Logical floor bands.** Real models give each structural sub-level its own storey entity (finished
+level, underside of slab, underside of joist), so one physical floor appears as several storeys a
+few centimetres apart. Model 2 has 45 storeys at 45 distinct elevations but 9 physical floors.
+Storeys are therefore grouped into bands: a new band starts where the elevation gap exceeds
+`BAND_GAP_FRACTION` (0.3) of the model's own LARGEST inter-storey gap.
+
+The largest gap is used rather than the median because it is a floor-to-floor separation in both
+regimes: in a sub-levelled model the median gap is a sub-level gap, but in a clean one-storey-per-
+floor model the median gap is a floor gap — a median-based rule merges every floor of a clean model
+into one band. The rule is dimensionless, so it behaves identically for millimetre, metre, and
+imperial models without needing a project length unit (which v001 ingestion does not persist).
+
+Verified stable for every fraction in 0.2..0.35 on the live 45-storey model (9 bands, matching its
+real floor count) and on clean, sub-levelled, multi-wing, metric, basement, and double-height
+synthetic models.
+
+**One band is one floor.** Several storeys at the same level — e.g. wings A/B/C/D of one building —
+are OR-ed together as a single logical floor (`storey_global_id IN (...)`), not treated as
+ambiguity.
+
+**Ordinal origin.** IFC defines `IfcBuildingStorey.Elevation` relative to the building origin, so
+ordinal 1 is the band containing elevation 0 when the model has one; models expressed in a
+site/project datum (no band at 0) fall back to their lowest band. Both rules derive from the data,
+and the choice is always reported.
+
+**Unresolvable scope clarifies.** An ordinal outside the model's band count, a model with no storey
+elevations, or a phrase with no readable floor returns unresolved with a reason, which becomes a
+clarification — never a widened query.
+
+### 3. Known limitation
+
+A single extreme outlier gap (e.g. a landscape/site storey placed far from the building) inflates
+the band reference and can merge real floors. No such model exists in the current corpus, and the
+reported interpretation makes the resulting floor count visible to the user rather than silent.

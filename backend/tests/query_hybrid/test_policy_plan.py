@@ -75,8 +75,22 @@ def test_policy_schema_is_openai_strict_sized():
     assert len(json.dumps(s)) < 15000  # within strict structured-output limits
 
 
-def test_prompt_is_v001_and_query_only():
-    assert POLICY_PLANNER_PROMPT_VERSION == "policy_planner_v001"
+def test_prompt_is_v002_and_query_only():
+    assert POLICY_PLANNER_PROMPT_VERSION == "policy_planner_v002"
     text = policy_planner_prompt().lower()
     assert "from the user's query alone" in text or "from the query" in text
     assert "facet" in text
+
+
+def test_prompt_requires_typed_conditions_and_stays_query_only():
+    """Task 23 §1: the planner must be told to emit conditions as typed data and
+    must still be forbidden from seeing/emitting model-specific detail."""
+    text = policy_planner_prompt().lower()
+    assert "conditions" in text
+    # The core instruction: a condition living only in prose is lost.
+    assert "only inside" in text or "only in prose" in text
+    # Query-only isolation is unchanged from v001.
+    assert "no observed values" in text
+    assert "do not emit final ifc classes" in text
+    # It must not resolve floor language itself.
+    assert "do not resolve values yourself" in text

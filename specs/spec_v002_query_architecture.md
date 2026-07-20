@@ -1197,3 +1197,63 @@ with Task 16 wording, this governs. Completed task history is not rewritten.
   meaning; every accepted-group GlobalId is hydrated post-answer; missing GlobalIds are reported
   distinctly (not truncation). The 50-example LLM budget no longer constrains the viewer set.
 - The public `/api/query` envelope is unchanged (viewer identity list is simply uncapped).
+
+## Task 23 amendment — Constraint preservation through the pipeline
+
+Supersedes nothing; it closes a gap in the Task 17 pipeline. Task 17 resolved a question into
+independent evidence groups, each holding ONE predicate. A compound request therefore decomposed
+into unrelated claims — `IfcDoor objects` and `storey = X` as separate groups — and the unfiltered
+class group was executed and accepted as exact evidence. "Show me all the doors in the second
+floor" returned all 551 doors of model 2. The answer model cannot recover a condition that
+retrieval already discarded.
+
+### 1. Conditions are typed data, not prose
+
+LLM call 1 now emits, per facet, a `result_concept` plus a typed **conceptual intent tree**:
+`IntentCondition` leaves (concept kind, concept, operator, value concept, unit, negation,
+`required`) and `IntentGroup` Boolean nodes. Because OpenAI strict structured outputs do not
+reliably support recursive schemas, the tree is a bounded adjacency list (`parent_group_id`),
+depth-limited to match the typed SQL `FilterGroup`.
+
+A condition may never exist only in `question`, `semantic_query`, or `analysis_intent`. Structural
+validation rejects a plan whose facet carries conditions without requesting exact structured
+retrieval, and rejects malformed/duplicate/cyclic/unresolvable-parent condition trees.
+
+Call 1 remains **query-only**: it still sees no classes, fields, values, counts, or candidates, and
+still emits no SQL. Retrieval modality is still decided before semantic resolution and cannot change
+afterwards. There are still exactly two principal LLM calls.
+
+### 2. Deterministic, contextual resolution
+
+`query/semantic/intent_resolution.py` resolves each leaf against the active model, in the context of
+the facet's already-resolved result class — a requested width resolves to a width observed on the
+target class, never to any width-like field in the model. Resolution is lexical and structural over
+the already-cached vocabulary and spatial data: it adds **no LLM call and no embedding call**, so it
+does not change query latency.
+
+Floor/storey language is one model-aware value-resolution case, handled by
+`query/semantic/spatial.py` (see spec_v003 Task 23 amendment). It is not a floor-specific patch to
+the pipeline.
+
+### 3. One authoritative compound result
+
+A constrained facet produces `COMPOUND` evidence groups: the result class AND the whole resolved
+condition tree, executed as ONE result through the existing typed SQL compiler. Its exact count,
+bounded answer examples, and complete viewer identities all derive from that single result, so the
+answer and the 3D viewer share one resolved scope by construction.
+
+An unfiltered class group is never accepted as the answer to a filtered question.
+
+### 4. A required condition is never silently dropped
+
+If a required condition cannot be resolved or compiled, its group is marked failed and carries the
+reason; it can never become exact evidence. When every candidate result class for a facet fails, the
+query returns the existing clarification behavior naming what could not be resolved — it never falls
+back to the broader unfiltered query, because that would answer a different question.
+
+### 5. Reported interpretation
+
+Resolved conditions carry a human-readable interpretation (e.g. which storey entities a floor band
+covers). It is attached to the accepted groups, passed to the answer model as `applied_conditions`,
+and surfaced in the response, so a model-aware interpretation is auditable and correctable rather
+than silent.

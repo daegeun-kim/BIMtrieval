@@ -14,7 +14,12 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.api.schemas.response import PrimaryEntityResult
-from app.query.hybrid.groups.schemas import GroupPredicate, PredicateKind
+from app.query.hybrid.groups.schemas import (
+    GroupPredicate,
+    PredicateCondition,
+    PredicateGroup,
+    PredicateKind,
+)
 from app.query.sql.class_aliases import expand_entity_classes
 from app.query.sql.dispatch import execute_sql
 from app.query.sql.errors import AmbiguousFieldError, FieldNotFoundError
@@ -35,6 +40,30 @@ _OPERATOR_MAP = {
     "case_insensitive_exact": Operator.CASE_INSENSITIVE_EXACT,
     "contains": Operator.CONTAINS,
     "starts_with": Operator.STARTS_WITH,
+    "eq": Operator.EQ,
+    "ne": Operator.NE,
+    "gt": Operator.GT,
+    "gte": Operator.GTE,
+    "lt": Operator.LT,
+    "lte": Operator.LTE,
+    "between": Operator.BETWEEN,
+    "in": Operator.IN,
+    "not_in": Operator.NOT_IN,
+}
+# Operators whose negation has a direct allowlisted inverse. Anything else is
+# refused rather than approximated, so a negated condition is never silently
+# turned into a weaker one (Task 23 §1).
+_NEGATION_MAP = {
+    Operator.EQ: Operator.NE,
+    Operator.NE: Operator.EQ,
+    Operator.EXACT: Operator.NE,
+    Operator.CASE_INSENSITIVE_EXACT: Operator.NE,
+    Operator.IN: Operator.NOT_IN,
+    Operator.NOT_IN: Operator.IN,
+    Operator.GT: Operator.LTE,
+    Operator.GTE: Operator.LT,
+    Operator.LT: Operator.GTE,
+    Operator.LTE: Operator.GT,
 }
 _FIELD_KIND_MAP = {
     "attribute": FieldKind.ATTRIBUTE,
@@ -72,6 +101,65 @@ def _value_plan(predicate: GroupPredicate, source_model_id: int, limit: int) -> 
     )
 
 
+def compile_condition(condition: PredicateCondition) -> FilterCondition:
+    """One resolved leaf -> one allowlisted typed `FilterCondition`.
+
+    Reuses the existing field/operator allowlists; raises rather than degrading so
+    an uncompilable required condition fails its group instead of being dropped."""
+    op = _OPERATOR_MAP.get(condition.operator)
+    if op is None:
+        raise ValueError(f"operator {condition.operator!r} is not allowlisted")
+    if condition.negated:
+        inverse = _NEGATION_MAP.get(op)
+        if inverse is None:
+            raise ValueError(f"operator {condition.operator!r} has no allowlisted negation")
+        op = inverse
+    fk = _FIELD_KIND_MAP.get(condition.field_kind)
+    if fk is None:
+        raise ValueError(f"field kind {condition.field_kind!r} is not allowlisted")
+    value: object
+    if isinstance(condition.value, tuple):
+        value = list(condition.value)
+    else:
+        value = condition.value
+    return FilterCondition(
+        field=FieldRef(field_kind=fk, set_name=condition.set_name, field_name=condition.field_name),
+        operator=op,
+        value=value,
+        unit=condition.unit,
+    )
+
+
+def compile_predicate_group(group: PredicateGroup) -> FilterGroup:
+    """The resolved Boolean tree -> the existing recursive typed `FilterGroup`.
+
+    This is the ONLY place a group predicate becomes SQL filters, and it goes
+    through the same compiler/allowlists every other path uses (Task 23 §1)."""
+    conditions: list = []
+    for node in group.conditions:
+        if isinstance(node, PredicateGroup):
+            conditions.append(compile_predicate_group(node))
+        else:
+            conditions.append(compile_condition(node))
+    if not conditions:
+        raise ValueError("empty condition group")
+    return FilterGroup(bool_op=group.bool_op, conditions=conditions)
+
+
+def _compound_plan(
+    predicate: GroupPredicate, source_model_id: int, limit: int
+) -> FilterEntitiesPlan:
+    """Result class AND every resolved condition, as ONE authoritative plan."""
+    if predicate.filters is None:
+        raise ValueError("compound predicate carries no filters")
+    return FilterEntitiesPlan(
+        source_model_id=source_model_id,
+        entity_classes=list(expand_entity_classes(list(predicate.ifc_classes))),
+        filters=compile_predicate_group(predicate.filters),
+        limit=limit,
+    )
+
+
 def execute_predicate(
     session: Session,
     predicate: GroupPredicate,
@@ -95,6 +183,15 @@ def execute_predicate(
             res = execute_sql(
                 session,
                 SqlOperation.LIST_ENTITIES,
+                plan,
+                viewer_match_limit=viewer_limit,
+                with_viewer_identities=True,
+            )
+        elif predicate.kind == PredicateKind.COMPOUND.value:
+            plan = _compound_plan(predicate, source_model_id, sample_limit)
+            res = execute_sql(
+                session,
+                SqlOperation.FILTER_ENTITIES,
                 plan,
                 viewer_match_limit=viewer_limit,
                 with_viewer_identities=True,
@@ -154,10 +251,16 @@ class IdentityResult:
 
 
 def _where_args(predicate: GroupPredicate, source_model_id: int):
-    """(entity_classes, filters) for `select_viewer_identities` from a predicate."""
+    """(entity_classes, filters) for `select_viewer_identities` from a predicate.
+
+    Viewer identities are derived from the SAME predicate the answer's exact count
+    came from, so highlighted objects can never be a broader set than the answer's
+    scope (Task 23 §1)."""
     classes = list(expand_entity_classes(list(predicate.ifc_classes)))
     if predicate.kind == PredicateKind.ENTITY_CLASS.value:
         return classes, None
+    if predicate.kind == PredicateKind.COMPOUND.value:
+        return classes, _compound_plan(predicate, source_model_id, 1).filters
     plan = _value_plan(predicate, source_model_id, 1)
     return classes, plan.filters
 

@@ -116,6 +116,27 @@ def _entity_where(source_model_id: int, entity_classes: list[str], filters, sess
     return where
 
 
+def select_scope_entity_ids(
+    session: Session, predicate, source_model_id: int, limit: int | None = None
+) -> list[int]:
+    """Canonical entity ids inside a group predicate's structured scope (Task 23 §1).
+
+    Used to run RAG and graph traversal INSIDE a resolved compound scope instead
+    of over the whole model. Reuses the same `_entity_where` compilation as the
+    count and the viewer identities, so all three describe one identical set.
+    """
+    from app.query.hybrid.groups.execute import compile_predicate_group
+    from app.query.sql.class_aliases import expand_entity_classes
+
+    classes = list(expand_entity_classes(list(predicate.ifc_classes)))
+    filters = compile_predicate_group(predicate.filters) if predicate.filters is not None else None
+    where = _entity_where(source_model_id, classes, filters, session)
+    stmt = sa.select(_ET.c.id).where(where)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return [r[0] for r in session.execute(stmt)]
+
+
 def select_viewer_identities(
     session: Session,
     source_model_id: int,

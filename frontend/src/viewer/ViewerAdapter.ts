@@ -21,6 +21,7 @@ import * as THREE from "three";
 
 import { EdgeOverlay, type EdgeRole } from "./EdgeOverlay";
 import { type Profile, detectProfile } from "./profileDetection";
+import { ProjectedSizePolicy, asPolicyModel } from "./ProjectedSizePolicy";
 import {
   BASE_MATERIALS,
   DIM_MATERIAL,
@@ -99,6 +100,14 @@ export class ViewerAdapter {
   private profile: Profile = "balanced";
   private profileOverride: Profile | null = null;
   private lastDetectedProfile: Profile = "balanced";
+  /**
+   * Projected-size rendering policy (task23 issue 2). Hides non-fundamental
+   * objects that are too small on screen. Evaluated only on load, camera rest,
+   * resize, and view-offset changes — never per frame and never per motion tick,
+   * so it cannot reintroduce the Task 18/20 interaction hitches Task 22 removed.
+   */
+  private sizePolicy = new ProjectedSizePolicy();
+  private sizePolicyActive = false;
 
   constructor(maxSelection = 5) {
     this.maxSelection = maxSelection;
@@ -155,7 +164,10 @@ export class ViewerAdapter {
     // start/stop of a pan or orbit. Continuous fixed-quality rendering is
     // heavier while idle but smooth during interaction (spec_v006 §28).
     world.camera.controls.addEventListener("rest", () => {
-      void this.updateFragments();
+      // Re-evaluate projected sizes at rest, then refresh Fragments once. The
+      // policy runs BEFORE the update so a single Fragments refresh covers both
+      // the LOD change and the visibility change (task23 issue 2).
+      void this.applyProjectedSizePolicy().then(() => this.updateFragments());
     });
     fragments.list.onItemSet.add(({ value: model }) => {
       model.useCamera(world.camera.three as THREE.PerspectiveCamera);
@@ -226,6 +238,8 @@ export class ViewerAdapter {
     if (next === this.rightObstructionPx) return;
     this.rightObstructionPx = next;
     this.applyViewOffset();
+    // A projection change can alter projected sizes (task23 issue 2).
+    void this.applyProjectedSizePolicy().then(() => this.updateFragments());
   }
 
   /**
@@ -498,6 +512,10 @@ export class ViewerAdapter {
     } catch {
       result = null;
     }
+    // An object hidden by the projected-size policy cannot be picked (task23
+    // issue 2). Belt-and-braces: Fragments should not raycast invisible items,
+    // but selection identity must not depend on that implementation detail.
+    if (result && this.isHiddenBySize(result.localId)) return null;
     return result?.localId ?? null;
   }
 
@@ -594,6 +612,18 @@ export class ViewerAdapter {
     }
     let profile: Profile = detectProfile({ artifactBytes: bytes.byteLength, itemCount: localIds.length }, null);
     this.applyDetectedProfile(profile);
+
+    // Projected-size policy (task23 issue 2): classify categories and cache
+    // bounding volumes once, from the artifact only. Failure leaves the policy
+    // inactive and every object visible — it is an optimization, never a
+    // correctness requirement.
+    //
+    // Candidates self-restrict to geometry-bearing items: `getBoxes` returns an
+    // empty box for an item with no geometry, and `prepare` skips those. This is
+    // deliberately NOT done via `getItemsWithGeometry()`, which was measured
+    // stalling for minutes on the 283k-item reference model.
+    this.sizePolicyActive = await this.sizePolicy.prepare(asPolicyModel(model), localIds);
+    if (this.sizePolicyActive) await this.applyProjectedSizePolicy();
 
     // Optional edge overlay (task15 §2): built asynchronously AFTER the scene
     // is ready and usable, in yielded batches, so it never delays load or
@@ -722,6 +752,8 @@ export class ViewerAdapter {
     this.queryPrimarySet = new Set();
     this.rolesActive = false;
     this.classification = { roof: [], wall: [] };
+    this.sizePolicy.reset();
+    this.sizePolicyActive = false;
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
     this.removeBasePlane();
@@ -791,6 +823,74 @@ export class ViewerAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Projected-size policy (task23 issue 2)
+  // -------------------------------------------------------------------------
+
+  /**
+   * An object that must stay visible regardless of size or category: every
+   * query-primary result and every manual selection. The rendering optimization
+   * must never drop or broaden the identities the query pipeline returned.
+   */
+  private isSizeExempt = (localId: number): boolean =>
+    this.queryPrimarySet.has(localId) || this.manualLocalIds().has(localId);
+
+  private manualLocalIds(): Set<number> {
+    return new Set(this.manual.values());
+  }
+
+  /**
+   * Re-evaluate projected sizes and apply ONLY the visibility changes.
+   *
+   * Cheap by construction: classification and bounding volumes are cached at
+   * load, so this is a numeric pass over cached centers/radii plus one bounded
+   * `setVisible` call per direction. It never re-reads IFC data, never rebuilds
+   * geometry, and never calls the backend.
+   *
+   * Does NOT call `updateFragments()` itself — callers batch that, so a rest
+   * event performs exactly one Fragments refresh.
+   */
+  private async applyProjectedSizePolicy(): Promise<void> {
+    if (!this.sizePolicyActive || !this.model || !this.world) return;
+    const camera = this.world.camera.three as THREE.PerspectiveCamera;
+    if (!camera?.isPerspectiveCamera) return;
+    const dom = this.rendererDom();
+    const height = dom?.clientHeight ?? 0;
+    if (height <= 0) return;
+
+    const delta = this.sizePolicy.evaluate(camera, height, this.isSizeExempt);
+    if (delta.hide.length === 0 && delta.show.length === 0) return;
+
+    try {
+      const model = asPolicyModel(this.model);
+      if (delta.hide.length) await model.setVisible(delta.hide, false);
+      if (delta.show.length) await model.setVisible(delta.show, true);
+      // Hidden faces must not leave floating edges behind.
+      this.recolorEdges();
+    } catch {
+      // A visibility failure must never crash or freeze the viewer.
+    }
+  }
+
+  /** True when an object is currently hidden by the projected-size policy. */
+  isHiddenBySize(localId: number): boolean {
+    return this.sizePolicyActive && this.sizePolicy.isHidden(localId);
+  }
+
+  /** Diagnostics/tests: how many objects the policy currently hides. */
+  getSizeHiddenCount(): number {
+    return this.sizePolicyActive ? this.sizePolicy.hiddenIds().length : 0;
+  }
+
+  /** Diagnostics/tests: objects retained at any projected size. */
+  getSizeRetainedCount(): number {
+    return this.sizePolicy.getRetainedCount();
+  }
+
+  isSizePolicyActive(): boolean {
+    return this.sizePolicyActive;
+  }
+
+  // -------------------------------------------------------------------------
   // Fragments LOD/visibility update
   // -------------------------------------------------------------------------
 
@@ -829,6 +929,9 @@ export class ViewerAdapter {
     // Canvas dimensions changed — the view-offset centering math must use the
     // fresh size, without moving the camera (task19 §2).
     this.applyViewOffset();
+    // Projected size is measured in CSS px, so a viewport change alters it even
+    // though the camera did not move (task23 issue 2).
+    void this.applyProjectedSizePolicy().then(() => this.updateFragments());
   }
 
   async fitAll(): Promise<void> {
@@ -940,6 +1043,10 @@ export class ViewerAdapter {
         if (manualIds.length) await this.model.highlight(manualIds, MANUAL_MATERIAL);
       }
       this.recolorEdges();
+      // Highlighting an otherwise filtered object must make it visible, and
+      // clearing the highlight must immediately reapply its size/category state
+      // (task23 issue 2). Runs before the single Fragments refresh below.
+      await this.applyProjectedSizePolicy();
       await this.updateFragments();
     } catch {
       // a highlight failure must never crash the viewer (spec_v006 §11.3, §15)
@@ -1028,6 +1135,11 @@ export class ViewerAdapter {
    * entity's current face color.
    */
   edgeRoleOf(localId: number): EdgeRole {
+    // A face hidden by the projected-size policy must not leave a wireframe
+    // behind (task23 issue 2). Checked first because it overrides every colour
+    // role — but never applies to highlighted/selected objects, which the
+    // policy exempts from hiding in the first place.
+    if (this.isHiddenBySize(localId)) return "hidden";
     const manualIds = [...this.manual.values()];
     if (this.rolesActive) {
       if (this.queryPrimarySet.has(localId)) {

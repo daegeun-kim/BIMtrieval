@@ -335,3 +335,17 @@ Task 17 runs entity/relationship RAG per conceptual facet only when the query-on
 it (never because Stage-3 candidates are weak/strong). RAG enriches an exact class group with ranked
 representative examples, or forms a bounded `entity_id_set` RAG-only group (coverage=bounded) — never
 an exact total. SQL remains authoritative when both refer to the same canonical group (§4 dedup).
+
+## Task 23 amendment — RAG runs inside the resolved structured scope
+
+When a facet resolved a constrained (compound) result, its semantic search is restricted to the
+entities inside that scope. "Doors on the second floor that appear suitable for emergency egress"
+first resolves the door-and-floor scope, then ranks only those entities for semantic relevance.
+
+- The scope comes from `select_scope_entity_ids`, i.e. the same compiled predicate that produced the
+  exact count and the viewer identities — RAG can never rank an entity outside the answer's scope.
+- An empty scoped result stays empty. It never broadens to whole-model RAG; the group records that
+  nothing semantically relevant was found within the requested scope.
+- RAG remains bounded semantic evidence and never becomes an exact count. Scoping changes which
+  candidates are eligible, not their authority.
+- Facets with no conditions are unchanged: whole-model semantic search as in Task 17.

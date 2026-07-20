@@ -130,6 +130,9 @@ function roleRgba(): Record<EdgeRole, [number, number, number, number]> {
     context: VIEWER_COLORS.context,
     manual: VIEWER_COLORS.manual,
     dim: VIEWER_COLORS.dim,
+    // Hidden by the projected-size policy: alpha is 0, so this colour is never
+    // seen. It exists only to keep the role table total (task23 issue 2).
+    hidden: VIEWER_COLORS.dim,
   };
   for (const role of Object.keys(source) as EdgeRole[]) {
     const c = new THREE.Color(source[role]).multiplyScalar(EDGES.darken);

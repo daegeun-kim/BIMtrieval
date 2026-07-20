@@ -729,3 +729,54 @@ pipeline. The Task 16 probe modules are retired; catalog / explain_general / cla
   concept totals are forbidden — an exact total is set only when a single exact primary group is
   accepted.
 - Prompts: `policy_planner_v001` / `group_answerer_v001`.
+
+## Task 23 amendment — Constraint-preserving orchestration
+
+### 1. Group construction
+
+`build_groups` now receives the planner's facets. A facet carrying an intent tree produces COMPOUND
+groups — one per candidate result class, each resolving the facet's conditions in that class's
+context — instead of independent class/value groups. Unconstrained facets keep the exact Task 17
+behavior.
+
+- A COMPOUND group whose predicate executed is `authority=exact`: it is the precise answer to the
+  FILTERED question.
+- COMPOUND groups are exempt from `_dedupe_full_class_value_groups`. Even when a filtered count
+  equals the class total, that group is the user's actual request and must survive as the group
+  whose scope the answer and viewer use.
+- A group whose required conditions did not resolve is `coverage=failed`, non-queryable, and carries
+  the reason.
+
+### 2. Clarification instead of a widened answer
+
+Before the answer call, the service checks the constrained facets. A facet is blocked only when
+EVERY candidate result class failed to resolve its required conditions; if any candidate resolved,
+the question is answerable and the answerer chooses between them as usual. A blocked facet returns a
+clarification naming what could not be resolved, and logs an `unresolved_required_constraint`
+failure record.
+
+### 3. Answer and viewer share one scope
+
+Viewer identities for a COMPOUND group are hydrated from the same predicate, via the same
+`_entity_where` compilation, as the exact count — so the highlighted set and the counted set are one
+set by construction, not by convention.
+
+The answer payload carries `applied_conditions` per group and instructs the answer model to state
+the interpretation and never report an unfiltered class total as the answer to a filtered question.
+
+### 4. Preserved decisions
+
+Exactly two principal LLM calls; query-only modality policy isolated from active-model semantic
+data; SQL exact / RAG bounded; existing allowlists, source-model isolation, graph limits, read-only
+behavior, and vocabulary/index caches all unchanged. No additional router, resolver, verifier,
+judge, or replanning call was added, and no late answerer-side reconstruction of a discarded
+intersection exists.
+
+### 5. Known limitation — graph scope
+
+`retrieval_policy.graph` and `retrieval_policy.rag_relationship` are recorded and logged but are not
+executed by the Task 17 group pipeline; graph traversal remains reachable only through the legacy
+single-path route. Scoped graph seeding therefore has nothing to scope in the active pipeline today.
+This is a pre-existing Task 17 gap, not a Task 23 regression. The mechanism a scoped traversal needs
+already exists — `select_scope_entity_ids` returns exactly the constrained seed set — so wiring
+graph execution into the group pipeline is the only remaining work.

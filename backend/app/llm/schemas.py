@@ -53,6 +53,10 @@ __all__ = [
     "PlanExecution",
     "QueryPlan",
     "RoleHint",
+    "ConceptKind",
+    "IntentOperator",
+    "IntentCondition",
+    "IntentGroup",
     "Facet",
     "RetrievalPolicy",
     "RetrievalPolicyPlan",
@@ -186,6 +190,74 @@ class RoleHint(str, Enum):
     UNCERTAIN = "uncertain"
 
 
+class ConceptKind(str, Enum):
+    """What KIND of thing a condition constrains (Task 23 §1). Still conceptual —
+    the planner says "a containing building level", not `storey_name`."""
+
+    FIELD = "field"  # a named characteristic of the result concept
+    QUANTITY = "quantity"  # a measured/dimensional value
+    SPATIAL_SCOPE = "spatial_scope"  # containing level / building / space
+    RELATIONSHIP_SCOPE = "relationship_scope"  # constrained via a connection
+    CLASSIFICATION = "classification"
+    MATERIAL = "material"
+    MISSING_VALUE = "missing_value"  # the characteristic is absent/unset
+
+
+class IntentOperator(str, Enum):
+    """Conceptual comparison. Mapped to an allowlisted SQL operator only AFTER the
+    field is resolved, so the planner never picks a database operator."""
+
+    EQUALS = "equals"
+    CONTAINS = "contains"
+    STARTS_WITH = "starts_with"
+    ONE_OF = "one_of"
+    GREATER_THAN = "greater_than"
+    GREATER_OR_EQUAL = "greater_or_equal"
+    LESS_THAN = "less_than"
+    LESS_OR_EQUAL = "less_or_equal"
+    BETWEEN = "between"
+    IS_MISSING = "is_missing"
+    IS_PRESENT = "is_present"
+
+
+class IntentCondition(_StrictModel):
+    """ONE material condition the user expressed about a facet's result concept.
+
+    Conditions are first-class typed data — they must NEVER exist only inside
+    prose fields such as `question`, `semantic_query`, or `analysis_intent`,
+    because retrieval can only preserve what it can see (Task 23 §1).
+
+    Boolean structure is expressed as a bounded adjacency list rather than a
+    nested object, because OpenAI strict structured outputs do not reliably
+    support recursive schemas: `parent_group_id` points at an `IntentGroup`, or
+    is empty for a condition attached directly to the facet (an implicit AND).
+    """
+
+    condition_id: str = Field(min_length=1, max_length=40)
+    parent_group_id: str | None = Field(default=None, max_length=40)
+    concept_kind: ConceptKind = ConceptKind.FIELD
+    # The characteristic being constrained, in plain language — never a final IFC
+    # property name, database field, or JSON path.
+    concept: str = Field(min_length=1, max_length=200)
+    operator: IntentOperator = IntentOperator.EQUALS
+    # The value in plain language ("the second floor", "external", "fire rated").
+    value_concept: str | None = Field(default=None, max_length=200)
+    value_list: list[str] = Field(default_factory=list, max_length=50)
+    unit: str | None = Field(default=None, max_length=16)
+    negated: bool = False
+    # A required condition may NEVER be dropped to let a broader query run. When
+    # it cannot be resolved the query must fail or clarify (Task 23 §1).
+    required: bool = True
+
+
+class IntentGroup(_StrictModel):
+    """A Boolean grouping node for conditions that are not a simple AND."""
+
+    group_id: str = Field(min_length=1, max_length=40)
+    parent_group_id: str | None = Field(default=None, max_length=40)
+    bool_op: Literal["and", "or"] = "and"
+
+
 class Facet(_StrictModel):
     """One conceptual sub-question of the query (Task 17 §1 Stage 2).
 
@@ -202,6 +274,15 @@ class Facet(_StrictModel):
     needs_entity_rag: bool = False
     needs_relationship_rag: bool = False
     needs_graph: bool = False
+
+    # --- conceptual intent tree (Task 23 §1) ---
+    # The thing the user wants returned by this facet, in plain language ("doors").
+    # Resolved to IFC classes later; never an IFC class here.
+    result_concept: str | None = Field(default=None, max_length=200)
+    # Every material condition on `result_concept`, and their Boolean structure.
+    # Conditions attached to no group are combined with AND.
+    conditions: list[IntentCondition] = Field(default_factory=list, max_length=20)
+    condition_groups: list[IntentGroup] = Field(default_factory=list, max_length=8)
 
 
 class RetrievalPolicy(_StrictModel):

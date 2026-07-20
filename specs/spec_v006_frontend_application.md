@@ -1394,3 +1394,109 @@ The interaction-smoothness gate is again the owner's to confirm on the real RTX 
 is a removal, not a new mechanism, and restores the pre-Task-18 rendering path the owner remembers as
 smooth (plus the retained chunk culling). Database, vectors, and the prepared artifact format are
 unchanged.
+
+## Task 23 amendment — Projected-size rendering policy
+
+Adds a screen-size-driven visibility filter. It composes with, and does not replace, any existing
+rendering reduction: Fragments LOD/visibility, frustum culling, the chunked EdgeOverlay, mesh
+simplification, renderer scheduling, pixel ratio, camera controls, and the Task 22 continuous-
+rendering model are all unchanged, with their existing configuration and update timing.
+
+### 1. The rule
+
+Each renderable object's projected size is its bounding-sphere diameter in CSS px under the active
+perspective camera:
+
+```text
+px = (2 * radius * viewportHeightPx) / (2 * distance * tan(fov / 2))
+```
+
+Hysteresis: an object enters the reduced state below **20 px** and leaves it only above **24 px**;
+between the two it keeps its previous state. The decision depends ONLY on projected size — never on
+absolute camera distance, and never on whether the camera is moving. A camera inside an object's
+bounding sphere yields `Infinity`, so an enclosing object is never hidden.
+
+The camera's horizontal view offset (task19 §2) rescales only the horizontal axis (it passes
+`fullHeight === height`), so the vertical mapping used here stays correct with or without an offset.
+
+### 2. When it is evaluated
+
+Model load, camera `rest`, viewport resize, view-offset/projection change, and highlight changes.
+There is **no per-frame whole-model scan and no periodic Fragments update during camera motion** —
+this policy deliberately introduces no navigation, motion, wake, or stationary rendering mode, since
+per-gesture transition work was the source of the Task 18/20 hitches that Task 22 removed.
+
+Each evaluation is a numeric pass over cached centres/radii, and applies only the ids whose
+visibility actually CHANGED, via one bounded `setVisible` call per direction, followed by the single
+Fragments refresh the caller already performs.
+
+### 3. What is retained below 20 px
+
+Retained at any projected size:
+
+- walls, including every wall subtype the viewer already recognises;
+- roofs;
+- slabs — both explicit roof slabs and ordinary floor slabs;
+- doors and windows with explicit IFC `IsExternal = true`;
+- columns with explicit IFC `LoadBearing = true`.
+
+Everything else non-highlighted is hidden below 20 px and restored above 24 px, through the existing
+rendering and material path, without reloading the model.
+
+Exterior/load-bearing status is NEVER guessed from names, geometry, position, material, proximity,
+or an LLM. Only an explicit IFC boolean qualifies: a missing, null, string, or otherwise ambiguous
+value does not. Model 1 stores these in a non-standard flattened pset, so none of its doors/windows/
+columns qualify — the correct outcome under this rule.
+
+**Implementation trap:** the property read requires `getItemsData(ids, { attributesDefault: true,
+relations: { IsDefinedBy: … } })`. With a pruned attribute list the Fragments API returns the
+relation array EMPTY, which silently reads as "property absent" for every object.
+
+### 4. Highlighted and selected objects
+
+Query-primary results and manual selections bypass the filter entirely and are never hidden, however
+small or non-fundamental. Highlighting an otherwise filtered object makes it visible immediately;
+clearing the highlight reapplies its current size/category state. The policy never drops or broadens
+the identities the query pipeline returned.
+
+Detail level for highlighted objects is already handled by existing mechanisms — Fragments' own
+mesh LOD, and the EdgeOverlay's dedicated `highlightFarEnterPx` / `highlightFarExitPx` chunk
+thresholds — so no new per-object detail control was added for them, as the task allows when an
+applicable control already exists.
+
+### 5. Interaction guarantees
+
+- Filtered objects remain loaded and restore deterministically above 24 px.
+- An object hidden by the policy cannot be picked: `resolvePickLocalId` rejects a hit on a
+  size-hidden id, so selection identity does not depend on whether Fragments raycasts invisible
+  geometry.
+- Hidden faces must not leave a floating wireframe, so a `hidden` edge role with alpha 0 was added
+  to the theme. This is a visibility change only — no class mapping, colour, opacity, or semantic
+  role changes.
+- The isolated component preview is unaffected: the policy is driven by the main camera only.
+- Classification and bounding volumes are cached once at load; camera updates never re-read IFC
+  data, rebuild geometry, regenerate artifacts, or call the backend/database/embedding service/LLM.
+- Failure is safe: if the required Fragments APIs are missing or classification throws, the policy
+  stays inactive and every object remains visible. It is an optimization, never a correctness
+  requirement.
+
+### 6. Measured eligibility (real artifacts)
+
+| model | items | retained at any size | hide candidates |
+| --- | --- | --- | --- |
+| 2 (27,388 items) | 2,641 | 24,747 (90.4%) | doors 54/551, columns 35/89, windows 407/428 qualify |
+| 1 (283,238 items) | 1,159 | 282,079 (99.6%) | none qualify — non-standard psets |
+
+Conditional-property counts match the database exactly. One-time classification cost measured at
+66 ms for model 2 and ~10 s for model 1, whose pathological flattened property sets make the
+per-item read ~100x more expensive. That pass runs asynchronously after the scene is usable — the
+same pattern as the edge overlay — so it never blocks load or input; on model 1 the policy simply
+becomes active a few seconds after the model appears.
+
+### 7. Known limitations
+
+- `getItemsWithGeometry()` was measured stalling for minutes on the 283k-item model, so it is NOT
+  used to pre-restrict the candidate set. Candidates self-restrict instead, because `getBoxes`
+  returns an empty box for a geometry-less item and those are skipped.
+- Live in-browser visual/performance verification on both models has NOT yet been performed; the
+  evidence above is unit tests plus artifact-level measurement.

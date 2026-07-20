@@ -189,6 +189,10 @@ def build_group_answer_payload(
                 "example_note": (
                     "bounded sample" if g.allocation_truncated else "all members shown"
                 ),
+                # How the user's own conditions were resolved against this model
+                # (Task 23 §1). The answer must state this, so an interpretation
+                # the user disagrees with is visible rather than silent.
+                "applied_conditions": list(getattr(g, "interpretation_notes", []) or [])[:4],
                 "warnings": g.warnings[:3],
             }
         )
@@ -207,7 +211,11 @@ def build_group_answer_payload(
             "NEVER sum associated groups into a concept total (e.g. do not add stairs + railings + "
             "doors into one 'circulation' number). An exact count of 0 or an absent class means "
             "'not explicitly represented', not that the feature is absent. Put only entity-bearing "
-            "groups you accept into viewer_primary_group_ids / viewer_context_group_ids."
+            "groups you accept into viewer_primary_group_ids / viewer_context_group_ids. "
+            "When a group carries applied_conditions, its count already reflects the user's "
+            "filter — state the interpretation briefly (e.g. which levels a floor covers) so "
+            "the user can correct it, and never report the unfiltered class total as the "
+            "answer to a filtered question."
         ),
     }
 

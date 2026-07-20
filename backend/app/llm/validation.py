@@ -19,6 +19,7 @@ from app.config.settings import Settings, get_settings  # noqa: F401 (Settings k
 from app.llm.schemas import (
     CombinationOp,
     ExecutionMode,
+    IntentOperator,
     QueryPlan,
     RetrievalPolicy,
     RetrievalPolicyPlan,
@@ -85,6 +86,7 @@ def validate_policy_plan(plan: RetrievalPolicyPlan) -> list[str]:
                     errors.append(
                         f"facet {f.facet_id!r} needs retrieval but has empty semantic_query"
                     )
+            errors.extend(_validate_intent_tree(f))
         # The declared policy must equal the authoritative union of facet needs.
         declared = plan.retrieval_policy
         union = frozen_policy(plan)
@@ -118,6 +120,100 @@ def validate_policy_plan(plan: RetrievalPolicyPlan) -> list[str]:
     else:
         errors.append(f"policy route {plan.route.value!r} is not supported at Stage 2")
 
+    return errors
+
+
+#: Conceptual operators that carry no value of their own.
+_VALUELESS_OPERATORS = {IntentOperator.IS_MISSING, IntentOperator.IS_PRESENT}
+#: Conceptual operators that need a list rather than a single value.
+_LIST_OPERATORS = {IntentOperator.ONE_OF, IntentOperator.BETWEEN}
+#: Matches the typed SQL `FilterGroup` bound, so a planner tree can never encode
+#: Boolean logic the compiler would have to reject later (spec_v003 §6).
+MAX_INTENT_DEPTH = 3
+
+
+def _validate_intent_tree(facet) -> list[str]:
+    """Structural validation of ONE facet's conceptual intent tree (Task 23 §1).
+
+    Enforces that conditions are well-formed, uniquely identified, correctly
+    grouped, and bounded — so a condition can never be half-expressed and then
+    silently discarded during resolution."""
+    errors: list[str] = []
+    fid = facet.facet_id
+
+    group_ids = [g.group_id for g in facet.condition_groups]
+    if len(group_ids) != len(set(group_ids)):
+        errors.append(f"facet {fid!r}: condition_groups must have unique group_id values")
+    known_groups = set(group_ids)
+
+    condition_ids = [c.condition_id for c in facet.conditions]
+    if len(condition_ids) != len(set(condition_ids)):
+        errors.append(f"facet {fid!r}: conditions must have unique condition_id values")
+
+    for g in facet.condition_groups:
+        if g.parent_group_id and g.parent_group_id not in known_groups:
+            errors.append(
+                f"facet {fid!r}: group {g.group_id!r} references unknown "
+                f"parent_group_id {g.parent_group_id!r}"
+            )
+        if g.parent_group_id == g.group_id:
+            errors.append(f"facet {fid!r}: group {g.group_id!r} is its own parent")
+
+    # Cycle + depth check over the group forest.
+    parent_of = {g.group_id: g.parent_group_id for g in facet.condition_groups}
+    for gid in group_ids:
+        seen: set[str] = set()
+        cur: str | None = gid
+        depth = 0
+        while cur:
+            if cur in seen:
+                errors.append(f"facet {fid!r}: condition_groups contain a cycle at {cur!r}")
+                break
+            seen.add(cur)
+            cur = parent_of.get(cur)
+            depth += 1
+        if depth > MAX_INTENT_DEPTH:
+            errors.append(
+                f"facet {fid!r}: group {gid!r} nests deeper than {MAX_INTENT_DEPTH} levels"
+            )
+
+    for c in facet.conditions:
+        if c.parent_group_id and c.parent_group_id not in known_groups:
+            errors.append(
+                f"facet {fid!r}: condition {c.condition_id!r} references unknown "
+                f"parent_group_id {c.parent_group_id!r}"
+            )
+        if not c.concept.strip():
+            errors.append(f"facet {fid!r}: condition {c.condition_id!r} has an empty concept")
+        has_value = bool((c.value_concept or "").strip()) or bool(c.value_list)
+        if c.operator in _VALUELESS_OPERATORS:
+            if has_value:
+                errors.append(
+                    f"facet {fid!r}: condition {c.condition_id!r} uses "
+                    f"{c.operator.value} and must not carry a value"
+                )
+        elif not has_value:
+            errors.append(
+                f"facet {fid!r}: condition {c.condition_id!r} uses {c.operator.value} "
+                "but carries no value_concept/value_list"
+            )
+        if c.operator is IntentOperator.BETWEEN and len(c.value_list) != 2:
+            errors.append(
+                f"facet {fid!r}: condition {c.condition_id!r} uses between and "
+                "requires exactly 2 value_list entries"
+            )
+        if c.operator is IntentOperator.ONE_OF and not c.value_list:
+            errors.append(
+                f"facet {fid!r}: condition {c.condition_id!r} uses one_of and requires value_list"
+            )
+
+    # A facet that carries conditions is by definition a filtered request, so it
+    # must ask for the structured retrieval that can actually apply them.
+    if facet.conditions and not facet.needs_exact_structured:
+        errors.append(
+            f"facet {fid!r} carries conditions but did not request exact structured "
+            "retrieval; a filtered request cannot be answered without it"
+        )
     return errors
 
 

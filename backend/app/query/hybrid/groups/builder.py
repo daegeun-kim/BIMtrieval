@@ -77,6 +77,82 @@ def _fact_predicate(fact: Any) -> GroupPredicate | None:
     )
 
 
+def _result_classes(fr: Any) -> list[str]:
+    """Candidate IFC classes for a facet's result concept, best first, present in
+    the model only. Mirrors the class-group ordering used for unconstrained
+    facets so a constrained facet resolves against the same candidates."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for c in fr.ontology_candidates:
+        if c.present_in_model and c.ifc_class not in seen:
+            seen.add(c.ifc_class)
+            ordered.append(c.ifc_class)
+    for c in fr.model_class_candidates:
+        if c.ifc_class not in seen:
+            seen.add(c.ifc_class)
+            ordered.append(c.ifc_class)
+    return ordered
+
+
+def _compound_groups(
+    session: Session,
+    fr: Any,
+    facet: Any,
+    source_model_id: int,
+    settings: Settings,
+) -> list[EvidenceGroup]:
+    """Build the CONSTRAINED groups for one facet (Task 23 §1).
+
+    One group per candidate result class, each carrying the facet's full
+    condition tree resolved in that class's context. A class whose required
+    conditions cannot be resolved yields a FAILED group carrying the reason — it
+    is never replaced by the unfiltered class group, because answering a filtered
+    question with the class total silently drops the user's constraint."""
+    from app.query.semantic.intent_resolution import resolve_facet_intent
+
+    out: list[EvidenceGroup] = []
+    classes = _result_classes(fr)[: settings.max_evidence_groups]
+    onto_def = {c.ifc_class: c.profile_excerpt for c in fr.ontology_candidates}
+
+    for ifc_class in classes:
+        intent = resolve_facet_intent(
+            session, facet, [ifc_class], source_model_id, settings=settings
+        )
+        conditions = ", ".join(
+            c.concept for c in (facet.conditions or []) if getattr(c, "concept", None)
+        )
+        label = f"{ifc_class} objects where {conditions}"[:80]
+        group = EvidenceGroup(
+            # Short and stable: the condition text belongs in `label`, not the id.
+            # Long ids are unreliable for the answerer to echo back verbatim, which
+            # surfaced as spurious "unknown rejected group id" warnings.
+            group_id=f"{_slug(fr.facet_id)}--{_slug(ifc_class)}--filtered",
+            facet_id=fr.facet_id,
+            label=label,
+            predicate=GroupPredicate(
+                kind=PredicateKind.COMPOUND.value,
+                ifc_classes=(ifc_class,),
+                filters=intent.filters,
+            ),
+            role_hint=fr.role_hint,
+            authority=AUTHORITY_SEMANTIC,
+            coverage=COVERAGE_UNKNOWN,
+            source_kinds=["semantic_resolution"],
+            predicate_queryable=True,
+            ontology_definition=onto_def.get(ifc_class),
+            facet_ids=[fr.facet_id],
+            interpretation_notes=list(intent.interpretation_notes),
+        )
+        if not intent.executable:
+            # Required constraint lost -> this group can never be exact evidence.
+            group.coverage = COVERAGE_FAILED
+            group.predicate_queryable = False
+            group.unresolved_conditions = list(intent.unresolved_required)
+            group.warnings.extend(intent.unresolved_required)
+        out.append(group)
+    return out
+
+
 def _collect_specs(facet_resolutions: list[Any]) -> dict[tuple, EvidenceGroup]:
     """One group per unique predicate signature, deduped across facets (§4)."""
     groups: dict[tuple, EvidenceGroup] = {}
@@ -168,12 +244,30 @@ def build_groups(
     settings: Settings,
     embedding_service_getter: Callable[[], Any],
     selection_entity_ids: list[int] | None = None,
+    facets: list[Any] | None = None,
 ) -> list[EvidenceGroup]:
-    groups_by_sig = _collect_specs(facet_resolutions)
+    """Build the evidence groups for one question.
+
+    A facet that carries an intent tree (Task 23 §1) produces COMPOUND groups —
+    its result class AND every user condition, executed as one authoritative
+    result. Only unconstrained facets fall back to the Task 17 behavior of
+    independent class/value groups."""
+    facets_by_id = {f.facet_id: f for f in (facets or []) if getattr(f, "conditions", None)}
+    constrained = [fr for fr in facet_resolutions if fr.facet_id in facets_by_id]
+    unconstrained = [fr for fr in facet_resolutions if fr.facet_id not in facets_by_id]
+
+    groups_by_sig = _collect_specs(unconstrained)
     groups = list(groups_by_sig.values())
     # Bound the number of groups deterministically (role, then similarity).
     groups.sort(key=lambda g: (_ROLE_RANK.get(g.role_hint, 3), -g.similarity, g.group_id))
     groups = groups[: settings.max_evidence_groups]
+
+    compound: list[EvidenceGroup] = []
+    for fr in constrained:
+        compound.extend(
+            _compound_groups(session, fr, facets_by_id[fr.facet_id], source_model_id, settings)
+        )
+    groups = compound + groups
 
     if policy.sql:
         _execute_sql_groups(session, groups, source_model_id, settings)
@@ -226,9 +320,12 @@ def _execute_sql_groups(
         g.factual_profile = {"class_histogram": res.class_histogram}
         g.all_viewer_identities_available = True
         g.coverage = COVERAGE_COMPLETE
+        # A compound group is the exact answer to the FILTERED question — its
+        # count, examples, and viewer identities all come from this one result
+        # (Task 23 §1).
         g.authority = (
             AUTHORITY_EXACT
-            if g.predicate.kind == PredicateKind.ENTITY_CLASS.value
+            if g.predicate.kind in (PredicateKind.ENTITY_CLASS.value, PredicateKind.COMPOUND.value)
             else AUTHORITY_STRUCTURED
         )
         if "sql" not in g.source_kinds:
@@ -249,6 +346,12 @@ def _dedupe_full_class_value_groups(groups: list[EvidenceGroup]) -> list[Evidenc
                 class_counts[g.predicate.ifc_classes[0]] = g.exact_count
     kept: list[EvidenceGroup] = []
     for g in groups:
+        # A COMPOUND group is the user's actual filtered request. Even when its
+        # count happens to equal the class total it must survive, because it is
+        # the group whose scope the answer and viewer are entitled to use.
+        if g.predicate.kind == PredicateKind.COMPOUND.value:
+            kept.append(g)
+            continue
         if (
             g.predicate.kind != PredicateKind.ENTITY_CLASS.value
             and len(g.predicate.ifc_classes) == 1
@@ -290,6 +393,11 @@ def _execute_rag_entity(
         for g in groups
         if g.predicate.kind == PredicateKind.ENTITY_CLASS.value and g.predicate.ifc_classes
     }
+    # Structured scope per facet: when a facet resolved a compound (filtered)
+    # result, semantic search must rank only entities INSIDE that scope. An empty
+    # scoped result stays empty — it never widens to whole-model RAG (Task 23 §1).
+    scope_by_facet = _structured_scopes(session, groups, source_model_id)
+
     for fr in facet_resolutions:
         plan = RagSearchPlan(
             source_model_id=source_model_id,
@@ -304,6 +412,17 @@ def _execute_rag_entity(
         except (EmbeddingServiceUnavailableError, DegradedCapabilityError):
             continue
         candidates = rag_res.entity_candidates[: settings.rag_facet_top_k]
+        scope = scope_by_facet.get(fr.facet_id)
+        if scope is not None:
+            # Bounded semantic evidence, restricted to the authoritative scope.
+            candidates = [c for c in candidates if c.canonical_id in scope]
+            if not candidates:
+                for g in groups:
+                    if g.facet_id == fr.facet_id:
+                        g.warnings.append(
+                            "no semantically relevant matches within the requested scope"
+                        )
+                continue
         if not candidates:
             continue
         ids = [c.canonical_id for c in candidates]
@@ -329,6 +448,29 @@ def _execute_rag_entity(
                 remainder.append(c.canonical_id)
         if remainder:
             _add_rag_only_group(session, fr, remainder, groups, source_model_id, settings)
+
+
+def _structured_scopes(
+    session: Session, groups: list[EvidenceGroup], source_model_id: int
+) -> dict[str, set[int]]:
+    """Entity ids inside each facet's authoritative compound scope (Task 23 §1).
+
+    Only facets that actually resolved a constrained result get a scope; an
+    unconstrained facet keeps whole-model semantic search as before."""
+    from app.query.sql.entities import select_scope_entity_ids
+
+    scopes: dict[str, set[int]] = {}
+    for g in groups:
+        if g.predicate.kind != PredicateKind.COMPOUND.value:
+            continue
+        if g.coverage == COVERAGE_FAILED or not g.predicate.is_constrained:
+            continue
+        try:
+            ids = select_scope_entity_ids(session, g.predicate, source_model_id)
+        except Exception:  # noqa: BLE001 - scoping is best-effort; never zero a group
+            continue
+        scopes.setdefault(g.facet_id, set()).update(ids)
+    return scopes
 
 
 def _add_rag_only_group(

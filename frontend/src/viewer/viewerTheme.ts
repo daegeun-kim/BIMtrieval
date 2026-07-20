@@ -117,6 +117,13 @@ export const EDGES = {
     context: 0.4, //           face 0.16
     manual: 1,
     dim: 0, //                 face 0.35 (candidate 3, task18 §9) — context edges disabled
+    /**
+     * Object hidden by the projected-size policy (task23 issue 2). Its faces are
+     * not rendered, so its custom edges must not be either — otherwise a hidden
+     * object leaves a floating wireframe. Eligibility/visibility only: nothing
+     * about the object's class mapping, color, or semantic role changes.
+     */
+    hidden: 0,
   },
   /**
    * Projected screen-size hysteresis for base-model edge chunk culling
