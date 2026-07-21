@@ -52,6 +52,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Mapping
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -230,6 +232,14 @@ _ORDINAL_WORDS = {
 _TOP_WORDS = ("top", "uppermost", "highest", "roof level", "last")
 _BOTTOM_WORDS = ("lowest", "bottom", "basement", "cellar", "sub-level", "sublevel")
 _FLOOR_WORDS = ("floor", "storey", "story", "level", "plan", "deck", "etage", "plane")
+
+# Read-only public views. The Task 24 span detector must recognize the SAME
+# floor vocabulary this module resolves against, so there is one definition of
+# what counts as floor language rather than two that can drift apart.
+ORDINAL_WORDS: Mapping[str, int] = MappingProxyType(_ORDINAL_WORDS)
+TOP_WORDS: tuple[str, ...] = _TOP_WORDS
+BOTTOM_WORDS: tuple[str, ...] = _BOTTOM_WORDS
+FLOOR_WORDS: tuple[str, ...] = _FLOOR_WORDS
 
 
 def mentions_floor_concept(text: str) -> bool:

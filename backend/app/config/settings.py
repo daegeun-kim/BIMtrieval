@@ -38,9 +38,12 @@ class Settings(BaseSettings):
     # emitting the full structured JSON (observed on complex planner prompts in
     # task08). Keep this generous so structured output always completes.
     openai_max_output_tokens: int = 16000
-    # Bounded retry on transient provider errors (timeout/rate-limit/5xx) — the
-    # planner/answer loop itself is never retried unboundedly (spec_v005 §17).
-    openai_max_retries: int = 2
+    # At most ONE bounded application retry, for a short transient connection,
+    # rate-limit, or provider 5xx failure (Task 24 §10.4). A full request
+    # timeout is deliberately NOT retried, and SDK-internal retries are disabled
+    # (`max_retries=0` in llm.client) so the two cannot multiply into 6 provider
+    # calls for one question.
+    openai_max_retries: int = 1
     openai_retry_backoff_s: float = 1.5
     # Independently configurable so planner/answer models can be replaced later
     # (spec_v005 §4). Left as None here — planner_model/answer_model are the

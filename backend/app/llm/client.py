@@ -1,18 +1,23 @@
-"""OpenAI planner + answer client using schema-enforced structured outputs
-(spec_v005 §2, §4, §11).
+"""OpenAI client for the two Task 24 LLM calls, using schema-enforced
+structured outputs.
 
 Two roles, independently configurable models (`planner_model` / `answer_model`,
-spec_v005 §4):
+kept separately configurable for later A/B evaluation per task24 §10.1):
 
-- `plan_query()` → one `QueryPlan` (structured output). This is OpenAI call 1.
-- `generate_answer()` → one `AnswerOutput` (structured output). This is call 2.
+- `bind_query()`             -> one `BindingPlan`. This is LLM call 1.
+- `generate_grounded_answer()` -> one `GroundedAnswer`. This is LLM call 2.
 
-Secret handling (task07 §Secret handling): the API key is read from settings
-(runtime env / .env) only. It is never logged, printed, hard-coded, or returned.
-If the key is absent, `plan_query`/`generate_answer` raise `LLMUnavailableError`
-with a sanitized message and no network call is made. The `openai.OpenAI`
-object is built lazily so importing/instantiating this module never touches the
-network.
+There is no third method by design: no router, verifier, judge, repair,
+reflection, correction, reranking, or replanning call exists (task24 §10.1).
+
+Retry policy lives in exactly one place, `_structured_call`, and SDK-internal
+retries are disabled so the two cannot multiply (task24 §10.4).
+
+Secret handling: the API key is read from settings (runtime env / .env) only. It
+is never logged, printed, hard-coded, or returned. If the key is absent, both
+calls raise `LLMUnavailableError` with a sanitized message and no network call
+is made. The `openai.OpenAI` object is built lazily, so importing this module
+never touches the network.
 """
 
 from __future__ import annotations
@@ -21,20 +26,16 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from app.config.settings import Settings, get_settings
 from app.llm.prompts import (
-    ANSWERER_PROMPT_VERSION,
-    GROUP_ANSWERER_PROMPT_VERSION,
-    PLANNER_PROMPT_VERSION,
-    POLICY_PLANNER_PROMPT_VERSION,
-    answerer_prompt,
-    group_answerer_prompt,
-    planner_prompt,
-    policy_planner_prompt,
+    BINDER_PROMPT_VERSION,
+    GROUNDED_ANSWERER_PROMPT_VERSION,
+    binder_prompt,
+    grounded_answerer_prompt,
 )
-from app.llm.schemas import QueryPlan, RetrievalPolicyPlan
+from app.llm.schemas import BindingPlan, GroundedAnswer
 from app.llm.serialization import dumps_context
 
 if TYPE_CHECKING:
@@ -80,46 +81,15 @@ class TokenUsage:
         }
 
 
-class AnswerOutput(BaseModel):
-    """Structured answer envelope (spec_v005 §11, §16 + Task 16 §9).
-
-    The universal-hybrid answerer is a relevance judge: it explicitly accepts or
-    rejects each probe as a candidate reference and selects which probes drive
-    viewer highlights. The probe-decision fields default empty/false so the
-    legacy answer path (which does not use probes) stays valid."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    answer: str = Field(min_length=1)
-    used_general_knowledge: bool = False
-    disclosed_conflicts: bool = False
-    model_evidence_sufficient: bool = True
-    inference_used: bool = False
-    # --- Group relevance decisions (Task 17 §8) ---
-    primary_group_ids: list[str] = Field(default_factory=list)
-    supporting_group_ids: list[str] = Field(default_factory=list)
-    context_group_ids: list[str] = Field(default_factory=list)
-    rejected_group_ids: list[str] = Field(default_factory=list)
-    viewer_primary_group_ids: list[str] = Field(default_factory=list)
-    viewer_context_group_ids: list[str] = Field(default_factory=list)
-    inference_basis_group_ids: list[str] = Field(default_factory=list)
-
-
 @dataclass
-class PlanResult:
-    plan: QueryPlan
+class BindingResult:
+    plan: BindingPlan
     usage: TokenUsage
 
 
 @dataclass
-class PolicyResult:
-    plan: RetrievalPolicyPlan
-    usage: TokenUsage
-
-
-@dataclass
-class AnswerResult:
-    output: AnswerOutput
+class GroundedAnswerResult:
+    output: GroundedAnswer
     usage: TokenUsage
 
 
@@ -150,63 +120,50 @@ class OpenAIQueryClient:
             self._client = OpenAI(
                 api_key=api_key.get_secret_value(),
                 timeout=self.settings.openai_timeout_s,
+                # Task 24 §10.4: "disable SDK-internal retries when application
+                # retry behavior is active". The SDK defaults to 2 internal
+                # retries; combined with this module's own bounded retry that is
+                # up to 3x2 = 6 provider calls for one question, multiplying both
+                # latency and spend invisibly. Retry policy lives in exactly one
+                # place — `_structured_call` below.
+                max_retries=0,
             )
         return self._client
 
-    def plan_query(self, planner_context: dict[str, Any]) -> PlanResult:
-        """OpenAI call 1: route + complete typed plan (spec_v005 §2, §5)."""
+    def bind_query(self, binder_context: dict[str, Any]) -> BindingResult:
+        """Task 24 LLM call 1: bind the question to candidate slate IDs (§2).
+
+        There is deliberately no repair variant of this call. §3.3 requires an
+        invalid binding to produce a clarification or typed unavailable result,
+        never a second planning request.
+        """
         model = self.settings.get_planner_model()
         parsed, usage = self._structured_call(
             model=model,
-            system=planner_prompt(),
-            user_payload=planner_context,
-            response_format=QueryPlan,
-            prompt_version=PLANNER_PROMPT_VERSION,
-            role="planner",
+            system=binder_prompt(),
+            user_payload=binder_context,
+            response_format=BindingPlan,
+            prompt_version=BINDER_PROMPT_VERSION,
+            role="binder",
         )
-        return PlanResult(plan=parsed, usage=usage)
+        return BindingResult(plan=parsed, usage=usage)
 
-    def plan_retrieval_policy(self, policy_context: dict[str, Any]) -> PolicyResult:
-        """Task 17 LLM call 1: the QUERY-ONLY retrieval policy + facet plan. The
-        input carries no active-model candidates/schema (see build_policy_context),
-        so modality selection cannot depend on model contents."""
-        model = self.settings.get_planner_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=policy_planner_prompt(),
-            user_payload=policy_context,
-            response_format=RetrievalPolicyPlan,
-            prompt_version=POLICY_PLANNER_PROMPT_VERSION,
-            role="policy_planner",
-        )
-        return PolicyResult(plan=parsed, usage=usage)
+    def generate_grounded_answer(self, packet_payload: dict[str, Any]) -> GroundedAnswerResult:
+        """Task 24 LLM call 2: express already-adjudicated answer parts (§8).
 
-    def generate_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
-        """OpenAI call 2 (legacy path): grounded answer from bounded evidence."""
+        Its output is validated deterministically against the packet; a failure
+        produces a safe fallback, never a second answering call (§8.3).
+        """
         model = self.settings.get_answer_model()
         parsed, usage = self._structured_call(
             model=model,
-            system=answerer_prompt(),
-            user_payload=evidence_payload,
-            response_format=AnswerOutput,
-            prompt_version=ANSWERER_PROMPT_VERSION,
-            role="answerer",
+            system=grounded_answerer_prompt(),
+            user_payload=packet_payload,
+            response_format=GroundedAnswer,
+            prompt_version=GROUNDED_ANSWERER_PROMPT_VERSION,
+            role="grounded_answerer",
         )
-        return AnswerResult(output=parsed, usage=usage)
-
-    def generate_group_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
-        """Task 17 LLM call 2: group-level relevance judgment + answer from
-        accepted evidence groups (Task 17 §8)."""
-        model = self.settings.get_answer_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=group_answerer_prompt(),
-            user_payload=evidence_payload,
-            response_format=AnswerOutput,
-            prompt_version=GROUP_ANSWERER_PROMPT_VERSION,
-            role="group_answerer",
-        )
-        return AnswerResult(output=parsed, usage=usage)
+        return GroundedAnswerResult(output=parsed, usage=usage)
 
     def _structured_call(
         self,
@@ -271,17 +228,29 @@ _TRANSIENT_ERROR_NAMES = frozenset(
 
 
 def _is_transient(exc: Exception | None) -> bool:
-    """True for provider errors worth one retry (timeout / rate limit / 5xx),
-    False for deterministic errors like auth/validation that a retry won't fix."""
+    """True for provider errors worth ONE retry (Task 24 §10.4).
+
+    Deliberately EXCLUDES a full request timeout. §10.4: "do not automatically
+    retry a full LLM timeout." A reasoning model that exhausted the timeout is
+    overwhelmingly likely to exhaust it again, so retrying doubles the user's
+    wait before failing anyway — the worst possible outcome for a pipeline whose
+    latency is already the main complaint.
+
+    Schema, validation, refusal, and deterministic execution failures are also
+    excluded: a retry cannot fix them.
+    """
     if exc is None:
         return False
     name = type(exc).__name__
+    if name == "APITimeoutError":
+        return False
     if name in _TRANSIENT_ERROR_NAMES:
         status = getattr(exc, "status_code", None)
         if name == "APIStatusError" and status is not None:
             return int(status) >= 500 or int(status) == 429
         return True
-    return isinstance(exc, (TimeoutError, ConnectionError))
+    # A short connection blip is worth one retry; an exhausted timeout is not.
+    return isinstance(exc, ConnectionError)
 
 
 def _sanitize(exc: Exception | None) -> str:

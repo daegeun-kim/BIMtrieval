@@ -31,6 +31,14 @@ class RagSearchPlan(BaseModel):
     minimum_similarity_profile: str = "default_v001"
     expand_relationship_endpoints: bool = True
     selected_entity_ids: list[int] = Field(default_factory=list, max_length=MAX_SELECTED_ENTITY_IDS)
+    #: Restrict entity search to these canonical entity ids (Task 24 §5.3).
+    #:
+    #: `None` means unscoped whole-model search — the pre-Task-24 behaviour.
+    #: An EMPTY LIST means "a structured scope was computed and it is empty",
+    #: which must yield no candidates rather than silently widening to the whole
+    #: model. That distinction is the point of the field: §5.3 requires "keep an
+    #: empty scoped RAG result empty; do not widen to whole-model RAG".
+    scope_entity_ids: list[int] | None = None
 
     @model_validator(mode="after")
     def _at_least_one_kind_enabled(self) -> "RagSearchPlan":

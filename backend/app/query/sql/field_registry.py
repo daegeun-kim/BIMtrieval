@@ -25,7 +25,8 @@ always "m", meters — see `normalize_quantity_value()`).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from types import MappingProxyType
+from typing import Literal, Mapping
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -61,6 +62,14 @@ _TYPE_FACT_JSON_FIELDS: dict[str, tuple[str, ...]] = {
     "type_global_id": ("type", "global_id"),
     "type_predefined_type": ("type", "predefined_type"),
 }
+
+# Read-only public views of the three fixed field maps above. Other modules
+# (e.g. the Task 24 field-concept index) need to know which fixed fields exist
+# and where they live; exposing immutable proxies keeps this module the single
+# definition of that mapping instead of it being duplicated or reached into.
+ATTRIBUTE_JSON_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(_ATTRIBUTE_JSON_FIELDS)
+ATTRIBUTE_COLUMN_FIELDS: Mapping[str, str] = MappingProxyType(_ATTRIBUTE_COLUMN_FIELDS)
+TYPE_FACT_JSON_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(_TYPE_FACT_JSON_FIELDS)
 
 
 @dataclass(frozen=True)

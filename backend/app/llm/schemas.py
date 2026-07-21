@@ -1,30 +1,29 @@
-"""Unified schema-enforced planner output (spec_v005 §5).
+"""Schema-enforced contracts for the two Task 24 LLM calls.
 
-ONE plan, produced by ONE OpenAI structured-output call, covering every route:
-catalog, sql, rag, graph, hybrid, explain_general, and clarify. The planner
-chooses the route *and* fills the complete executable subplans in the same
-call — there is no separate route-classification request (spec_v005 §2).
+Exactly two model-facing schemas remain, one per principal call (§10.1):
 
-Design constraints that make this safe to hand to OpenAI structured outputs
-and to the backend:
+- `BindingPlan` — LLM call 1 selects candidate IDs the backend computed against
+  the active model. It cannot emit an IFC class, field name, JSON path, SQL
+  fragment, or graph seed, which is what makes the binding checkable.
+- `GroundedAnswer` — LLM call 2 expresses already-adjudicated answer parts, and
+  every structured claim cites a `fact_id` the backend supplied.
 
-- **Non-recursive.** OpenAI strict structured outputs do not reliably support
-  recursive JSON schemas, and an LLM does not need arbitrarily nested boolean
-  logic. Filters are a *flat* list combined by one `filter_bool_op`; that maps
-  to a single depth-1 `FilterGroup` in the typed execution plan.
-- **No raw SQL.** Subplans carry only semantic operation names, allowlisted
-  field references, operators, and values — never table/column/WHERE text
-  (spec_v005 §6, Prohibited actions).
-- **Split scalar/list values.** `value_text` (scalars) and `value_list`
-  (in/not_in/between) avoid a union-typed `value`, which keeps the emitted JSON
-  schema simple and strict-mode friendly. The backend casts to the resolved
-  field's real type during translation (`llm.translate`).
+Design constraints that keep these safe for OpenAI structured outputs:
 
-Semantic validation that needs the database (field existence, model existence,
-operator/type compatibility) is intentionally NOT done here as pydantic
-validators — it lives in `llm.validation` / `llm.translate` so an invalid plan
-can be caught and given exactly one repair attempt (spec_v005 §6) instead of
-raising inside the OpenAI SDK's parse step.
+- **Non-recursive.** Strict structured outputs do not reliably support recursive
+  JSON schemas, so Boolean structure is a flat adjacency list (`bool_group`)
+  rather than a nested tree. The backend expands it into the bounded
+  `FilterGroup` tree in `query.sql.schemas` during compilation.
+- **No raw SQL, no identifiers.** Both schemas carry only IDs, enum values, and
+  the user's own wording.
+
+Semantic validation that needs the database is deliberately NOT done as pydantic
+validators — it lives in `query.binding.validate`, so an invalid binding
+produces a typed clarification rather than raising inside the SDK's parse step,
+and never a repair call (§3.3).
+
+The Task 04/16/17 planner contracts (`QueryPlan`, `RetrievalPolicyPlan`,
+`Facet`, and their subplans) were removed with the orchestration they served.
 """
 
 from __future__ import annotations
@@ -35,31 +34,20 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.query.sql.schemas import FieldKind, Operator, SqlOperation
-from app.shared.types import QueryRoute, QueryScope
 
 __all__ = [
     "FieldKind",
     "Operator",
     "SqlOperation",
-    "ExecutionMode",
-    "CombinationOp",
     "ViewerIntent",
-    "PlanFieldRef",
-    "PlanFilter",
-    "CatalogPlan",
-    "SqlPlan",
-    "RagPlan",
-    "GraphPlan",
-    "PlanExecution",
-    "QueryPlan",
-    "RoleHint",
-    "ConceptKind",
-    "IntentOperator",
-    "IntentCondition",
-    "IntentGroup",
-    "Facet",
-    "RetrievalPolicy",
-    "RetrievalPolicyPlan",
+    "OutputOperation",
+    "ScopeKind",
+    "BoundOperator",
+    "BoundCondition",
+    "AnswerPart",
+    "BindingPlan",
+    "FactualClaim",
+    "GroundedAnswer",
 ]
 
 
@@ -67,30 +55,8 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ExecutionMode(str, Enum):
-    """spec_v005 §8 dependency modes, plus `single` for one-path routes."""
-
-    SINGLE = "single"
-    PARALLEL_INDEPENDENT = "parallel_independent"
-    SQL_THEN_RAG = "sql_then_rag"
-    RAG_THEN_SQL = "rag_then_sql"
-    RAG_RELATIONSHIP_THEN_GRAPH_THEN_SQL = "rag_relationship_then_graph_then_sql"
-    SQL_RELATIONSHIP_THEN_GRAPH_THEN_RAG = "sql_relationship_then_graph_then_rag"
-
-
-class CombinationOp(str, Enum):
-    """spec_v005 §9 canonical-ID combination semantics."""
-
-    NONE = "none"
-    INTERSECTION = "intersection"
-    UNION = "union"
-    SQL_FILTER_OF_RAG = "sql_filter_of_rag"
-    RAG_RANK_OF_SQL = "rag_rank_of_sql"
-    RELATIONSHIP_ENDPOINT_EXPANSION = "relationship_endpoint_expansion"
-
-
 class ViewerIntent(str, Enum):
-    """spec_v005 §14 — desired viewer behavior; frontend owns colors/camera."""
+    """Desired viewer behavior; the frontend owns colors and camera."""
 
     NO_OP = "no_op"
     SELECT_AND_FIT = "select_and_fit"
@@ -99,115 +65,57 @@ class ViewerIntent(str, Enum):
     AWAIT_USER_CONFIRMATION = "await_user_confirmation"
 
 
-class PlanFieldRef(_StrictModel):
-    """An allowlisted semantic field reference (resolved later against schema)."""
-
-    field_kind: FieldKind
-    set_name: str | None = Field(default=None, max_length=200)
-    field_name: str = Field(min_length=1, max_length=200)
-
-
-class PlanFilter(_StrictModel):
-    """One flat filter condition. Scalars go in `value_text`; list operators
-    (in/not_in/between) go in `value_list`. Values are strings; the backend
-    casts to the resolved field's real type (spec_v005 §6)."""
-
-    field: PlanFieldRef
-    operator: Operator
-    value_text: str | None = Field(default=None, max_length=500)
-    value_list: list[str] = Field(default_factory=list, max_length=50)
-    unit: str | None = Field(default=None, max_length=16)
+# ---------------------------------------------------------------------------
+# Task 24: the model-aware semantic binding contract (LLM call 1)
+# ---------------------------------------------------------------------------
+#
+# This REPLACES the broad facet/evidence-group planning contract above with one
+# compact typed binding plan (Task 24 §2.2). The essential difference: the model
+# no longer describes concepts in prose for the backend to resolve afterwards —
+# it SELECTS from candidate IDs the backend already computed against the active
+# model. It may not emit IFC classes, field names, JSON paths, SQL, graph seeds,
+# or new candidate definitions.
+#
+# There are deliberately no hypotheses, investigation lists, dependencies,
+# planner-authored DAGs, exploratory branches, correction plans, or alternate
+# plans to execute and compare (§2.3). One binding per requested answer part.
 
 
-class CatalogPlan(_StrictModel):
-    """Model-catalog operations (spec_v005 §7 SQL/catalog, scope=model_catalog)."""
+class OutputOperation(str, Enum):
+    """What the user wants DONE with the bound subject (§2.2).
 
-    operation: SqlOperation
-    filters: list[PlanFilter] = Field(default_factory=list, max_length=20)
-    filter_bool_op: Literal["and", "or"] = "and"
-    family_key: str | None = Field(default=None, max_length=200)
-    entity_class: str | None = Field(default=None, max_length=200)
-    target_source_model_id: int | None = None
-    direction: Literal["asc", "desc"] = "desc"
-    limit: int | None = Field(default=None, ge=1, le=500)
+    Retrieval mode is DERIVED from this by the backend, never chosen by the
+    model (§5.1) — there are no sql/rag/graph flags in this contract.
+    """
 
-
-class SqlPlan(_StrictModel):
-    """Deterministic active-model structured retrieval (spec_v005 §7 SQL)."""
-
-    operation: SqlOperation
-    entity_classes: list[str] = Field(default_factory=list, max_length=50)
-    filters: list[PlanFilter] = Field(default_factory=list, max_length=20)
-    filter_bool_op: Literal["and", "or"] = "and"
-    aggregate_function: Literal["count", "sum", "min", "max", "average"] | None = None
-    aggregate_field: PlanFieldRef | None = None
-    group_by_field: PlanFieldRef | None = None
-    target_unit: str | None = Field(default=None, max_length=16)
-    entity_id: int | None = None
-    global_id: str | None = Field(default=None, max_length=64)
-    entity_ids: list[int] = Field(default_factory=list, max_length=50)
-    relationship_id: int | None = None
-    relationship_classes: list[str] = Field(default_factory=list, max_length=50)
-    limit: int | None = Field(default=None, ge=1, le=500)
+    COUNT = "count"
+    EXISTENCE = "existence"
+    LIST = "list"
+    SAMPLE_DETAIL = "sample_detail"
+    GROUP_DISTRIBUTION = "group_distribution"
+    AGGREGATE = "aggregate"
+    EXTREMUM = "extremum"
+    DESCRIPTION = "description"
+    COMPARISON = "comparison"
+    RELATIONSHIP = "relationship"
 
 
-class RagPlan(_StrictModel):
-    """Semantic retrieval (spec_v005 §7 RAG; conforms to v004 contracts)."""
+class ScopeKind(str, Enum):
+    """Where the answer part looks. A SCOPE selects; it never narrows (§1.3)."""
 
-    semantic_query: str = Field(min_length=1, max_length=2000)
-    search_entity_documents: bool = True
-    search_relationship_documents: bool = False
-    top_k_per_kind: int = Field(default=30, ge=1, le=100)
-    visible_limit: int = Field(default=10, ge=1, le=50)
-    threshold_profile: Literal["default_v001", "high_precision_v001"] = "default_v001"
-    expand_relationship_endpoints: bool = True
+    ACTIVE_MODEL = "active_model"
+    SELECTED_OBJECTS = "selected_objects"
+    PREVIOUS_RESULT = "previous_result"
+    SPATIAL_CANDIDATE = "spatial_candidate"
 
 
-class GraphPlan(_StrictModel):
-    """Deterministic relationship traversal (spec_v005 §7 Graph)."""
-
-    start_entity_ids: list[int] = Field(default_factory=list, max_length=50)
-    relationship_classes: list[str] = Field(default_factory=list, max_length=50)
-    max_depth: int = Field(default=1, ge=0, le=3)
-    direction: Literal["outgoing", "incoming", "both"] = "both"
-    expand_relationship_endpoints: bool = True
-
-
-class PlanExecution(_StrictModel):
-    """How declared paths run and how their canonical IDs combine (spec_v005 §8, §9)."""
-
-    mode: ExecutionMode = ExecutionMode.SINGLE
-    combination: CombinationOp = CombinationOp.NONE
-
-
-class RoleHint(str, Enum):
-    """Query-specific PRELIMINARY relevance hint for a facet (Task 17 §5). It is a
-    hypothesis, not a decision — the answerer assigns the final group role."""
-
-    DIRECT = "direct"
-    SUPPORTING = "supporting"
-    CONTEXT = "context"
-    UNCERTAIN = "uncertain"
-
-
-class ConceptKind(str, Enum):
-    """What KIND of thing a condition constrains (Task 23 §1). Still conceptual —
-    the planner says "a containing building level", not `storey_name`."""
-
-    FIELD = "field"  # a named characteristic of the result concept
-    QUANTITY = "quantity"  # a measured/dimensional value
-    SPATIAL_SCOPE = "spatial_scope"  # containing level / building / space
-    RELATIONSHIP_SCOPE = "relationship_scope"  # constrained via a connection
-    CLASSIFICATION = "classification"
-    MATERIAL = "material"
-    MISSING_VALUE = "missing_value"  # the characteristic is absent/unset
-
-
-class IntentOperator(str, Enum):
-    """Conceptual comparison. Mapped to an allowlisted SQL operator only AFTER the
-    field is resolved, so the planner never picks a database operator."""
+class BoundOperator(str, Enum):
+    """Conceptual comparison. Mapped to an allowlisted SQL operator only after
+    the field's data type is known, so the model never picks a database
+    operator."""
 
     EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
     CONTAINS = "contains"
     STARTS_WITH = "starts_with"
     ONE_OF = "one_of"
@@ -216,134 +124,115 @@ class IntentOperator(str, Enum):
     LESS_THAN = "less_than"
     LESS_OR_EQUAL = "less_or_equal"
     BETWEEN = "between"
-    IS_MISSING = "is_missing"
     IS_PRESENT = "is_present"
+    IS_MISSING = "is_missing"
 
 
-class IntentCondition(_StrictModel):
-    """ONE material condition the user expressed about a facet's result concept.
+class BoundCondition(_StrictModel):
+    """One narrowing condition, tied to a slate candidate and to the question.
 
-    Conditions are first-class typed data — they must NEVER exist only inside
-    prose fields such as `question`, `semantic_query`, or `analysis_intent`,
-    because retrieval can only preserve what it can see (Task 23 §1).
-
-    Boolean structure is expressed as a bounded adjacency list rather than a
-    nested object, because OpenAI strict structured outputs do not reliably
-    support recursive schemas: `parent_group_id` points at an `IntentGroup`, or
-    is empty for a condition attached directly to the facet (an implicit AND).
+    Provenance is mandatory (§2.4): every executed narrowing condition must be
+    traceable to an exact span in the current question, the viewer selection, or
+    a typed predicate inherited from the previous accepted result. A condition
+    carrying neither `source_span` nor `inherited_from_scope` is INVENTED and is
+    rejected deterministically — never repaired by asking the model again.
     """
 
     condition_id: str = Field(min_length=1, max_length=40)
-    parent_group_id: str | None = Field(default=None, max_length=40)
-    concept_kind: ConceptKind = ConceptKind.FIELD
-    # The characteristic being constrained, in plain language — never a final IFC
-    # property name, database field, or JSON path.
-    concept: str = Field(min_length=1, max_length=200)
-    operator: IntentOperator = IntentOperator.EQUALS
-    # The value in plain language ("the second floor", "external", "fire rated").
-    value_concept: str | None = Field(default=None, max_length=200)
+    #: A field / spatial / material / classification candidate ID from the slate.
+    candidate_id: str = Field(min_length=1, max_length=40)
+    operator: BoundOperator = BoundOperator.EQUALS
+    value_text: str | None = Field(default=None, max_length=500)
     value_list: list[str] = Field(default_factory=list, max_length=50)
     unit: str | None = Field(default=None, max_length=16)
     negated: bool = False
-    # A required condition may NEVER be dropped to let a broader query run. When
-    # it cannot be resolved the query must fail or clarify (Task 23 §1).
-    required: bool = True
+    #: Boolean group position. Conditions sharing a group id combine with that
+    #: group's operator; conditions with no group combine with the part's
+    #: `condition_bool_op`. Flat by design — OpenAI strict structured outputs do
+    #: not reliably support recursive schemas.
+    bool_group: str | None = Field(default=None, max_length=40)
+    #: The EXACT substring of the current question this condition came from.
+    source_span: str | None = Field(default=None, max_length=300)
+    #: True when the condition is inherited from the previous accepted result's
+    #: typed scope rather than from the current question's wording.
+    inherited_from_scope: bool = False
 
 
-class IntentGroup(_StrictModel):
-    """A Boolean grouping node for conditions that are not a simple AND."""
+class AnswerPart(_StrictModel):
+    """One independent request inside the question (§2.2)."""
 
-    group_id: str = Field(min_length=1, max_length=40)
-    parent_group_id: str | None = Field(default=None, max_length=40)
-    bool_op: Literal["and", "or"] = "and"
-
-
-class Facet(_StrictModel):
-    """One conceptual sub-question of the query (Task 17 §1 Stage 2).
-
-    Emitted by the QUERY-ONLY policy planner: it carries a concept and its
-    per-facet retrieval information needs — never a final IFC class, property, or
-    raw SQL. The backend resolves the concept against the active model afterward
-    (Stage 3)."""
-
-    facet_id: str = Field(min_length=1, max_length=40)
-    question: str = Field(min_length=1, max_length=300)
-    role_hint: RoleHint = RoleHint.UNCERTAIN
-    semantic_query: str = Field(min_length=1, max_length=400)
-    needs_exact_structured: bool = False
-    needs_entity_rag: bool = False
-    needs_relationship_rag: bool = False
-    needs_graph: bool = False
-
-    # --- conceptual intent tree (Task 23 §1) ---
-    # The thing the user wants returned by this facet, in plain language ("doors").
-    # Resolved to IFC classes later; never an IFC class here.
-    result_concept: str | None = Field(default=None, max_length=200)
-    # Every material condition on `result_concept`, and their Boolean structure.
-    # Conditions attached to no group are combined with AND.
-    conditions: list[IntentCondition] = Field(default_factory=list, max_length=20)
-    condition_groups: list[IntentGroup] = Field(default_factory=list, max_length=8)
+    part_id: str = Field(min_length=1, max_length=40)
+    #: The portion of the user's question this part answers, quoted or closely
+    #: paraphrased, so the final answer can address each part explicitly.
+    request_text: str = Field(min_length=1, max_length=300)
+    operation: OutputOperation
+    #: Exactly one primary subject candidate ID.
+    subject_candidate_id: str = Field(min_length=1, max_length=40)
+    #: A bounded explicit union, used ONLY when the user asks for multiple peer
+    #: concepts. Never used to add components, type definitions, or supporting
+    #: elements to a requested occurrence total (§3.1).
+    union_subject_candidate_ids: list[str] = Field(default_factory=list, max_length=4)
+    scope_kind: ScopeKind = ScopeKind.ACTIVE_MODEL
+    #: Required when `scope_kind` is `spatial_candidate`.
+    scope_candidate_id: str | None = Field(default=None, max_length=40)
+    conditions: list[BoundCondition] = Field(default_factory=list, max_length=20)
+    condition_bool_op: Literal["and", "or"] = "and"
+    #: Field candidate IDs whose values the answer should report.
+    output_field_candidate_ids: list[str] = Field(default_factory=list, max_length=8)
+    #: Free text for genuinely QUALITATIVE ranking only. Structured questions
+    #: must not use this — it is the one place semantics stay unadjudicated.
+    semantic_ranking_text: str | None = Field(default=None, max_length=300)
+    #: Only for relationship/connectivity operations.
+    relationship_candidate_id: str | None = Field(default=None, max_length=40)
+    endpoint_subject_candidate_id: str | None = Field(default=None, max_length=40)
+    #: Multi-part questions need ONE explicit primary visual part; the viewer
+    #: must not union every part merely because each was retrieved (§9).
+    is_primary_visual: bool = False
 
 
-class RetrievalPolicy(_StrictModel):
-    """The immutable SQL/RAG/graph modality decision (Task 17 §2). Decided from
-    the query alone; the authoritative value is the union of the facets' needs."""
+class BindingPlan(_StrictModel):
+    """LLM call 1 output: the complete model-aware semantic binding (§2.2)."""
 
-    sql: bool = False
-    rag_entity: bool = False
-    rag_relationship: bool = False
-    graph: bool = False
-
-
-class RetrievalPolicyPlan(_StrictModel):
-    """LLM call 1 output (Task 17 Stage 2): the query-only retrieval policy and
-    conceptual facet plan. For a conversational active-model question it carries
-    `facets` + `retrieval_policy` (route=hybrid). Catalog/general/clarify are
-    preserved routes and carry no facets. NO active-model candidates, schema
-    fields, IFC classes, or raw SQL appear in the INPUT to this call."""
-
-    scope: QueryScope
-    route: QueryRoute
-    source_model_id: int | None = None
-
-    analysis_intent: str | None = Field(default=None, max_length=500)
-    facets: list[Facet] = Field(default_factory=list, max_length=6)
-    retrieval_policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
-
-    # Preserved non-analysis routes.
-    catalog_plan: CatalogPlan | None = None
+    #: The language to answer in, so responses stay in the user's language.
+    response_language: str = Field(default="en", max_length=32)
+    #: One to four answer parts, matching the actual independent requests.
+    answer_parts: list[AnswerPart] = Field(default_factory=list, max_length=4)
+    viewer_intent: ViewerIntent = ViewerIntent.NO_OP
+    #: Set ONLY when a material ambiguity cannot be safely bound (§2.2).
     needs_clarification: bool = False
     clarification_question: str | None = Field(default=None, max_length=500)
+    #: Detected material modifiers the model could not bind. Declaring one here
+    #: is REQUIRED rather than optional: §2.4 forbids silently dropping a
+    #: modifier so a broader query can execute.
+    unresolved_modifiers: list[str] = Field(default_factory=list, max_length=12)
 
-    viewer_intent: ViewerIntent = ViewerIntent.NO_OP
-    answer_focus: str | None = Field(default=None, max_length=500)
-    sample_detail_requested: bool = False
+
+class FactualClaim(_StrictModel):
+    """One checkable numeric/named assertion the answer makes (§8.3).
+
+    Every structured claim must reference a `fact_id` the backend supplied, and
+    the value must match what the backend computed. Deterministic validation
+    compares them; a mismatch is rejected without another model call.
+    """
+
+    fact_id: str = Field(min_length=1, max_length=80)
+    #: The value as asserted in the answer text. Compared against the packet.
+    value: str = Field(max_length=120)
+    unit: str | None = Field(default=None, max_length=16)
+    #: Any IFC class, property, material, or relationship endpoint named in this
+    #: claim. Each must appear in the answer packet (§8.3).
+    named_entities: list[str] = Field(default_factory=list, max_length=12)
 
 
-class QueryPlan(_StrictModel):
-    """The complete planner output for one natural-language question (spec_v005 §5)."""
+class GroundedAnswer(_StrictModel):
+    """LLM call 2 output: the final answer plus what it is grounded in (§8.3)."""
 
-    scope: QueryScope
-    route: QueryRoute
-    source_model_id: int | None = None
-
-    catalog_plan: CatalogPlan | None = None
-    sql_plan: SqlPlan | None = None
-    rag_plan: RagPlan | None = None
-    graph_plan: GraphPlan | None = None
-
-    execution: PlanExecution = Field(default_factory=PlanExecution)
-
-    needs_clarification: bool = False
-    clarification_question: str | None = Field(default=None, max_length=500)
-    viewer_intent: ViewerIntent = ViewerIntent.NO_OP
-    # A short internal note the answer model may use to focus the response.
-    # Never surfaced verbatim; never authoritative (spec_v005 §11).
-    answer_focus: str | None = Field(default=None, max_length=500)
-    # True ONLY when the user explicitly asked for a sample/example object's
-    # details ("pick a sample door and show me the details") or one specific
-    # component's details (task13 §3). Ordinary count/list/show/highlight
-    # questions are NOT sample-detail intent. When true, the backend picks one
-    # deterministic matching entity from the database and attaches its bounded
-    # details — the answer model never invents a sample.
-    sample_detail_requested: bool = False
+    answer: str = Field(min_length=1)
+    #: The answer parts this response actually used.
+    answer_part_ids: list[str] = Field(default_factory=list, max_length=8)
+    structured_claims: list[FactualClaim] = Field(default_factory=list, max_length=16)
+    #: True when the answer draws on general knowledge rather than the model.
+    used_general_knowledge: bool = False
+    used_inference: bool = False
+    #: True when the answer discloses a material limitation it was given.
+    disclosed_limitation: bool = False

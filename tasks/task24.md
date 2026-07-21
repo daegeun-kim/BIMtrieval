@@ -1,557 +1,971 @@
-# Task 24: Provisional Model-Aware LLM Query Agent
+# Task 24: Model-Aware Semantic Binding and Authoritative BIM Retrieval
 
-## Status
+## Purpose
 
-This task is a **provisional design and experimental plan**. It is not yet the final Task 24 and
-is expected to receive additional requirements from the user.
+Implement a new active BIM question-answering pipeline that reliably narrows a large model to the
+smallest authoritative evidence needed to answer the user's question.
 
-Do not replace the production query pipeline or begin broad implementation from this draft alone.
-The purpose of the current file is to preserve the user's exact architectural intention, the
-suggested pipeline changes discussed so far, and the shape of an isolated experimental path. When
-the user finalizes Task 24, this status and the remaining open decisions must be updated before
-implementation begins.
+The project is a BIM RAG application. A user should be able to access, analyze, and understand a
+complex building model without sending the entire BIM dataset to an LLM. SQL, RAG, and graph
+retrieval remain the available evidence engines, but the pipeline must determine the intended BIM
+concept and constraints before executing expensive retrieval.
 
-Do not use earlier task files as architectural authority for this work. Task 23 is complete, and
-`specs/test_query.md` records evaluation performed after the Task 23 changes. Task 24 is motivated
-by the remaining failures observed in that post-Task-23 evaluation.
+Implement Task 24 as the active query pipeline on the experimental branch. Do not create a feature
+flag, parallel endpoint, compatibility route, or separate legacy/new orchestration path. Future
+query work will build on the completed Task 24 architecture.
+
+## Fundamental problem
+
+The pipeline currently places model-aware semantic selection at the wrong point in the cycle:
+
+1. the first LLM interprets the question without seeing a bounded view of how relevant concepts
+   may be represented in the active model;
+2. deterministic resolution produces many possible classes, fields, values, and evidence groups;
+3. many candidates are executed before their relevance is established;
+4. the final LLM receives competing results and is asked both to decide what the user meant and to
+   write the answer.
+
+This can lose relevant evidence, execute the wrong representation, dilute correct evidence among
+irrelevant candidates, or make the final LLM reinterpret exact results. It also wastes database
+work, tokens, and response time.
+
+The solution is to make one small, model-aware semantic binding before authoritative execution,
+then give the final LLM only the already-adjudicated result.
+
+## Non-negotiable generalization rule
+
+Do not implement any fix whose condition is a specific sample question, phrase, expected value,
+IFC file, or test count.
+
+In particular:
+
+- no exact-query string matching;
+- no branches for individual phrases from `specs/test_query.md`;
+- no hard-coded expected counts;
+- no special handling for one named property value, object type, floor expression, or absent
+  concept;
+- no prompt examples that cause the implementation to work only for the recorded wording;
+- no model-2-specific mapping or logic.
+
+Every implementation change must enforce a general invariant, such as:
+
+- scope references and result filters are distinct typed concepts;
+- a requested occurrence cannot silently become a type definition or component;
+- every executed constraint is grounded in the user's wording or an explicitly inherited scope;
+- an exact empty representation outranks a semantically similar but different non-empty class;
+- exact, zero, unavailable, and partial evidence are not interchangeable;
+- the final LLM cannot choose among unexecuted or competing semantic interpretations.
+
+The questions in `specs/test_query.md` are acceptance tests only. They must not be used as a source
+of query-specific production rules. Add unrelated and paraphrased tests for every mechanism so a
+sample-specific patch cannot pass validation.
 
 ---
 
-# 1. User intention
+# Required architecture
 
-The current pipeline is too rigid. It divides natural-language understanding, retrieval-mode
-selection, semantic candidate resolution, evidence-group construction, relevance judgment, and
-answer writing across several strict boundaries. These boundaries were intended to improve safety
-and grounding, but they also repeatedly lose, broaden, or misinterpret the user's meaning.
-
-The intended direction is to give the LLM more authority to work in a bounded, human-like manner.
-The LLM should be able to:
-
-- inspect a compact representation of what the active IFC model actually contains;
-- form one or more hypotheses about how the user's concept is represented;
-- request multiple useful database investigations in one batch;
-- inspect compact intermediate results;
-- detect when an initial interpretation was wrong or incomplete;
-- revise the interpretation or query once when justified;
-- distinguish direct stored evidence from indirect clues and unavailable information;
-- produce an honest `I don't know` / `cannot be determined from this model` result when the IFC
-  does not provide sufficient evidence.
-
-This is a deliberate movement away from forcing every question through a rigid sequence of blind
-policy planning, broad semantic candidate creation, and final evidence-group repair. It is not a
-movement toward sending the entire IFC database to an LLM or allowing unrestricted database
-access.
-
-The design should learn from the human-like working pattern used to establish the expected answers
-in `specs/test_query.md`: inspect the available model structure, run several targeted queries,
-compare intermediate results, correct a mistaken interpretation, and only then state the answer.
-The production pipeline does not need to reproduce that process exactly, but it should use the
-same useful capabilities within explicit bounds.
-
-Token use may increase from the current version when the additional tokens carry useful model
-vocabulary, field coverage, intermediate query results, or competing interpretations. Lower token
-use remains preferable when answer quality is equal. Response time remains important, so the
-design must prefer batched database investigations and a bounded number of LLM round trips over an
-open-ended agent loop.
-
----
-
-# 2. Core architectural direction
-
-Explore replacing much of the current model-blind planning and broad evidence-group machinery with
-a **model-aware LLM query agent** backed by a small set of safe, typed investigation tools.
-
-Target conceptual flow:
+Use this data flow:
 
 ```text
-user question
-    + bounded conversation state
-    + compact active-model manifest
-        -> LLM query agent
-        -> one batch of typed SQL / semantic / graph investigations
-        -> deterministic backend execution
-        -> compact intermediate results
-        -> either:
-             A. deterministic exact or unavailable answer
-             B. one LLM correction or qualitative-synthesis round
-        -> deterministic validation
-        -> viewer identities from the accepted executed result
+user question + bounded history + typed previous scope/selection
+    -> deterministic, query-specific candidate slate from cached model semantics
+    -> LLM call 1: bind the user's requested answer parts to candidate IDs
+    -> deterministic validation, IFC semantic closure, and retrieval-mode derivation
+    -> one authoritative execution per answer part
+       - typed SQL for exact structured facts
+       - SQL-scoped RAG for qualitative semantic ranking
+       - seeded graph traversal for relationships/connectivity
+    -> compact answer packet containing only adjudicated results
+    -> LLM call 2: uniform grounded answer writing
+    -> deterministic response validation and viewer identities from the same results
 ```
 
-This is a maximum-two-call normal path, not a requirement to make two calls for every question.
+Keep exactly two principal LLM calls for a normally answered active-model question:
 
-## 2.1 Simple exact path
+1. model-aware semantic binding;
+2. final grounded response.
 
-For a straightforward count, list, filter, exact property query, catalog query, exact zero, absent
-class, or absent field:
+Do not add an LLM router, verifier, judge, repair, reflection, correction, reranking, or replanning
+call. An invalid binding or invalid final response must not trigger a third model request.
 
-```text
-LLM call 1: compile the question into one or more typed investigations
-backend: execute and validate exact results
-backend: render the answer and viewer action deterministically
-```
-
-The final answer LLM should not be called when the backend already has a complete, unambiguous
-answer. This should reduce both latency and the risk that a correct count is omitted, changed, or
-relabelled.
-
-## 2.2 Complex or qualitative path
-
-For a multi-part, ambiguous, qualitative, or semantically defined question:
-
-```text
-LLM call 1: propose a bounded batch of investigations
-backend: execute independent investigations, concurrently where safe
-LLM call 2: inspect the compact results, select or revise the interpretation, and synthesize
-backend: validate claims, evidence scope, and viewer scope
-```
-
-## 2.3 Exceptional correction path
-
-Permit one bounded correction when deterministic checks show that the first interpretation cannot
-support the requested answer. The correction is exceptional and must not become an open-ended
-agent loop.
-
-Examples of reasons to permit correction:
-
-- only a type/style definition was selected for a physical occurrence request;
-- component classes were mixed with assemblies in a count;
-- a qualified concept is supported only by an unqualified broad class;
-- the requested field is not populated on the selected result class;
-- an exact zero conflicts with a plausible alternate representation that was not investigated;
-- overlapping parent and child classes would be double-counted;
-- a logical building concept, such as a floor level, was confused with raw IFC entity count;
-- a graph question did not execute graph traversal;
-- a multi-part question has missing result parts;
-- the proposed answer scope and viewer scope do not match.
-
-The correction input must report the concrete conflict or missing coverage. It must not ask the LLM
-to restart the entire investigation without guidance.
+SQL, RAG, graph, model vocabulary, ontology, logical floor bands, typed SQL compilation, session
+state, and viewer identity behavior should be reused and corrected rather than rebuilt as parallel
+systems.
 
 ---
 
-# 3. Compact active-model manifest
+# 1. Build a compact model-aware candidate slate before LLM call 1
 
-The first LLM should no longer be intentionally blind to all active-model structure. Give it a
-bounded, cached manifest that helps it choose from information the model actually exposes without
-sending entity-scale data.
+## 1.1 Purpose
 
-The manifest should be deterministic, read-only, provenance-aware, and derived from existing
-ingested data. It should contain the minimum useful representation of:
+The candidate slate is a bounded description of plausible ways the current question may be
+represented in the active model. It gives the first LLM enough model awareness to select the right
+meaning without sending the model manifest, canonical JSON, complete vocabulary, database rows, or
+retrieval results.
 
-- observed IFC entity classes and exact counts;
-- observed relationship classes;
-- occurrence versus type/style/component/relationship role;
-- relevant IFC inheritance and class-family information;
-- queryable attributes, type facts, property fields, and quantity fields by class;
-- populated and missing coverage for fields and quantities;
-- bounded common categorical values with occurrence counts;
-- material and classification availability;
-- logical floor/elevation bands in addition to raw `IfcBuildingStorey` entities;
-- supported relationship and graph traversal capabilities;
-- model/catalog identity needed to describe the active model truthfully.
+Build it deterministically from existing cached resources where possible:
 
-The manifest must not contain:
+- IFC ontology classes, inheritance, definitions, and schema roles;
+- active-model class profiles and exact presence/count metadata;
+- queryable field registry;
+- observed property, quantity, classification, material, type, and attribute profiles;
+- field coverage and missing-data states;
+- logical floor bands and storey metadata;
+- relationship classes and graph capabilities;
+- selected objects;
+- the previous accepted result's typed scope.
 
-- full canonical JSON for every entity;
-- complete entity lists;
-- embedding vectors;
-- secrets or credentials;
-- unrestricted SQL text;
-- thousands of viewer identities;
-- unbounded distinct property values.
+Do not run an exact SQL count for every candidate. Candidate generation is discovery, not
+execution. Reuse cached counts and profiles already available in the vocabulary where possible.
 
-When the manifest omits a value due to bounds, the LLM must be able to request a typed inspection
-of that class or field rather than treating manifest absence as model absence.
+## 1.2 Query-driven retrieval of candidates
 
----
+Build the slate from the entire user question using a deterministic combination of:
 
-# 4. Typed investigation interface
+- exact and normalized lexical matches;
+- IFC label and identifier tokenization;
+- ontology-definition similarity;
+- existing semantic embeddings;
+- active-model presence and field coverage;
+- quoted values, numeric values, units, comparison language, and explicit Boolean structure;
+- bounded conversation and selection context.
 
-The LLM should request typed operations rather than generate unrestricted raw SQL. Reuse existing
-safe compiler, repository, graph, RAG, source-model isolation, statement timeout, and read-only
-mechanisms wherever they remain suitable.
+Exact normalized matches must be retained before semantic supplemental candidates are capped. This
+prevents a compound question containing several explicit BIM nouns from losing one simply because
+another noun ranked higher by embedding similarity.
 
-The experimental interface should remain small and conceptually include the following capability
-families.
+Do not solve recall by raising a global similarity threshold, increasing existing retrieval limits,
+or sending the entire vocabulary. Use a small mixed slate with exact matches first and semantic
+supplements second.
 
-## 4.1 Inspect model
+## 1.3 Candidate types
 
-Return compact, relevant model metadata for a requested subject or characteristic:
+The slate must contain typed candidate records with stable request-local IDs. Include only the
+candidate types relevant to the current question:
 
-- candidate occurrence classes and their roles;
-- exact class counts and class-family membership;
-- queryable fields and coverage;
-- bounded observed values and counts;
-- quantity availability and units;
-- relationship endpoints and supported traversals;
-- logical spatial bands.
+### Subject candidates
 
-## 4.2 Execute structured query
+Each subject candidate represents one possible requested result concept and contains:
 
-Support safe typed operations including:
+- candidate ID;
+- plain-language label;
+- bounded ontology definition;
+- IFC schema role;
+- occurrence family or exact class binding;
+- present family members in the active model;
+- whether the representation is present or absent;
+- cached exact class/family counts when already available;
+- semantic role such as occurrence, type definition, property definition, spatial structure,
+  relationship, or other non-result metadata;
+- whether selecting it would represent one physical/logical result or a supporting component.
 
-- exact count;
-- bounded entity list;
-- Boolean filters;
-- field-value distribution;
-- group-by and grouped counts;
-- existence;
-- populated/missing coverage;
-- minimum, maximum, and sum when underlying numeric data exists;
-- class-family aggregation without parent/child double-counting;
-- viewer identity hydration from the same executed predicate.
+An ontology candidate that is semantically exact but absent from the active model must remain
+eligible. Do not discard absent exact candidates and replace them with a broader non-empty class.
 
-## 4.3 Semantic search
+### Field candidates
 
-Use semantic retrieval only for concepts that cannot be represented confidently by an exact
-structured predicate or when the user explicitly asks for qualitative/semantic evidence.
+Each field candidate contains:
 
-Semantic search returns bounded candidates with provenance and coverage. Its candidate count is not
-an exact model total. When an exact structured scope exists, semantic search must run inside that
-scope and must never widen an empty scope to the whole model.
+- candidate ID;
+- canonical typed field reference;
+- plain-language meaning and normalized aliases;
+- applicable subject families/classes;
+- field kind;
+- data type and supported operators;
+- coverage state and populated/missing counts where known;
+- a few query-relevant normalized observed values, not a global value dump.
 
-## 4.4 Graph traversal
+Field resolution and value resolution must be separate. Do not require a field-name match and an
+observed-value match to succeed in one lexical comparison.
 
-Support bounded traversal for connectivity, containment, assignment, endpoints, neighborhoods, and
-paths. A graph claim may be made only from executed graph results. Relationship descriptions or
-broad entity classes cannot substitute for traversal.
+### Spatial candidates
 
----
+Include spatial candidates only when spatial scope is relevant. They may represent:
 
-# 5. Batched investigation
+- the active model/building scope;
+- logical floor bands;
+- exact storey entities when the user explicitly asks about storey entities;
+- selected spatial containers;
+- a previous spatial result.
 
-One LLM output may request several independent investigations. Prefer executing those queries
-concurrently where the existing database/session rules allow it.
+A reference that identifies the active model is a scope selection. A predicate that restricts
+results to a spatial subset is a condition. Represent these as different typed fields so one cannot
+accidentally become the other.
 
-Example intent:
+### Relationship candidates
 
-```text
-Question: How many fire-rated walls are there, and what rating do they have?
+Include relationship candidates only for questions about connection, containment, assignment,
+aggregation, adjacency, membership, endpoints, or paths. Record:
 
-Investigation batch:
-1. Resolve the wall occurrence family and count each non-overlapping occurrence class.
-2. Inspect fire-rating field coverage across that family.
-3. Group populated fire-rating values and count them.
-```
+- relationship candidate ID;
+- relationship meaning and IFC class;
+- endpoint roles/classes when known;
+- availability in the active model;
+- supported traversal direction and depth bounds.
 
-The LLM should receive compact results such as:
+### Coverage/capability candidates
 
-```text
-wall occurrence family total: 1,981
-fire-rating field: Pset_WallCommon.FireRating
-populated occurrences: 720
-values: EI60 = 720
-```
+Expose only query-relevant capability information, such as whether the selected subject family has
+the requested quantity, property, material association, classification, or graph relationship.
+Do not send a full model manifest.
 
-The LLM should not receive all 720 entities unless the user requested a list or representative
-details. The exact result and full viewer identities remain backend-owned.
+## 1.4 Bounds
 
-Multiple cheap, useful database queries in one execution round are preferable to multiple
-sequential LLM calls. Database investigation may increase when it decreases semantic guesswork.
+Keep the serialized slate small enough for a fast planner request. Use conservative caps and test
+them with compound questions. As an initial implementation target:
 
----
+- at most 8 subject candidates after exact candidates and deduplication;
+- at most 8 field candidates;
+- at most 8 relevant value candidates total;
+- at most 6 spatial candidates;
+- at most 6 relationship candidates;
+- short definitions and profiles rather than representative entity documents.
 
-# 6. Conversation and previous-result scope
-
-Do not send only opaque previous entity IDs to the LLM. Preserve a typed bounded description of the
-previous accepted result, for example:
-
-```text
-subject concept: doors
-accepted occurrence classes: IfcDoor
-exact count: 551
-scope handle: previous_primary_result
-source predicate: all IfcDoor occurrences in the active model
-```
-
-The backend retains the actual canonical entity scope. The LLM refers to the bounded scope handle
-when resolving phrases such as `those`, `them`, or `only the external ones`.
-
-Follow-up operations must intentionally extend, filter, replace, or aggregate the previous scope.
-They must not rely on semantic similarity to the previous user sentence alone.
+These are maximum bounds, not quotas. Simple exact questions should usually receive one obvious
+subject candidate and only the fields actually implied by the question.
 
 ---
 
-# 7. LLM authority and deterministic boundaries
+# 2. LLM call 1 is a semantic binder, not an investigation agent
 
-The intention is to grant the LLM more authority over semantic investigation, not over database
-safety or factual arithmetic.
+## 2.1 Input
 
-The LLM may:
+The first LLM receives only:
 
-- select relevant classes and fields from the bounded manifest;
-- request several typed investigations;
-- compare intermediate results;
-- reject an initial interpretation;
-- request one bounded revision;
-- decide when direct evidence is sufficient for a qualitative conclusion;
-- distinguish direct evidence from indirect clues;
-- synthesize qualitative findings.
+- the current user question;
+- bounded conversational text required to resolve references;
+- active model/catalog scope;
+- selected-object summaries when present;
+- typed previous-result scope when present;
+- the compact request-specific candidate slate;
+- the small output schema and its rules.
 
-Deterministic backend code retains authority over:
+It must not receive full canonical JSON, full model vocabulary, database rows, raw embeddings,
+candidate SQL results, or viewer identity lists.
 
-- source-model isolation;
-- read-only enforcement;
-- allowed operations, fields, operators, and traversal types;
-- SQL compilation and parameter binding;
-- numeric calculation and unit conversion;
-- statement, row, sample, and traversal limits;
-- exact counts and grouped counts;
-- coverage calculations;
-- canonical IDs and viewer identities;
-- validation of result and viewer scope;
-- enforcement of the normal and exceptional round limits;
-- prompt-injection resistance at the execution boundary.
+## 2.2 Output schema
 
-Do not add unrestricted SQL execution merely to make the system more agentic. If raw SQL is ever
-considered later, it requires a separate explicit user decision and security design; it is not part
-of this provisional task.
+Replace the broad facet/evidence-group planning contract with one compact typed binding plan.
 
----
+The plan must contain:
 
-# 8. Insufficient IFC information
+- response language;
+- one to four answer parts, matching the actual independent requests in the question;
+- viewer intent;
+- clarification status only when a material ambiguity cannot be safely bound.
 
-A poor or incomplete IFC file is a normal input condition, not itself a pipeline defect. The
-pipeline must preserve the distinction between:
+Each answer part must contain:
 
-- requested class absent;
-- class present but requested field absent;
-- field present but requested value absent;
-- exact query returned zero;
-- semantic candidates found but not verified;
-- operation unsupported by the current execution path;
-- execution failure.
+- stable `part_id`;
+- output operation from a bounded enum, covering at least count, existence, list/show, sample detail,
+  group/distribution, aggregate, extremum/ranking, description/summary, comparison, and
+  relationship/connectivity;
+- one primary subject candidate ID, or a bounded explicit union of subject candidate IDs only when
+  the user asks for multiple peer concepts;
+- scope reference: active model, selected objects, previous accepted result, or another typed
+  spatial candidate;
+- zero or more typed conditions;
+- requested output fields when applicable;
+- optional semantic-ranking text only for genuinely qualitative evidence;
+- relationship candidate and endpoint target only for relationship/connectivity operations.
 
-Direct typed evidence, indirect clues, and unavailable evidence must remain separate.
+Each condition must contain:
 
-If the IFC does not contain enough direct evidence, the response must state that the answer cannot
-be determined from the model. Indirect names, descriptions, or associated objects may be mentioned
-only as explicitly labelled, inconclusive context when they are genuinely helpful. They must not be
-converted into a fabricated property, classification, material, quantity, connectivity result, or
-exact total.
+- field/spatial/material/classification candidate ID;
+- operator;
+- user value text/list and unit when present;
+- Boolean group position;
+- an exact source span from the current question, or an explicit inherited-scope reference.
 
----
+The model may select only candidate IDs present in the supplied slate. It may not emit IFC classes,
+field names, JSON paths, SQL, graph start IDs, arbitrary investigation operations, or new candidate
+definitions.
 
-# 9. Answer generation and validation
+## 2.3 No hypotheses or investigation DAG
 
-## 9.1 Deterministic answers
+Do not add:
 
-Render exact and unambiguous results without a final answer LLM, including:
+- hypotheses;
+- investigation lists;
+- dependencies or a planner-authored DAG;
+- optional exploratory branches;
+- iterative tool use;
+- correction plans;
+- alternate plans to execute and compare.
 
-- exact counts;
-- exact zero results;
-- absent classes;
-- absent fields or quantities;
-- exact value distributions;
-- catalog listings;
-- bounded database-backed sample details;
-- supported-operation limitations.
+The LLM chooses one binding per requested answer part. Deterministic execution either supports that
+binding, returns a typed absence/coverage state, or requests clarification.
 
-## 9.2 LLM-synthesized answers
+## 2.4 General constraint provenance
 
-Use the second LLM call only when the user needs qualitative synthesis, semantic comparison,
-interpretation of multiple evidence sources, or an answer that cannot be rendered from one exact
-result contract.
+Every executed narrowing condition must be traceable to:
 
-The second LLM should receive accepted investigation results and explicit coverage, rather than a
-large collection of broad groups it must repair.
+- an exact span in the current question;
+- the current viewer selection; or
+- a typed predicate inherited from the previous accepted result.
 
-## 9.3 Deterministic response checks
+Reject invented conditions deterministically. Do not ask the LLM to repair them.
 
-Before returning an LLM-synthesized answer, verify at minimum:
+Candidate generation should emit bounded `detected_modifier_spans` for structurally recognizable
+modifiers such as quoted values, comparisons, units, numeric bounds, floor/level references,
+negation, and field/value matches. The binding must cover each material detected modifier or mark
+it unresolved. A required modifier may never be silently dropped so a broader query can execute.
 
-- every asserted exact number exists in an accepted investigation result;
-- individual entity names come from accepted bounded evidence;
-- a qualified concept is not supported only by an unqualified class count;
-- type/style/component objects are not silently presented as physical occurrences;
-- the answer does not claim sufficient evidence when direct evidence is unavailable;
-- every requested part of a multi-part question is answered or explicitly marked unavailable;
-- viewer identities derive from the same accepted executed predicate as the direct answer;
-- rejected investigation results do not appear in the answer or viewer.
-
-When these checks fail, use a safe deterministic fallback from the validated investigation results.
-Do not add a third verifier LLM solely to judge the second LLM.
+This mechanism must remain general. Do not maintain a list of complete sample-query phrases.
 
 ---
 
-# 10. Token and latency policy
+# 3. Deterministic IFC semantic closure and validation
 
-The user authorizes a moderate increase in token use when it improves model awareness, correction,
-and answer accuracy.
+## 3.1 One primary semantic result per answer part
 
-Prefer spending tokens on:
+Before execution, convert the selected subject candidate into one authoritative semantic result
+set.
 
-- the compact active-model manifest;
-- typed previous-result context;
-- field and quantity coverage;
-- compact intermediate result summaries;
-- explicit competing interpretations when real ambiguity remains;
-- qualitative evidence that the final LLM genuinely needs.
+For an exact count or list, do not execute semantically adjacent candidate classes and ask the final
+LLM to choose. One answer part normally has one primary occurrence family.
 
-Do not spend additional tokens on:
+When a user explicitly asks for multiple peer concepts, preserve them as separate answer parts or
+an explicit typed union. Do not automatically add parts, type definitions, styles, relationships,
+or supporting elements to the requested occurrence total.
 
-- full IFC entity data;
-- long repeated prompt instructions;
-- large numbers of entity examples for exact questions;
-- complete viewer ID lists;
-- unbounded ontology descriptions;
-- verbose hidden planning text that is not used by execution or validation.
+## 3.2 IFC family semantics
 
-The experimental path must measure actual input, reasoning, and output tokens separately. Do not
-assume that a larger configured completion ceiling improves reasoning. Prefer a stronger or more
-appropriate model, useful context, and explicit reasoning-effort configuration when evaluation
-shows a benefit.
+Build family closure from IFC ontology inheritance and schema roles:
 
-Normal target:
+- a generic superclass request includes applicable present occurrence subtypes;
+- an explicitly requested subtype remains specific;
+- type/style/property-definition classes are not physical occurrence results;
+- semantically related components are not descendants and are not automatically included;
+- spatial structure entities and logical floor bands are distinct result kinds;
+- relationships are evidence about endpoints, not occurrence results unless explicitly requested.
 
-- simple exact question: one LLM call;
-- complex or qualitative question: two LLM calls;
-- exceptional corrected question: at most one additional bounded correction round, with its reason
-  recorded.
+Do not create a growing table of query phrases mapped to class lists. A small schema-level role or
+family registry is acceptable only where the IFC ontology does not expose a required invariant,
+and every entry must describe a reusable IFC semantic rule rather than a sample query.
 
-Do not implement an unbounded inspect/query/replan loop.
+## 3.3 Binding validation
+
+Validate before any authoritative query executes:
+
+- every selected candidate exists in the request slate;
+- the subject role is compatible with the requested operation;
+- conditions apply to the chosen subject family;
+- operator and data type are compatible;
+- all required source spans are represented;
+- Boolean structure remains within existing typed SQL bounds;
+- units are compatible and deterministically convertible;
+- previous-result and selected-object scopes belong to the active model;
+- relationship seed and endpoint semantics are executable;
+- an exact operation is not being based on a bounded semantic-candidate count.
+
+An invalid binding returns a concise clarification or typed unavailable result. It must not trigger
+a second planning call, silently broaden the scope, or fall back to all entities of a nearby class.
 
 ---
 
-# 11. Experimental path
+# 4. General field and value normalization
 
-Implement the proposed design first as an isolated experimental query path. It must not silently
-replace the current production path during evaluation.
+## 4.1 Field concept index
 
-The experiment should reuse existing safe backend capabilities where practical, including:
+Create or extend a cached field-concept index that describes queryable fields using:
 
-- schema and model-vocabulary extraction;
-- ontology hierarchy;
-- typed SQL filters and compiler;
-- read-only database sessions and statement timeouts;
-- semantic index and scoped RAG;
-- graph traversal implementation;
-- session storage;
+- canonical field and set names;
+- split identifier tokens;
+- IFC/property definitions where available;
+- normalized BIM terminology and reusable aliases;
+- subject-family applicability;
+- data type, unit, and operator support;
+- field coverage.
+
+The alias vocabulary must describe general BIM concepts, not complete query phrases or expected
+values. It should support exporter and naming variation without binding one user question directly
+to one database path.
+
+## 4.2 Value normalization
+
+After a field is selected, normalize values using reusable rules:
+
+- Unicode and case normalization;
+- punctuation and whitespace normalization;
+- singular/plural and simple morphological normalization;
+- boolean and presence-state synonyms;
+- normalized IFC enum values;
+- numeric parsing;
+- unit conversion through the existing unit system;
+- exact quoted values preserved when the user requests exactness;
+- controlled contains/starts-with behavior only when requested or semantically necessary.
+
+Query the chosen field's complete indexed value vocabulary when required. Do not resolve a value
+against unrelated fields or against only a globally capped set of top facts.
+
+## 4.3 Presence, distribution, and aggregate operations
+
+Support presence/absence and field-value distributions through the existing typed SQL machinery.
+
+When a question asks how many objects have a property and what values it has, prefer one scoped
+group/distribution result over inventing a value condition. Presence, group-by, missing-value,
+aggregate, and extremum are distinct operations and must retain their correct coverage semantics.
+
+---
+
+# 5. Authoritative retrieval execution
+
+## 5.1 Mode is derived, not chosen by the LLM
+
+Derive retrieval from the bound operation:
+
+- structured count, existence, filter, list, group, distribution, aggregate, extremum, and exact
+  ranking use typed SQL;
+- qualitative semantic ranking uses RAG;
+- a qualitative request with a structured subject/conditions executes SQL scope first and RAG only
+  within the resulting IDs;
+- connection, containment, assignment, aggregation, membership, endpoint, and path questions use
+  seeded graph traversal;
+- relationship-document RAG may help retrieve qualitative relationship context but cannot replace
+  graph execution for a claimed connection.
+
+Do not expose SQL/RAG/graph route flags for the LLM to set. The external response may continue to
+use the existing route vocabulary, but actual execution must follow the operation contract.
+
+## 5.2 One authoritative execution per answer part
+
+Execute only the selected interpretation.
+
+- Do not count every subject candidate.
+- Do not execute every field/value candidate.
+- Do not build independent competing exact evidence groups.
+- Do not fetch viewer identities while evaluating candidates.
+- Do not ask the final LLM to select the authoritative result.
+
+An answer part should normally require one typed structured query. A bounded multi-part question
+may execute one query per answer part. Batch compatible operations where the existing SQL path can
+do so safely without creating another query engine.
+
+## 5.3 Scoped RAG
+
+RAG is bounded semantic evidence, never an exact total.
+
+When structured scope exists:
+
+1. execute the authoritative SQL predicate;
+2. search/rank only entities inside that scope;
+3. keep an empty scoped RAG result empty;
+4. do not widen to whole-model RAG;
+5. retain the SQL count separately from the bounded semantic candidates.
+
+Use only a few final RAG examples in the answer packet. Do not send full entity documents or large
+candidate lists to the final LLM.
+
+## 5.4 Graph execution
+
+Wire graph operations into the active pipeline rather than only recording that graph retrieval was
+requested.
+
+The graph executor must receive:
+
+- seed identities from the selected subject predicate, selected objects, or typed previous result;
+- relationship class/role binding;
+- direction;
+- existing bounded maximum depth;
+- optional endpoint subject family;
+- source-model isolation.
+
+Filter endpoint results to the requested endpoint semantics. If the model does not contain the
+required relationship representation or traversal cannot establish the requested connection,
+return unavailable/partial evidence. Never fabricate connected names from a broad entity list.
+
+---
+
+# 6. Evidence status and coverage contract
+
+Every answer part must finish with one of these result states:
+
+- `exact`: the requested representation and required data were queried with complete structured
+  coverage; the result may be nonzero;
+- `zero`: the requested representation was safely identified and completely queried, but no
+  matches were found;
+- `unavailable`: the required property, quantity, relationship, or representation cannot be
+  established from the model;
+- `partial`: a useful part is exact or directly supported, but another requested part is
+  unavailable or incomplete;
+- `ambiguous`: multiple materially different bindings remain and user clarification is required.
+
+Preserve more detailed internal missing-value states where the existing SQL path supports them,
+but map them into this concise answer-part contract for the final LLM.
+
+Rules:
+
+- zero is not unavailable;
+- missing field coverage is not a zero value;
+- an absent explicit representation describes the BIM model, not necessarily the real building;
+- a bounded RAG miss is not proof of absence;
+- failed graph execution is not evidence of no real-world connection;
+- partial evidence must identify the known and unknown parts separately;
+- no unavailable condition may be silently removed to produce a broader exact result.
+
+---
+
+# 7. Typed previous-result scope and conversation
+
+Replace the current previous-result state that carries only a bounded ID list with a compact,
+reproducible typed scope.
+
+Store at least:
+
+- source model ID;
+- selected subject family/result kind;
+- complete typed predicate or reproducible operation binding;
+- accepted answer-part ID;
+- exact count/status;
+- bounded example IDs only when useful;
+- complete viewer identity information only in the existing response/viewer channel, not session
+  prompt context.
+
+A follow-up may explicitly:
+
+- inherit the previous result and add a condition;
+- inherit it and request another property/aggregate;
+- replace it with a new subject;
+- refer to the current viewer selection.
+
+Do not scope a large follow-up to the first 50 or 200 previous IDs. Re-execute the stored typed
+predicate when complete scope is required.
+
+Clear or invalidate the previous scope when the active model changes, the session resets, or the
+stored source model does not match the request.
+
+---
+
+# 8. Compact answer packet for LLM call 2
+
+## 8.1 Final LLM responsibility
+
+The final LLM remains mandatory for answered queries so response style, language, qualifications,
+and multi-part presentation remain uniform.
+
+Its responsibility is only to express adjudicated results. It must not:
+
+- select a target class or field;
+- accept/reject candidate groups;
+- choose retrieval modes;
+- add counts from associated classes;
+- reinterpret zero as unavailable or unavailable as zero;
+- infer a connection not established by graph evidence;
+- broaden the viewer scope;
+- invent model facts.
+
+## 8.2 Answer packet
+
+Send one compact result object per answer part containing only:
+
+- part ID and the corresponding user request;
+- selected interpretation in plain language;
+- result status;
+- authority and coverage;
+- exact total, aggregate, extremum, or value distribution when applicable;
+- relevant class/value breakdown only when requested or necessary;
+- at most 3 representative examples by default;
+- up to the explicit user list limit for a list request, bounded by existing limits;
+- bounded relationship paths/endpoints for graph answers;
+- one concise limitation/reason for zero, unavailable, partial, or ambiguous results;
+- stable fact/result IDs for grounding;
+- response language and requested level of detail.
+
+Do not send:
+
+- rejected candidates;
+- semantic similarity scores;
+- planner reasoning;
+- ontology candidates not selected;
+- repeated group IDs that the answerer must classify;
+- 50 cross-group examples;
+- complete viewer identities;
+- raw canonical JSON;
+- database IDs or SQL.
+
+## 8.3 Final output and deterministic validation
+
+Use a small structured final-answer schema containing:
+
+- answer text;
+- answer-part IDs used;
+- structured factual claims referencing supplied fact/result IDs;
+- whether inference or general knowledge was used;
+- whether a material limitation was disclosed.
+
+Validate deterministically that:
+
+- all referenced answer parts and fact IDs exist;
+- structured numeric claims match the authoritative values and units;
+- zero/unavailable/partial status is preserved;
+- any named classes, properties, materials, or relationship endpoints in structured claims appear in
+  the answer packet;
+- the model did not claim complete coverage from bounded RAG evidence;
+- viewer selection remains backend-owned.
+
+Do not call the LLM again after validation failure. Return a concise safe fallback assembled from
+the authoritative answer-part results and record the validation failure. The final LLM is still
+called in the normal cycle; the fallback is an exceptional grounding safeguard, not a separate
+answer path chosen by query type.
+
+---
+
+# 9. Viewer identity consistency
+
+The final answer, exact total, and viewer identities must derive from the same authoritative
+answer-part result.
+
+- Fetch complete viewer identities only after execution has established the final result.
+- Do not highlight type/style/property-definition records for a physical occurrence result.
+- Supporting qualitative or graph context may use the existing context visualization only when it
+  is explicitly part of the answer packet and remains visually distinct.
+- Exact zero, unavailable, catalog, and non-visual summary answers should not highlight an unrelated
+  fallback set.
+- Viewer identity limits must never change the exact total supplied to the final LLM.
+- Multi-part questions need an explicit primary visual answer part; do not union all answer-part IDs
+  merely because they were retrieved.
+
+---
+
+# 10. Performance and token requirements
+
+The architecture must reduce work rather than compensate with larger limits.
+
+## 10.1 LLM calls
+
+- exactly two principal LLM calls for a normally answered active-model question;
+- no format-repair, correction, verifier, or retry LLM call;
+- keep `gpt-5-nano` as the initial planner and answer-model baseline;
+- keep planner and answer model settings independently configurable for later A/B evaluation;
+- do not upgrade a model merely to compensate for an oversized prompt or ambiguous contract.
+
+## 10.2 Prompt bounds
+
+- keep the candidate slate query-specific and normally far below its maximum caps;
+- keep the binding schema small enough that it does not produce long reasoning-like output;
+- send only adjudicated answer parts to LLM call 2;
+- default to at most 3 examples per answer part;
+- omit fields whose values are null/irrelevant rather than serializing large empty structures;
+- log serialized prompt sizes and actual prompt/completion tokens by role.
+
+Do not increase the number of evidence groups, RAG top-k, semantic-resolution top-k, example budget,
+graph depth, list limit, or LLM output-token limit as a solution.
+
+## 10.3 Database work
+
+- no sequential exact query per semantic candidate;
+- normally one authoritative retrieval per answer part;
+- viewer identity hydration occurs after result selection;
+- reuse caches for ontology, class profiles, field profiles, and logical floors;
+- avoid rebuilding or embedding the model vocabulary per question;
+- no per-question full canonical-JSON scan;
+- batch compatible multi-part operations when it measurably reduces round trips;
+- record statement counts and stage latency in diagnostics.
+
+## 10.4 Retry behavior
+
+Prevent nested retry multiplication:
+
+- disable SDK-internal retries when application retry behavior is active;
+- do not automatically retry a full LLM timeout;
+- permit at most one bounded application retry for a short transient connection, rate-limit, or
+  provider 5xx failure;
+- do not retry schema, validation, refusal, or deterministic execution failures;
+- preserve sanitized failure messages and never log credentials.
+
+## 10.5 Performance evidence
+
+Measure separately:
+
+- candidate-slate build time and serialized size;
+- LLM 1 latency and tokens;
+- binding validation/semantic closure time;
+- SQL, RAG, and graph execution time and statement counts;
+- answer-packet size;
+- LLM 2 latency and tokens;
+- viewer hydration time;
+- total response latency and tokens.
+
+Compare the complete Task 24 run against the timings recorded in `specs/test_query.md`. Provider
+latency varies, so acceptance is based on both end-to-end evidence and structural reductions. The
+new implementation must demonstrate fewer executed candidate queries, smaller final prompts, no
+extra LLM calls, and a lower median token/latency result across the same live suite.
+
+---
+
+# 11. Catalog, summary, and special operations
+
+## 11.1 Catalog
+
+Catalog questions remain model-catalog operations but must use the same final-answer contract for
+uniform response style. Include all safe recorded display metadata needed to identify a model,
+including the existing filename when a display name is absent. Do not fabricate missing catalog
+metadata.
+
+## 11.2 Building summary
+
+Provide a deterministic, cached or efficiently batched building-profile operation for broad model
+summaries. It may include only useful high-level facts such as:
+
+- logical floor count;
+- major occurrence-family counts;
+- major space categories;
+- directly recorded material/property summaries;
+- explicit model limitations relevant to the summary.
+
+Do not generate a summary by executing every semantic candidate group or sending the model
+vocabulary to the final LLM.
+
+## 11.3 Sample detail
+
+Sample selection is an output operation, not a semantic filter. After the subject predicate is
+executed, choose one deterministic matching occurrence and hydrate its bounded details through the
+existing detail path. A planner-invented sample condition must never block the operation.
+
+## 11.4 Logical spatial abstractions
+
+When the answer operation asks about logical floors/levels, use the existing elevation-band model.
+When the user explicitly asks about raw storey entities, use raw IFC spatial entities. Preserve
+both concepts and do not let a generic entity count silently substitute for a logical building
+abstraction.
+
+---
+
+# 12. Implementation boundaries
+
+Modify the current active query pipeline in place. Reuse and simplify existing packages rather than
+creating a second orchestration tree.
+
+Expected implementation areas include:
+
+- LLM schemas and the two prompts;
+- planner/context assembly;
+- semantic ontology/vocabulary candidate generation;
+- field/value resolution and coverage;
+- IFC class-family/role resolution;
+- typed SQL plan composition;
+- active hybrid orchestration;
+- RAG scoping;
+- graph seed/execution wiring;
+- session previous-result state;
+- answer evidence serialization and validation;
 - viewer identity hydration;
-- request/response contracts where they do not prevent a clean comparison.
+- diagnostic logging and evaluation fixtures.
 
-Do not preserve existing layers merely because they already exist. The experiment is specifically
-intended to determine whether the query-agent contract can simplify or retire parts of:
+Remove or retire active-path behavior whose only purpose is to:
 
-- query-only retrieval-policy planning;
-- planner-selected SQL/RAG/graph flags;
-- broad threshold-free candidate execution;
-- evidence-group competition for exact questions;
-- fixed example allocation for count questions;
-- final group relevance judgment for exact results;
-- clarification caused by one failed semantic candidate when another bounded investigation could
-  resolve the question.
+- execute many competing evidence groups;
+- allocate examples across competing groups;
+- ask the final LLM to accept/reject semantic candidates;
+- preserve query-only isolation from all model-aware semantic candidates;
+- carry previous results only as truncated identity lists.
 
-The experimental and existing paths must be comparable using the same model, active IFC data,
-questions, and expected results. Do not tune behavior only to the literal wording in
-`specs/test_query.md`; add paraphrases and structurally equivalent cases so improvements are
-general rather than query-specific.
+Do not remove reusable typed SQL, RAG, graph, ontology, vocabulary, floor-band, field-registry,
+viewer, or session infrastructure merely because the orchestration changes.
 
----
-
-# 12. Observability and evaluation
-
-Record bounded structured investigation traces for development and evaluation without exposing
-private chain-of-thought. For each question, capture:
-
-- model and reasoning configuration;
-- manifest version and bounds;
-- LLM-proposed investigation IDs, purposes, and typed operations;
-- execution mode actually used;
-- compact result counts, coverage states, and class histograms;
-- whether a correction was triggered and the deterministic reason;
-- accepted and rejected investigation IDs;
-- deterministic versus LLM-synthesized answer path;
-- viewer result count and scope identity;
-- per-stage latency;
-- input, reasoning, and output token usage;
-- final evaluation verdict and failure category.
-
-Do not log raw full IFC data, embeddings, secrets, credentials, unrestricted chat history, or
-thousands of entity identities.
-
-Evaluate at minimum:
-
-- all current PASS, PARTIAL, and FAIL entries in `specs/test_query.md`;
-- paraphrases of the recurring failures;
-- simple exact counts;
-- qualified counts and Boolean filters;
-- occurrence versus type/style/component distinctions;
-- exact zero, absent class, absent field, and absent quantity;
-- multi-part aggregates;
-- logical floor bands versus raw storey entities;
-- conversational follow-up scope;
-- catalog metadata;
-- sample-detail intent;
-- semantic qualitative questions;
-- graph/connectivity questions;
-- poor/incomplete IFC evidence;
-- prompt injection and unsupported operations.
-
-Compare:
-
-- total and category-specific pass rate;
-- unsupported or fabricated claims;
-- answer/viewer scope agreement;
-- planner/query correction rate;
-- number of LLM calls;
-- number of database investigations;
-- p50 and p95 latency by stage;
-- input, reasoning, output, and total tokens;
-- exact-question deterministic bypass rate.
-
-Lower call count, tokens, or latency is an improvement only when the final answer and viewer still
-meet the required correctness and grounding criteria.
+Do not change IFC ingestion, regenerate source IFC files, rebuild the database schema, or recreate
+vector data unless implementation proves a required general semantic field is genuinely absent
+from the existing stored/indexed information. Data already present must be solved in the query
+pipeline.
 
 ---
 
-# 13. Model experimentation
+# 13. Required testing
 
-Planner/query-agent and qualitative-answer models must remain independently configurable.
+## 13.1 Layered tests
 
-Do not change both roles simultaneously during the first comparison. Recommended experiment order:
+Tests must identify the first failing boundary rather than evaluating only final prose.
 
-1. current model with the new model-aware investigation contract;
-2. stronger query-agent model with the current qualitative-answer model;
-3. stronger query-agent plus deterministic exact-answer bypass;
-4. efficient versus stronger qualitative-answer model for the remaining qualitative cases;
-5. reasoning-effort comparison using the same questions and model.
+For each test case, independently validate:
 
-This isolates whether improvement comes from the architecture, the query-agent model, the answer
-model, or increased reasoning/token use.
+1. candidate slate recall and size;
+2. LLM binding or deterministic binding fixture;
+3. selected semantic family and schema role;
+4. field/value/spatial/relationship bindings;
+5. compiled authoritative operation;
+6. pre-LLM result status, count, distribution, examples, and coverage;
+7. compact answer packet contents and exclusions;
+8. final LLM grounded output or safe validation fallback;
+9. answer/viewer identity consistency;
+10. LLM calls, database statements, prompt tokens, and latency stages.
+
+## 13.2 Candidate and binding tests
+
+Cover at least:
+
+- exact lexical candidates surviving semantic caps;
+- multiple explicit subjects in one compound question;
+- semantically exact absent candidates retained;
+- occurrence versus type definition;
+- generic superclass versus explicit subtype;
+- related component versus requested whole occurrence;
+- spatial scope versus active-model reference;
+- quoted exact values;
+- numeric comparison and units;
+- negation and nested OR within existing bounds;
+- invented condition rejected through missing/invalid source provenance;
+- required modifier not silently omitted;
+- selected-object scope;
+- inherited previous-result scope;
+- model change invalidating prior scope;
+- multilingual binding where supported by the existing embedding/model path.
+
+## 13.3 Field/value and coverage tests
+
+Use several unrelated BIM fields and classes to prove general behavior:
+
+- canonical identifiers and plain-language synonyms;
+- boolean properties;
+- singular/plural stored values;
+- property values, type facts, classifications, materials, quantities, and attributes;
+- exact, contains, comparison, distribution, aggregate, present, and missing operations;
+- complete zero versus missing field versus extraction/unsupported state;
+- unit conversion;
+- the same concept represented differently in two models;
+- a field existing on one subject family but not another.
+
+## 13.4 Retrieval tests
+
+Cover:
+
+- one structured operation per answer part;
+- structured family expansion without type/style/component leakage;
+- scoped RAG never widening after an empty scoped result;
+- RAG candidate counts never becoming exact totals;
+- graph execution actually running when the operation requires it;
+- graph seeds honoring structured constraints and previous scope;
+- endpoint filtering;
+- unavailable graph coverage producing no fabricated connection;
+- multi-part execution retaining independent results;
+- primary viewer identities coming from the same predicate as the answer;
+- no viewer fallback for zero/unavailable results.
+
+## 13.5 Final-answer tests
+
+Cover:
+
+- uniform LLM call 2 for exact, zero, unavailable, partial, qualitative, catalog, and multi-part
+  results;
+- exact numbers and units preserved;
+- no summing of components or supporting concepts into a primary total;
+- concise exact response without inventory dumping;
+- appropriate model-limited language for absence;
+- useful partial answers that distinguish known and unknown parts;
+- same-language response;
+- answer packet contains no rejected candidates or complete viewer IDs;
+- invalid fact IDs or changed numeric claims rejected without a third LLM call;
+- safe fallback uses authoritative results and does not fabricate.
+
+## 13.6 Anti-overfitting and metamorphic tests
+
+For each corrected mechanism, add at least one unrelated query or paraphrase that was not copied
+from `specs/test_query.md`.
+
+Also test that:
+
+- changing active-model values changes the result without changing production prompt rules;
+- injecting an irrelevant high-count class candidate does not change the selected result family;
+- an absent exact class is not replaced by a broad present class;
+- changing only query wording preserves the same binding where meaning is unchanged;
+- changing from an occurrence request to an explicit type/component request changes the binding;
+- adding a valid condition narrows the same authoritative result rather than spawning independent
+  totals;
+- removing a required field changes exact/zero to unavailable rather than a broader result;
+- a follow-up over a result larger than the session ID cap still uses the complete predicate.
+
+## 13.7 Full live suite
+
+Run every query in `specs/test_query.md` against its specified model and session behavior. Record:
+
+- binding;
+- authoritative pre-answer result;
+- final answer;
+- expected result;
+- verdict;
+- answer/viewer counts;
+- modes actually executed;
+- LLM calls and tokens by role;
+- database statement count;
+- stage and total latency;
+- whether final validation fallback was used.
+
+Continue correcting general mechanisms and rerunning the complete suite until the acceptance
+criteria below are met. Do not stop after the originally motivating queries pass.
 
 ---
 
-# 14. Explicit non-goals of this provisional draft
+# 14. Acceptance criteria
 
-- Do not send the entire IFC database to an LLM.
-- Do not permit unrestricted raw SQL.
-- Do not remove deterministic safety and source-model isolation.
-- Do not trust the LLM for arithmetic that the database can compute exactly.
-- Do not create an unbounded autonomous agent loop.
-- Do not add a separate router, reranker, critic, and verifier LLM chain.
-- Do not increase semantic thresholds or evidence limits as the primary fix.
-- Do not tune hard-coded answers for the literal evaluation questions.
-- Do not replace the production path before the experiment demonstrates a measured benefit.
-- Do not treat incomplete IFC information as permission to infer a confident answer.
+Task 24 is complete only when all of the following are demonstrated:
+
+## Correctness
+
+- every material user constraint survives into one authoritative execution;
+- subject families contain the intended occurrences and exclude unrelated type/style/component
+  records;
+- field and value normalization works across unrelated classes and properties;
+- logical spatial concepts are not replaced by raw entity counts;
+- exact, zero, unavailable, partial, and ambiguous states are correct and user-facing;
+- graph claims come from executed graph evidence;
+- follow-ups reuse complete typed scope;
+- compound questions return every requested answer part;
+- no fabricated model fact is accepted;
+- final answer and viewer identities agree.
+
+## Architecture
+
+- LLM call 1 selects only from a bounded model-aware candidate slate;
+- the backend derives SQL/RAG/graph execution from the bound operation;
+- only the selected interpretation is authoritatively executed;
+- LLM call 2 receives only adjudicated answer parts;
+- no third LLM call exists in the normal, invalid-plan, or invalid-answer path;
+- no parallel legacy/new orchestration or feature flag remains;
+- no query-specific production patch or expected count is present.
+
+## Performance
+
+- exactly two principal LLM calls for normally answered active-model questions;
+- simple questions do not execute a query per semantic candidate;
+- answer examples are bounded per answer part rather than allocated across candidate groups;
+- SDK/application retries cannot multiply;
+- a full LLM timeout is not automatically repeated;
+- prompt sizes, tokens, statement counts, and stage timings are logged;
+- full-suite median token usage and end-to-end latency improve over the recorded baseline;
+- local retrieval/execution time for simple exact questions is not dominated by semantic candidate
+  enumeration.
+
+## Regression safety
+
+- source-model isolation and read-only behavior remain;
+- existing SQL allowlists and graph depth limits remain;
+- RAG never becomes exact count authority;
+- selection, catalog, reset, confirmation, viewer loading, viewer highlighting, and entity detail
+  behavior remain functional;
+- malformed input and prompt injection remain safely handled;
+- no IFC, database, or vector artifact is changed without a separately documented general need.
 
 ---
 
-# 15. Open decisions to finalize later
+# 15. Specification updates and completion record
 
-This provisional Task 24 intentionally leaves the following decisions open for the user's later
-additions:
+Update these specifications during implementation so they describe the completed Task 24 pipeline
+as the current source of truth:
 
-- exact typed investigation schema;
-- whether the correction round may issue one query batch or several dependent queries;
-- exact manifest bounds and refresh/cache rules;
-- model choices and reasoning-effort defaults;
-- token and latency budgets;
-- experimental endpoint or feature-flag shape;
-- compatibility requirements for the current public response schema;
-- exact production promotion criteria;
-- which existing group-pipeline modules should be retired after successful evaluation;
-- whether a future API migration is in scope.
+```text
+specs/spec_v002_query_architecture.md
+specs/spec_v003_sql_query_path.md
+specs/spec_v004_rag_query_path.md
+specs/spec_v005_hybrid_query_orchestration.md
+```
 
-Do not resolve these open decisions by assumption in the provisional implementation plan.
+Preserve completed task history. Do not rewrite older task files to make them appear consistent
+with the new architecture.
+
+After implementation and validation:
+
+1. append a concise completion report to this file;
+2. record the final schemas, data flow, removed/superseded active-path behavior, tests, live-suite
+   results, token/latency comparison, and genuine remaining limitations;
+3. confirm that no query-specific patches or expected counts were added to production code;
+4. rename this file to `tasks/task24_done.md` only after every required acceptance item is complete.

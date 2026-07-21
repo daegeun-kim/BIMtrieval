@@ -14,7 +14,7 @@ reconstructed from assistant prose (spec_v005 §12).
 from __future__ import annotations
 
 import threading
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +49,15 @@ class SessionState(BaseModel):
     last_primary_entity_ids: list[int] = Field(default_factory=list)
     last_context_entity_ids: list[int] = Field(default_factory=list)
     last_relationship_ids: list[int] = Field(default_factory=list)
+
+    # --- Typed previous-result scope (Task 24 §7) ---
+    # A REPRODUCIBLE description of the last accepted result, replacing the
+    # truncated id lists above as the basis for follow-ups. Storing the typed
+    # predicate rather than ids is what lets "how many of those are external?"
+    # cover the complete previous result instead of its first 50-200 members.
+    # `Any` because `PreviousScope` is a dataclass, not a pydantic model, and
+    # this state is process-local and never serialized to a client.
+    previous_scope: Any = None
 
 
 def reset(state: SessionState) -> SessionState:
