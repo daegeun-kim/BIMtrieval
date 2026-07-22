@@ -65,13 +65,37 @@ def search_kind(
     query_vector: list[float],
     top_k: int,
     threshold: float,
+    scope_entity_ids: list[int] | None = None,
 ) -> list[RagCandidate]:
-    """Independent per-kind pgvector search (spec_v004 §7)."""
+    """Independent per-kind pgvector search (spec_v004 §7).
+
+    `scope_entity_ids` restricts an ENTITY search to an already-computed
+    structured scope (Task 24 §5.3): RAG then ranks inside the authoritative SQL
+    result rather than across the whole model. An empty list is a real,
+    meaningful scope — it returns nothing rather than widening, because "the
+    structured predicate matched nothing" and "no scope was requested" are
+    different facts and must not produce the same answer.
+    """
     check_compatibility(session, source_model_id, source_kind)
     document_type = _KIND_DOCUMENT_TYPE[source_kind]
     canonical_col = _RD.c.entity_id if source_kind == "entity" else _RD.c.relationship_id
 
+    if scope_entity_ids is not None and source_kind == "entity" and not scope_entity_ids:
+        return []
+
     distance_expr = _RD.c.embedding.cosine_distance(query_vector)
+    predicates = [
+        _RD.c.source_model_id == source_model_id,
+        _RD.c.source_kind == source_kind,
+        _RD.c.document_type == document_type,
+        _RD.c.embedding_model == EMBEDDING_MODEL_NAME,
+        _RD.c.embedding_dim == EMBEDDING_DIM,
+        _RD.c.embedding.is_not(None),
+        canonical_col.is_not(None),
+    ]
+    if scope_entity_ids is not None and source_kind == "entity":
+        predicates.append(_RD.c.entity_id.in_(list(scope_entity_ids)))
+
     stmt = (
         sa.select(
             _RD.c.id,
@@ -82,15 +106,7 @@ def search_kind(
             _RD.c.text_template_version,
             distance_expr.label("distance"),
         )
-        .where(
-            _RD.c.source_model_id == source_model_id,
-            _RD.c.source_kind == source_kind,
-            _RD.c.document_type == document_type,
-            _RD.c.embedding_model == EMBEDDING_MODEL_NAME,
-            _RD.c.embedding_dim == EMBEDDING_DIM,
-            _RD.c.embedding.is_not(None),
-            canonical_col.is_not(None),
-        )
+        .where(*predicates)
         .order_by(distance_expr)
         .limit(top_k)
     )
@@ -155,6 +171,7 @@ def run_rag_search(
                 query_vector,
                 plan.top_k_per_kind,
                 threshold,
+                scope_entity_ids=plan.scope_entity_ids,
             )
         if plan.search_relationship_documents:
             relationship_candidates = search_kind(
@@ -181,7 +198,16 @@ def run_rag_search(
         c.passed_threshold for c in entity_candidates + relationship_candidates
     )
     warnings: list[str] = []
-    if not sufficient_evidence:
+    if plan.scope_entity_ids is not None and not plan.scope_entity_ids:
+        # Distinct from "nothing was similar enough": the structured predicate
+        # matched no objects, so there was nothing to rank. Reporting these the
+        # same way would let an empty scope read as a semantic miss (§5.3, §6
+        # "a bounded RAG miss is not proof of absence").
+        warnings.append(
+            "the structured scope for this question matched no objects, so no semantic "
+            "ranking was performed; this is not a semantic miss"
+        )
+    elif not sufficient_evidence:
         warnings.append(
             "no candidate passed the similarity threshold; treat as insufficient_evidence"
         )

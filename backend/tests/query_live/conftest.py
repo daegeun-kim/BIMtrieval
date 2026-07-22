@@ -35,6 +35,28 @@ def live_session():
         yield session
 
 
+@pytest.fixture(autouse=True)
+def _contain_failed_transactions(live_session):
+    """Roll back after every test so one failure cannot cascade.
+
+    `live_session` is module-scoped for speed, which means a single statement
+    that errors — most realistically a `statement_timeout` on an expensive
+    traversal — leaves the transaction aborted and every SUBSEQUENT test in that
+    module fails with `InFailedSqlTransaction`. That turns one honest failure
+    into a cluster of misleading ones, which is actively harmful when reading a
+    suite.
+
+    This does not hide anything: the test that genuinely failed still fails. It
+    only stops the damage spreading. Rolling back is safe here because every
+    test in this package is read-only.
+    """
+    yield
+    try:
+        live_session.rollback()
+    except Exception:  # noqa: BLE001 - teardown must never mask a real failure
+        pass
+
+
 @pytest.fixture(scope="session")
 def embedding_service():
     """Loads BAAI/bge-m3 once for the whole test session (spec_v004 §4: the
