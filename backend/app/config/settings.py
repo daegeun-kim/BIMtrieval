@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     # --- LLM (Section 6) ---
     openai_api_key: SecretStr | None = None
+<<<<<<< Updated upstream
     planner_model: str = "gpt-5-nano"
     answer_model: str = "gpt-5-nano"
     openai_timeout_s: float = 60.0
@@ -41,18 +42,63 @@ class Settings(BaseSettings):
     # Bounded retry on transient provider errors (timeout/rate-limit/5xx) — the
     # planner/answer loop itself is never retried unboundedly (spec_v005 §17).
     openai_max_retries: int = 2
+=======
+    openai_timeout_s: float = 120.0
+
+    # --- Task 25 §6 role/model/effort defaults ---
+    # Three independently-configurable roles on the Responses API with strict
+    # structured outputs. The binder is the hardest interpretation step; the
+    # correction is rare and handles a proven recoverable gap; the answer writer
+    # expresses already-adjudicated evidence and needs the least reasoning and a
+    # smaller output limit. A configured model that is unavailable must fail
+    # clearly — the client never silently substitutes another model (§6).
+    # Cost-reduced roster (owner-selected 2026-07-21) in place of the §6 flagship
+    # defaults: the ~1MB manifest makes each binder call's input dominate cost, so
+    # a cheap nano binder plus a low-effort mini answer writer cuts spend roughly
+    # 20x while keeping the manifest+ledger accuracy machinery unchanged.
+    binder_model: str = "gpt-5.4-nano"
+    binder_reasoning_effort: str = "medium"
+    binder_max_output_tokens: int = 16000
+
+    # The rare corrective retry stays in the binder family, one reasoning step up.
+    correction_model: str = "gpt-5.4-nano"
+    correction_reasoning_effort: str = "high"
+    correction_max_output_tokens: int = 16000
+
+    answer_model: str = "gpt-5.4-mini"
+    answer_reasoning_effort: str = "low"
+    answer_max_output_tokens: int = 4000
+
+    #: Service tier reported to the pricing registry when the provider omits one.
+    openai_service_tier: str = "standard"
+
+    # At most ONE bounded application retry for a short transient connection,
+    # rate-limit, or provider 5xx failure. A full request timeout is deliberately
+    # NOT retried, and SDK-internal retries are disabled (`max_retries=0` in
+    # llm.client) so the two cannot multiply.
+    openai_max_retries: int = 1
+>>>>>>> Stashed changes
     openai_retry_backoff_s: float = 1.5
-    # Independently configurable so planner/answer models can be replaced later
-    # (spec_v005 §4). Left as None here — planner_model/answer_model are the
-    # canonical knobs; these exist only as explicit per-role overrides if ever set.
-    planner_model_override: str | None = None
+
+    # Explicit per-role overrides, applied over the defaults above when set.
+    binder_model_override: str | None = None
+    correction_model_override: str | None = None
     answer_model_override: str | None = None
 
-    def get_planner_model(self) -> str:
-        return self.planner_model_override or self.planner_model
+    def get_binder_model(self) -> str:
+        return self.binder_model_override or self.binder_model
+
+    def get_correction_model(self) -> str:
+        return self.correction_model_override or self.correction_model
 
     def get_answer_model(self) -> str:
         return self.answer_model_override or self.answer_model
+
+    # Back-compat alias: the binder was historically the "planner". Kept so any
+    # remaining caller/diagnostic that asks for the planner model resolves to the
+    # binder role rather than breaking.
+    def get_planner_model(self) -> str:
+        return self.get_binder_model()
 
     # --- Database ---
     # Falls back to the backend-owned db_url loader (app.config.database.get_db_url,
@@ -143,6 +189,16 @@ class Settings(BaseSettings):
     # resolves under the repository root but is overrideable for tests/local
     # deployment. The resolved path is NEVER exposed to clients (Task 10 §2).
     viewer_asset_root: str | None = None
+
+    # --- Semantic manifests (task25 §2.1) ---
+    # Backend-owned root for ingestion-generated semantic manifests
+    # (model_semantics/{source_model_id}/{fingerprint}.semantic.json). ONE
+    # configuration value shared with ingestion via the repo-root `.env`, TWO
+    # independent resolvers — the backend never imports ingestion code (Task 09).
+    # Deliberately separate from `viewer_asset_root`: §2.1 forbids mixing
+    # semantic JSON with viewer fragments.
+    model_semantics_root: str | None = None
+
     # Explicit CORS allowlist for the local Vite frontend (spec_v006 §10.5).
     # No wildcard-with-credentials; overrideable via env (JSON list) without
     # placing any secret in frontend configuration.
@@ -157,6 +213,16 @@ class Settings(BaseSettings):
         if self.viewer_asset_root:
             return Path(self.viewer_asset_root)
         return _REPO_ROOT / "model_assets"
+
+    def get_model_semantics_root(self) -> Path:
+        """Resolve the configured semantic-manifest root (task25 §2.1).
+
+        Defaults to `<repo-root>/model_semantics`, matching the default the
+        ingestion project resolves independently from the same `.env` key.
+        """
+        if self.model_semantics_root:
+            return Path(self.model_semantics_root)
+        return _REPO_ROOT / "model_semantics"
 
     def get_database_url(self) -> str:
         """Resolve the database URL without ever printing/logging it.

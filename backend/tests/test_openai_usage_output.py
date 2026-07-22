@@ -106,7 +106,7 @@ def _run_question(svc: QueryService, client: _FakeClient, calls: list[dict], *, 
     append `calls` to the client log (mimicking client.py's post-completion
     appends), so the snapshot/finally wiring is exercised end to end."""
 
-    def _fake_answer(request, request_id, scope, c, state, t0):
+    def _fake_answer(request, request_id, scope, c, state, t0, usage_start=0):
         for entry in calls:
             c.log.calls.append(entry)
         if fail:
@@ -174,7 +174,7 @@ def test_client_without_a_log_surface_is_tolerated(logs):
 
     svc = QueryService(llm_client=_NoLog())
 
-    def _fake_answer(request, request_id, scope, c, state, t0):
+    def _fake_answer(request, request_id, scope, c, state, t0, usage_start=0):
         from app.query.service import _error_envelope
 
         return _error_envelope(request, "stub", request_id=request_id, scope=scope)

@@ -180,6 +180,7 @@ class QueryService:
             )
 
         client = self._client()
+<<<<<<< Updated upstream
         # Per-question OpenAI usage (task15 §1): snapshot the client's call log
         # so only the calls made for THIS question are summed, whether the
         # question succeeds, degrades, or fails after a completed planner call.
@@ -189,6 +190,22 @@ class QueryService:
             return self._answer_question(request, request_id, scope, client, state, t0)
         finally:
             if usage_start is not None:
+=======
+        # Snapshot the call log so ONLY this question's calls are summed. The
+        # client is cached per service instance, so `client.log.calls` holds
+        # every call the process has made — logging it wholesale would report a
+        # cumulative total as if it were one question's cost.
+        has_log = hasattr(client, "log")
+        usage_start = len(client.log.calls) if has_log else 0
+        try:
+            return self._answer_question(request, request_id, scope, client, state, t0, usage_start)
+        finally:
+            # Guarded on the SAME condition as `usage_start` above. An injected
+            # client without a `log` surface is legitimate (tests, and any future
+            # non-OpenAI provider), and usage reporting must never be the thing
+            # that fails a question that otherwise answered correctly.
+            if has_log:
+>>>>>>> Stashed changes
                 _emit_question_usage(client.log.calls[usage_start:])
 
     def _answer_question(
@@ -245,12 +262,31 @@ class QueryService:
                         req,
                         request_id,
                         session,
+<<<<<<< Updated upstream
                         policy_plan,
                         client,
                         state,
                         t0,
                         repaired,
                         planner_ms,
+=======
+                        PipelineRequest(
+                            question=request.question,
+                            source_model_id=request.active_source_model_id,
+                            history=[
+                                {"role": t.role, "content": t.content}
+                                for t in request.history[-self.settings.max_history_turns :]
+                            ],
+                            selected_entities=selected,
+                            selection_entity_ids=selection.entity_ids,
+                            previous_scope=previous,
+                        ),
+                        bind=lambda ctx: client.bind_query(ctx).plan,
+                        correct=lambda ctx: client.correct_binding(ctx).plan,
+                        answer=lambda payload: client.generate_grounded_answer(payload).output,
+                        settings=self.settings,
+                        embedding_service_getter=get_embedding_service,
+>>>>>>> Stashed changes
                     )
                 else:
                     envelope = self._answer_non_analysis(
@@ -974,6 +1010,7 @@ def _evidence_summary(pkg: EvidencePackage) -> EvidenceSummary:
 
 
 def _emit_question_usage(calls: list[dict]) -> None:
+<<<<<<< Updated upstream
     """Print one per-question OpenAI usage block (task15 §1).
 
     `calls` are the client-log entries added during this question only — each
@@ -982,6 +1019,12 @@ def _emit_question_usage(calls: list[dict]) -> None:
     made no OpenAI call (or none that reported usage) prints nothing rather
     than a misleading zero block; a question that failed after a completed
     planner call prints only what was actually reported.
+=======
+    """One per-question provider usage block + per-role/request USD cost (§6.1).
+
+    The token summary is preserved unchanged; the cost line is printed BESIDE it,
+    computed from the same captured usage and the versioned pricing registry.
+>>>>>>> Stashed changes
     """
     if not calls:
         return
@@ -990,6 +1033,53 @@ def _emit_question_usage(calls: list[dict]) -> None:
         completion_tokens=sum(int(c.get("completion_tokens", 0) or 0) for c in calls),
         total_tokens=sum(int(c.get("total_tokens", 0) or 0) for c in calls),
     )
+    _emit_openai_cost(calls)
+
+
+def _emit_openai_cost(calls: list[dict]) -> None:
+    """Print per-role and total USD cost from the versioned pricing registry.
+
+    Uses the exact billable buckets captured per call (uncached/cached/cache-write
+    input and output), so cached and reasoning tokens are never double-counted.
+    Falls back to the aggregate prompt/completion counts for a call that predates
+    the bucketed capture. An unknown model prints `cost unavailable`, never $0.
+    """
+    from app.llm.pricing import (
+        PRICING_REGISTRY_VERSION,
+        CallCost,
+        cost_for_call,
+        cost_for_request,
+        cost_from_simple_usage,
+    )
+
+    per_call: list[CallCost] = []
+    role_costs: dict[str, CallCost] = {}
+    for call in calls:
+        model = str(call.get("model", ""))
+        if "uncached_input_tokens" in call:
+            cost = cost_for_call(
+                model=model,
+                uncached_input_tokens=int(call.get("uncached_input_tokens", 0) or 0),
+                cached_input_tokens=int(call.get("cached_input_tokens", 0) or 0),
+                cache_write_tokens=int(call.get("cache_write_tokens", 0) or 0),
+                output_tokens=int(call.get("output_tokens", 0) or 0),
+                service_tier=call.get("service_tier"),
+            )
+        else:
+            cost = cost_from_simple_usage(
+                model,
+                int(call.get("prompt_tokens", 0) or 0),
+                int(call.get("completion_tokens", 0) or 0),
+                service_tier=call.get("service_tier"),
+            )
+        per_call.append(cost)
+        role_costs[str(call.get("role", "?"))] = cost
+
+    request_cost = cost_for_request(per_call)
+    fields = {role: cost.formatted() for role, cost in role_costs.items()}
+    fields["total"] = request_cost.formatted() if request_cost else "$0.000000"
+    fields["registry"] = PRICING_REGISTRY_VERSION
+    trace.emit("[OpenAI cost]", fields, force=True)
 
 
 def _emit_backend_timing(request_id: str, stages: dict, total_ms: float) -> None:

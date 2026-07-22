@@ -250,14 +250,42 @@ class IntentCondition(_StrictModel):
     required: bool = True
 
 
+<<<<<<< Updated upstream
 class IntentGroup(_StrictModel):
     """A Boolean grouping node for conditions that are not a simple AND."""
+=======
+class LedgerDispositionKind(str, Enum):
+    """How a required ledger item was accounted for (task25 §3.2).
+
+    These are NOT interchangeable. `bound_condition` means the item restricts
+    which objects qualify and a predicate was compiled for it; `bound_output`
+    means the item asked for something to be REPORTED and nothing was filtered.
+    Using the second where the first is required is exactly the Task 24 defect.
+    """
+
+    BOUND_SUBJECT = "bound_subject"
+    BOUND_CONDITION = "bound_condition"
+    BOUND_SCOPE = "bound_scope"
+    BOUND_OUTPUT = "bound_output"
+    BOUND_RELATIONSHIP = "bound_relationship"
+    #: Semantically the same request as another cited item.
+    REDUNDANT_WITH = "redundant_with"
+    #: Genuinely ambiguous; the request cannot be bound without clarification.
+    AMBIGUOUS = "ambiguous"
+    #: The model does not represent this in a queryable form.
+    UNAVAILABLE = "unavailable"
+
+
+class AnswerPart(_StrictModel):
+    """One independent request inside the question (§2.2)."""
+>>>>>>> Stashed changes
 
     group_id: str = Field(min_length=1, max_length=40)
     parent_group_id: str | None = Field(default=None, max_length=40)
     bool_op: Literal["and", "or"] = "and"
 
 
+<<<<<<< Updated upstream
 class Facet(_StrictModel):
     """One conceptual sub-question of the query (Task 17 §1 Stage 2).
 
@@ -312,6 +340,43 @@ class RetrievalPolicyPlan(_StrictModel):
 
     # Preserved non-analysis routes.
     catalog_plan: CatalogPlan | None = None
+=======
+class LedgerDisposition(_StrictModel):
+    """What the binding did with one required constraint-ledger item (task25 §3.2).
+
+    Every required item needs one of these, and the KIND matters as much as the
+    presence. An item whose ledger role is `condition` is only discharged by
+    `bound_condition` — reporting a same-named field as an output does not
+    discharge it. That distinction is the whole reason this type exists: Task 24
+    allowed an output field to account for a filter word, and answered "how many
+    external walls?" with every wall in the model.
+    """
+
+    item_id: str = Field(min_length=1, max_length=40)
+    disposition: LedgerDispositionKind
+    #: The part that discharged it, when a part did.
+    part_id: str | None = Field(default=None, max_length=40)
+    #: The manifest semantic ID it was bound to, when it was bound.
+    semantic_id: str | None = Field(default=None, max_length=200)
+    #: Required for `redundant_with`: the other item this one duplicates.
+    redundant_with_item_id: str | None = Field(default=None, max_length=40)
+    #: Required for `ambiguous` and `unavailable`: why, in plain language.
+    note: str | None = Field(default=None, max_length=300)
+
+
+class BindingPlan(_StrictModel):
+    """LLM call 1 output: the complete model-aware semantic binding (§2.2)."""
+
+    #: The language to answer in, so responses stay in the user's language.
+    response_language: str = Field(default="en", max_length=32)
+    #: Up to eight independent answer parts (task25 §3.3).
+    answer_parts: list[AnswerPart] = Field(default_factory=list, max_length=8)
+    #: One disposition per REQUIRED ledger item. Deterministic validation
+    #: rejects a binding that leaves one unaccounted for (task25 §3.2).
+    ledger_dispositions: list[LedgerDisposition] = Field(default_factory=list, max_length=64)
+    viewer_intent: ViewerIntent = ViewerIntent.NO_OP
+    #: Set ONLY when a material ambiguity cannot be safely bound (§2.2).
+>>>>>>> Stashed changes
     needs_clarification: bool = False
     clarification_question: str | None = Field(default=None, max_length=500)
 

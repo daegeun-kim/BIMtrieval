@@ -115,7 +115,9 @@ def build_unified_report(
     rel_failures: int,
     vector_stats: dict[str, Any],
     warnings: list[str],
+    manifest_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    manifest_stats = manifest_stats or {}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source_model_id": source_model_id,
@@ -158,6 +160,27 @@ def build_unified_report(
         "rel_embed_failures": vector_stats.get("rel_embed_failures", 0),
         "total_rag_docs": vector_stats.get("total_rag_docs", 0),
         "last_attempted_batch": vector_stats.get("last_attempted_batch", {}),
+        # Semantic manifest (task25 §2.1)
+        "manifest_validated": manifest_stats.get("validated", False),
+        "manifest_path": manifest_stats.get("path"),
+        "manifest_schema_version": manifest_stats.get("manifest_schema_version"),
+        "manifest_builder_version": manifest_stats.get("builder_version"),
+        "manifest_content_hash": manifest_stats.get("content_hash"),
+        "manifest_bytes": manifest_stats.get("bytes"),
+        "manifest_estimated_tokens": manifest_stats.get("estimated_tokens"),
+        "manifest_semantic_record_count": manifest_stats.get("semantic_record_count"),
+        "manifest_class_count": manifest_stats.get("class_count"),
+        "manifest_property_field_count": manifest_stats.get("property_field_count"),
+        "manifest_quantity_field_count": manifest_stats.get("quantity_field_count"),
+        "manifest_relationship_class_count": manifest_stats.get("relationship_class_count"),
+        "manifest_missing_capability_count": manifest_stats.get("missing_capability_count"),
+        "manifest_unsupported_structure_count": manifest_stats.get("unsupported_structure_count"),
+        "manifest_error": manifest_stats.get("error"),
+        # §2.1: a model is only "fully query-ready" when its structured data,
+        # its semantic manifest, AND its vectors all succeeded.
+        "fully_query_ready": bool(
+            manifest_stats.get("validated") and vector_stats.get("total_rag_docs", 0) > 0
+        ),
         "warning_count": len(warnings) + vector_stats.get("warning_count", 0),
         "warnings_sample": (warnings + vector_stats.get("warnings_sample", []))[:15],
     }

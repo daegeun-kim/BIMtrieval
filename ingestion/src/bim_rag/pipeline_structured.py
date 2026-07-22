@@ -46,6 +46,23 @@ _STAGE1_TABLES = [
 ]
 
 
+def _build_manifest_phase(engine: Any, source_model_id: int) -> dict[str, Any]:
+    """Generate this model's semantic manifest, never aborting the import.
+
+    A manifest failure is reported (and suppresses "fully query-ready"), but the
+    entities and relationships already committed stay valid so the pipeline can
+    simply be rerun (§2.1).
+    """
+    from bim_rag.config import get_model_semantics_root
+    from bim_rag.semantic_manifest import generate_manifest
+
+    try:
+        with Session(engine) as session:
+            return generate_manifest(session, source_model_id, get_model_semantics_root())
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal to the import
+        return {"validated": False, "error": sanitize_db_error(str(exc))[:300]}
+
+
 def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     """Import one IFC file (entities + relationships) into the shared PostgreSQL schema.
 
@@ -279,6 +296,28 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     print("[ifc_to_db] Structured import complete.")
 
     # ------------------------------------------------------------------
+    # Phase 3b: semantic manifest (task25 §2.1)
+    #
+    # Runs after entities, relationships, and members are committed — it reads
+    # them — and before vector generation, so the artifact describing the model
+    # exists by the time anything downstream consumes it.
+    # ------------------------------------------------------------------
+    print("[ifc_to_db] Building semantic manifest...")
+    manifest_stats = _build_manifest_phase(engine, source_model_id)
+    if manifest_stats.get("validated"):
+        print(
+            f"[ifc_to_db] Manifest OK  records={manifest_stats['semantic_record_count']}  "
+            f"~{manifest_stats['estimated_tokens']} tokens  "
+            f"hash={manifest_stats['content_hash'][:16]}..."
+        )
+    else:
+        # §2.1: a failed manifest must not be reported as query-ready, but the
+        # imported data is valid and idempotent ingestion can be rerun to
+        # repair the artifact without re-importing anything.
+        print(f"[ifc_to_db] Manifest FAILED: {manifest_stats.get('error')}")
+        all_warnings.append(f"[manifest] {manifest_stats.get('error')}")
+
+    # ------------------------------------------------------------------
     # Phase 4: Vector generation (pgvector + rag_documents)
     # ------------------------------------------------------------------
     from bim_rag.stage2_embed import run_vector_phase  # lazy: avoids loading torch at import
@@ -288,6 +327,7 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     print("[ifc_to_db] Vector phase complete.")
 
     return build_unified_report(
+        manifest_stats=manifest_stats,
         scan=scan,
         fingerprint=fp,
         source_model_id=source_model_id,

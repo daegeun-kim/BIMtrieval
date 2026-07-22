@@ -66,6 +66,24 @@ def sanitize_db_error(msg: str) -> str:
     return _URL_CRED_RE.sub(r"\1<credentials>@", msg)
 
 
+def get_model_semantics_root() -> Path:
+    """Resolve the root holding generated semantic manifests (task25 §2.1).
+
+    Mirrors the backend's `get_model_semantics_root()`: ONE configuration value
+    (`model_semantics_root` in the shared repo-root `.env`), TWO independent
+    resolvers. The backend must never import ingestion code, so the value is
+    shared as configuration rather than as a Python constant.
+
+    Defaults to `<repo-root>/model_semantics`. Deliberately separate from
+    `model_assets/` (viewer fragments) — §2.1 forbids mixing them.
+    """
+    load_dotenv(_ENV_FILE, override=False)
+    configured = os.environ.get("model_semantics_root") or os.environ.get("MODEL_SEMANTICS_ROOT")
+    if configured:
+        return Path(configured)
+    return _ENV_FILE.parent / "model_semantics"
+
+
 def validate_batch_size(n: int) -> int:
     """Reject the batch-size-64 path that preceded the 0x101 crashes.
 

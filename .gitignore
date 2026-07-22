@@ -22,6 +22,14 @@ model_assets/*
 !model_assets/fixtures/
 !model_assets/README.md
 
+# Generated semantic manifests (task25 §2.1, §8). One deterministic JSON per
+# (source_model_id, fingerprint), rebuilt by `ifc_to_db()` from the imported
+# data — local generated artifacts, never committed. Small tracked fixtures
+# under model_semantics/fixtures/ are kept for tests.
+model_semantics/*
+!model_semantics/fixtures/
+!model_semantics/README.md
+
 # Frontend OpenAPI snapshot is regenerable from the backend; keep it out of Git.
 frontend_openapi_snapshot.json
 

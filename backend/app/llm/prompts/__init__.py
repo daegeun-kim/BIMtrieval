@@ -12,6 +12,7 @@ from pathlib import Path
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
+<<<<<<< Updated upstream
 # planner_v002 / answerer_v002: universal hybrid evidence pipeline (Task 16).
 PLANNER_PROMPT_VERSION = "planner_v002"
 ANSWERER_PROMPT_VERSION = "answerer_v002"
@@ -20,6 +21,19 @@ ANSWERER_PROMPT_VERSION = "answerer_v002"
 # intent tree, so user conditions survive into retrieval instead of living only in prose.
 POLICY_PLANNER_PROMPT_VERSION = "policy_planner_v002"
 GROUP_ANSWERER_PROMPT_VERSION = "group_answerer_v001"
+=======
+#: Task 25 LLM call 1: manifest-aware semantic binder and decomposer. Selects
+#: manifest semantic IDs, decomposes into answer parts, and disposes every
+#: required constraint-ledger item. Emits no SQL, table/column names, graph text,
+#: retrieval limits, or a global SQL/RAG/graph mode.
+BINDER_PROMPT_VERSION = "binder_v002"
+#: Task 25 conditional corrective binder: same schema, retried only around the
+#: typed gate failures of a proven recoverable gap.
+CORRECTION_PROMPT_VERSION = "correction_v001"
+#: Final call: expresses already-adjudicated answer parts. Selects nothing, and
+#: its structured claims are validated against the answer packet.
+GROUNDED_ANSWERER_PROMPT_VERSION = "grounded_answerer_v001"
+>>>>>>> Stashed changes
 
 
 @lru_cache(maxsize=8)
@@ -34,6 +48,7 @@ def planner_prompt() -> str:
     return load_prompt(PLANNER_PROMPT_VERSION)
 
 
+<<<<<<< Updated upstream
 def answerer_prompt() -> str:
     return load_prompt(ANSWERER_PROMPT_VERSION)
 
@@ -44,3 +59,11 @@ def policy_planner_prompt() -> str:
 
 def group_answerer_prompt() -> str:
     return load_prompt(GROUP_ANSWERER_PROMPT_VERSION)
+=======
+def correction_prompt() -> str:
+    return load_prompt(CORRECTION_PROMPT_VERSION)
+
+
+def grounded_answerer_prompt() -> str:
+    return load_prompt(GROUNDED_ANSWERER_PROMPT_VERSION)
+>>>>>>> Stashed changes
