@@ -30,19 +30,6 @@ class Settings(BaseSettings):
 
     # --- LLM (Section 6) ---
     openai_api_key: SecretStr | None = None
-<<<<<<< Updated upstream
-    planner_model: str = "gpt-5-nano"
-    answer_model: str = "gpt-5-nano"
-    openai_timeout_s: float = 60.0
-    # gpt-5-nano is a reasoning model: reasoning tokens count against the
-    # completion budget, so a small cap makes it hit the length limit before
-    # emitting the full structured JSON (observed on complex planner prompts in
-    # task08). Keep this generous so structured output always completes.
-    openai_max_output_tokens: int = 16000
-    # Bounded retry on transient provider errors (timeout/rate-limit/5xx) — the
-    # planner/answer loop itself is never retried unboundedly (spec_v005 §17).
-    openai_max_retries: int = 2
-=======
     openai_timeout_s: float = 120.0
 
     # --- Task 25 §6 role/model/effort defaults ---
@@ -77,7 +64,6 @@ class Settings(BaseSettings):
     # NOT retried, and SDK-internal retries are disabled (`max_retries=0` in
     # llm.client) so the two cannot multiply.
     openai_max_retries: int = 1
->>>>>>> Stashed changes
     openai_retry_backoff_s: float = 1.5
 
     # Explicit per-role overrides, applied over the defaults above when set.

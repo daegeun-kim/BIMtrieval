@@ -1,20 +1,3 @@
-<<<<<<< Updated upstream
-"""OpenAI planner + answer client using schema-enforced structured outputs
-(spec_v005 §2, §4, §11).
-
-Two roles, independently configurable models (`planner_model` / `answer_model`,
-spec_v005 §4):
-
-- `plan_query()` → one `QueryPlan` (structured output). This is OpenAI call 1.
-- `generate_answer()` → one `AnswerOutput` (structured output). This is call 2.
-
-Secret handling (task07 §Secret handling): the API key is read from settings
-(runtime env / .env) only. It is never logged, printed, hard-coded, or returned.
-If the key is absent, `plan_query`/`generate_answer` raise `LLMUnavailableError`
-with a sanitized message and no network call is made. The `openai.OpenAI`
-object is built lazily so importing/instantiating this module never touches the
-network.
-=======
 """OpenAI client for the Task 25 pipeline: Responses API + strict structured
 outputs, three independently-configurable roles (task25 §6).
 
@@ -41,7 +24,6 @@ being added on top.
 
 If a configured model is unavailable the call fails clearly; it never silently
 substitutes another model.
->>>>>>> Stashed changes
 """
 
 from __future__ import annotations
@@ -50,30 +32,19 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from app.config.settings import Settings, get_settings
 from app.llm.pricing import CallCost, cost_for_call
 from app.llm.prompts import (
-<<<<<<< Updated upstream
-    ANSWERER_PROMPT_VERSION,
-    GROUP_ANSWERER_PROMPT_VERSION,
-    PLANNER_PROMPT_VERSION,
-    POLICY_PLANNER_PROMPT_VERSION,
-    answerer_prompt,
-    group_answerer_prompt,
-    planner_prompt,
-    policy_planner_prompt,
-=======
     BINDER_PROMPT_VERSION,
     CORRECTION_PROMPT_VERSION,
     GROUNDED_ANSWERER_PROMPT_VERSION,
     binder_prompt,
     correction_prompt,
     grounded_answerer_prompt,
->>>>>>> Stashed changes
 )
-from app.llm.schemas import QueryPlan, RetrievalPolicyPlan
+from app.llm.schemas import BindingPlan, GroundedAnswer
 from app.llm.serialization import dumps_context
 
 if TYPE_CHECKING:
@@ -170,46 +141,15 @@ class TokenUsage:
         }
 
 
-class AnswerOutput(BaseModel):
-    """Structured answer envelope (spec_v005 §11, §16 + Task 16 §9).
-
-    The universal-hybrid answerer is a relevance judge: it explicitly accepts or
-    rejects each probe as a candidate reference and selects which probes drive
-    viewer highlights. The probe-decision fields default empty/false so the
-    legacy answer path (which does not use probes) stays valid."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    answer: str = Field(min_length=1)
-    used_general_knowledge: bool = False
-    disclosed_conflicts: bool = False
-    model_evidence_sufficient: bool = True
-    inference_used: bool = False
-    # --- Group relevance decisions (Task 17 §8) ---
-    primary_group_ids: list[str] = Field(default_factory=list)
-    supporting_group_ids: list[str] = Field(default_factory=list)
-    context_group_ids: list[str] = Field(default_factory=list)
-    rejected_group_ids: list[str] = Field(default_factory=list)
-    viewer_primary_group_ids: list[str] = Field(default_factory=list)
-    viewer_context_group_ids: list[str] = Field(default_factory=list)
-    inference_basis_group_ids: list[str] = Field(default_factory=list)
-
-
 @dataclass
-class PlanResult:
-    plan: QueryPlan
+class BindingResult:
+    plan: BindingPlan
     usage: TokenUsage
 
 
 @dataclass
-class PolicyResult:
-    plan: RetrievalPolicyPlan
-    usage: TokenUsage
-
-
-@dataclass
-class AnswerResult:
-    output: AnswerOutput
+class GroundedAnswerResult:
+    output: GroundedAnswer
     usage: TokenUsage
 
 
@@ -240,21 +180,6 @@ class OpenAIQueryClient:
             self._client = OpenAI(
                 api_key=api_key.get_secret_value(),
                 timeout=self.settings.openai_timeout_s,
-<<<<<<< Updated upstream
-            )
-        return self._client
-
-    def plan_query(self, planner_context: dict[str, Any]) -> PlanResult:
-        """OpenAI call 1: route + complete typed plan (spec_v005 §2, §5)."""
-        model = self.settings.get_planner_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=planner_prompt(),
-            user_payload=planner_context,
-            response_format=QueryPlan,
-            prompt_version=PLANNER_PROMPT_VERSION,
-            role="planner",
-=======
                 max_retries=0,
             )
         return self._client
@@ -273,37 +198,9 @@ class OpenAIQueryClient:
             prompt_version=BINDER_PROMPT_VERSION,
             cache_key=binder_context.get("cache_key"),
             role="binder",
->>>>>>> Stashed changes
         )
-        return PlanResult(plan=parsed, usage=usage)
+        return BindingResult(plan=parsed, usage=usage)
 
-<<<<<<< Updated upstream
-    def plan_retrieval_policy(self, policy_context: dict[str, Any]) -> PolicyResult:
-        """Task 17 LLM call 1: the QUERY-ONLY retrieval policy + facet plan. The
-        input carries no active-model candidates/schema (see build_policy_context),
-        so modality selection cannot depend on model contents."""
-        model = self.settings.get_planner_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=policy_planner_prompt(),
-            user_payload=policy_context,
-            response_format=RetrievalPolicyPlan,
-            prompt_version=POLICY_PLANNER_PROMPT_VERSION,
-            role="policy_planner",
-        )
-        return PolicyResult(plan=parsed, usage=usage)
-
-    def generate_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
-        """OpenAI call 2 (legacy path): grounded answer from bounded evidence."""
-        model = self.settings.get_answer_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=answerer_prompt(),
-            user_payload=evidence_payload,
-            response_format=AnswerOutput,
-            prompt_version=ANSWERER_PROMPT_VERSION,
-            role="answerer",
-=======
     def correct_binding(self, correction_context: dict[str, Any]) -> BindingResult:
         """The conditional one-time corrective call (§4).
 
@@ -336,23 +233,8 @@ class OpenAIQueryClient:
             prompt_version=GROUNDED_ANSWERER_PROMPT_VERSION,
             cache_key=None,
             role="grounded_answerer",
->>>>>>> Stashed changes
         )
-        return AnswerResult(output=parsed, usage=usage)
-
-    def generate_group_answer(self, evidence_payload: dict[str, Any]) -> AnswerResult:
-        """Task 17 LLM call 2: group-level relevance judgment + answer from
-        accepted evidence groups (Task 17 §8)."""
-        model = self.settings.get_answer_model()
-        parsed, usage = self._structured_call(
-            model=model,
-            system=group_answerer_prompt(),
-            user_payload=evidence_payload,
-            response_format=AnswerOutput,
-            prompt_version=GROUP_ANSWERER_PROMPT_VERSION,
-            role="group_answerer",
-        )
-        return AnswerResult(output=parsed, usage=usage)
+        return GroundedAnswerResult(output=parsed, usage=usage)
 
     # -- transport ----------------------------------------------------------
 
@@ -448,25 +330,18 @@ _TRANSIENT_ERROR_NAMES = frozenset(
 
 
 def _is_transient(exc: Exception | None) -> bool:
-<<<<<<< Updated upstream
-    """True for provider errors worth one retry (timeout / rate limit / 5xx),
-    False for deterministic errors like auth/validation that a retry won't fix."""
-=======
     """True for provider errors worth ONE retry. Excludes a full timeout."""
->>>>>>> Stashed changes
     if exc is None:
         return False
     name = type(exc).__name__
+    if name == "APITimeoutError":
+        return False
     if name in _TRANSIENT_ERROR_NAMES:
         status = getattr(exc, "status_code", None)
         if name == "APIStatusError" and status is not None:
             return int(status) >= 500 or int(status) == 429
         return True
-<<<<<<< Updated upstream
-    return isinstance(exc, (TimeoutError, ConnectionError))
-=======
     return isinstance(exc, ConnectionError)
->>>>>>> Stashed changes
 
 
 def _sanitize(exc: Exception | None) -> str:
