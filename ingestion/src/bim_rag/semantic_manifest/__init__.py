@@ -59,12 +59,30 @@ __all__ = [
     "compute_content_hash",
     "estimate_tokens",
     "generate_manifest",
+    "generate_manifest_v002",
     "manifest_dir",
     "manifest_path",
     "read_manifest",
     "validate_document",
     "write_manifest",
 ]
+
+
+def generate_manifest_v002(
+    session: Session,
+    source_model_id: int,
+    root: Path,
+) -> dict[str, Any]:
+    """Build, validate, and atomically publish one model's v002 manifest.
+
+    The single production entrypoint for the task26 artifact; `ifc_to_db()`
+    calls it and the backfill calls it.
+    """
+    from bim_rag.semantic_manifest.builder_v002 import build_semantic_manifest_v002
+    from bim_rag.semantic_manifest.writer_v002 import write_manifest_v002
+
+    document = build_semantic_manifest_v002(session, source_model_id)
+    return write_manifest_v002(document, root)
 
 
 def generate_manifest(

@@ -33,6 +33,7 @@ from bim_rag.reporting import build_unified_report
 from bim_rag.schema.models import (
     Base,
     DbIfcRelationship,
+    EntitySpatialMembership,
     IfcEntity,
     IfcSourceModel,
     RelationshipMember,
@@ -43,22 +44,34 @@ _STAGE1_TABLES = [
     IfcEntity.__table__,
     DbIfcRelationship.__table__,
     RelationshipMember.__table__,
+    EntitySpatialMembership.__table__,
 ]
 
 
+def _spatial_membership_phase(engine: Any, source_model_id: int) -> dict[str, Any]:
+    """Populate normalized effective spatial membership (task26 §4.2)."""
+    from bim_rag.spatial_membership import populate_spatial_memberships
+
+    try:
+        with Session(engine) as session, session.begin():
+            return populate_spatial_memberships(session, source_model_id)
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal to the import
+        return {"error": sanitize_db_error(str(exc))[:300]}
+
+
 def _build_manifest_phase(engine: Any, source_model_id: int) -> dict[str, Any]:
-    """Generate this model's semantic manifest, never aborting the import.
+    """Generate this model's v002 semantic manifest, never aborting the import.
 
     A manifest failure is reported (and suppresses "fully query-ready"), but the
     entities and relationships already committed stay valid so the pipeline can
     simply be rerun (§2.1).
     """
     from bim_rag.config import get_model_semantics_root
-    from bim_rag.semantic_manifest import generate_manifest
+    from bim_rag.semantic_manifest import generate_manifest_v002
 
     try:
         with Session(engine) as session:
-            return generate_manifest(session, source_model_id, get_model_semantics_root())
+            return generate_manifest_v002(session, source_model_id, get_model_semantics_root())
     except Exception as exc:  # noqa: BLE001 - reported, never fatal to the import
         return {"validated": False, "error": sanitize_db_error(str(exc))[:300]}
 
@@ -296,17 +309,32 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     print("[ifc_to_db] Structured import complete.")
 
     # ------------------------------------------------------------------
-    # Phase 3b: semantic manifest (task25 §2.1)
-    #
-    # Runs after entities, relationships, and members are committed — it reads
-    # them — and before vector generation, so the artifact describing the model
-    # exists by the time anything downstream consumes it.
+    # Phase 3b: normalized effective spatial membership (task26 §4.2)
     # ------------------------------------------------------------------
-    print("[ifc_to_db] Building semantic manifest...")
+    print("[ifc_to_db] Populating spatial memberships...")
+    membership_stats = _spatial_membership_phase(engine, source_model_id)
+    if "error" in membership_stats:
+        print(f"[ifc_to_db] Spatial memberships FAILED: {membership_stats['error']}")
+        all_warnings.append(f"[spatial_membership] {membership_stats['error']}")
+    else:
+        print(
+            f"[ifc_to_db] Spatial memberships rows={membership_stats.get('rows')}  "
+            f"entities={membership_stats.get('entities')}  "
+            f"nested={membership_stats.get('nested')}"
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 3c: semantic manifest v002 (task26 §5)
+    #
+    # Runs after entities, relationships, members, and memberships are
+    # committed — it reads them — and before vector generation, so the artifact
+    # describing the model exists by the time anything downstream consumes it.
+    # ------------------------------------------------------------------
+    print("[ifc_to_db] Building semantic manifest v002...")
     manifest_stats = _build_manifest_phase(engine, source_model_id)
     if manifest_stats.get("validated"):
         print(
-            f"[ifc_to_db] Manifest OK  records={manifest_stats['semantic_record_count']}  "
+            f"[ifc_to_db] Manifest OK  capabilities={manifest_stats['capability_count']}  "
             f"~{manifest_stats['estimated_tokens']} tokens  "
             f"hash={manifest_stats['content_hash'][:16]}..."
         )
@@ -326,7 +354,29 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     vector_stats = run_vector_phase(engine, source_model_id)
     print("[ifc_to_db] Vector phase complete.")
 
-    return build_unified_report(
+    # ------------------------------------------------------------------
+    # Phase 5: catalog metadata + readiness (task26 §4.6)
+    # ------------------------------------------------------------------
+    from bim_rag.readiness import ensure_catalog_entry, verify_model_readiness
+
+    readiness: dict[str, Any] = {}
+    try:
+        with Session(engine) as session, session.begin():
+            catalog_stats = ensure_catalog_entry(session, source_model_id)
+        with Session(engine) as session:
+            readiness = verify_model_readiness(session, source_model_id)
+        readiness["catalog_created"] = catalog_stats.get("created", False)
+        state = "READY" if readiness.get("ready") else "INCOMPLETE"
+        print(f"[ifc_to_db] Readiness: {state}")
+        for name, check in readiness.get("checks", {}).items():
+            if not check.get("ok"):
+                print(f"[ifc_to_db]   incomplete: {name} {check}")
+                all_warnings.append(f"[readiness] {name} incomplete: {check}")
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal to the import
+        readiness = {"ready": False, "error": sanitize_db_error(str(exc))[:300]}
+        all_warnings.append(f"[readiness] {readiness['error']}")
+
+    report = build_unified_report(
         manifest_stats=manifest_stats,
         scan=scan,
         fingerprint=fp,
@@ -343,3 +393,6 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
         vector_stats=vector_stats,
         warnings=all_warnings,
     )
+    report["spatial_membership"] = membership_stats
+    report["readiness"] = readiness
+    return report

@@ -125,7 +125,16 @@ def classify_container_structure(
     """
     if shape.distinct_field_count < min_distinct_fields:
         return StructureVerdict(reliable=True, coverage=COVERAGE_POPULATED)
-    if shape.schema_ratio < max_schema_ratio:
+    if (
+        shape.schema_ratio < max_schema_ratio
+        # A large container whose distinct field names OUTNUMBER the
+        # occurrences carrying them is a per-instance schedule matrix, not a
+        # shared property schema — even when each occurrence carries the whole
+        # matrix (ratio near 1.0). Field names that exist for fewer subjects
+        # than there are fields cannot be resolved as reusable concepts
+        # (task26 §4.4).
+        and shape.distinct_field_count <= shape.occurrence_count
+    ):
         return StructureVerdict(reliable=True, coverage=COVERAGE_POPULATED)
 
     return StructureVerdict(

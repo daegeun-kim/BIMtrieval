@@ -2,8 +2,9 @@
 endpoints development-only").
 
 These are NOT part of the public frontend contract and are only mounted when
-`settings.enable_dev_endpoints` is true. They expose the Task 24 binding stage
-in isolation — slate construction and, optionally, LLM call 1 plus deterministic
+`settings.enable_dev_endpoints` is true. They expose the experiment2_v4 binding
+stage in isolation — the requirement ledger, high-recall recommendations, and
+the compact binder projection, plus optionally LLM call 1 and deterministic
 validation — with no execution and no answer call. They never bypass the safety
 layer: no raw SQL, no secrets, no viewer identities.
 """
@@ -15,81 +16,89 @@ from fastapi import APIRouter
 from app.api.schemas.request import SessionQueryRequest
 from app.config.settings import get_settings
 from app.db.session import session_scope
-from app.llm.binder_context import build_binder_context
+from app.llm.binder_context_v2 import build_binder_context_v2
 from app.llm.client import LLMError, get_llm_client
-from app.query.binding.slate import SlateInputs, build_slate
-from app.query.binding.validate import validate_binding
-from app.query.session import get_session_store
+from app.query.binding.ledger_v2 import build_ledger_skeleton
+from app.query.binding.recall import resolve_ledger, run_recall
+from app.query.binding.validate_v2 import validate_plan
+from app.query.rag.embedding_service import get_embedding_service
+from app.query.semantic.manifest_v002 import (
+    ManifestV002UnavailableError,
+    build_binder_projection,
+    get_manifest_v002,
+)
 
 router = APIRouter(tags=["dev"], prefix="/api/dev")
 
 
-@router.post("/slate")
-def slate_only(request: SessionQueryRequest) -> dict:
-    """Return the candidate slate without calling any model (task24 §1).
+@router.post("/resolve")
+def resolve_only(request: SessionQueryRequest) -> dict:
+    """Return the ledger + recall + projection size without any model call.
 
     Useful for inspecting recall and prompt size for a question at zero cost.
     """
     settings = get_settings()
     if request.active_source_model_id is None:
-        return {"ok": False, "error": "an active model is required to build a slate"}
+        return {"ok": False, "error": "an active model is required to resolve a question"}
     with session_scope() as session:
-        slate = build_slate(
-            session,
-            SlateInputs(
-                question=request.question,
-                source_model_id=request.active_source_model_id,
-            ),
-            settings=settings,
+        try:
+            manifest = get_manifest_v002(session, request.active_source_model_id, settings)
+        except ManifestV002UnavailableError as exc:
+            return {"ok": False, "error": str(exc)}
+        projection = build_binder_projection(manifest)
+        ledger = build_ledger_skeleton(request.question)
+        recall = run_recall(
+            session, manifest, ledger, embedding_service_getter=get_embedding_service
         )
+        resolve_ledger(ledger, recall, manifest)
         return {
             "ok": True,
-            "size": slate.size_report(),
-            "slate": slate.to_prompt_payload(),
+            "projection_tokens": projection.estimated_tokens,
+            "projection_hash": projection.projection_hash[:16],
+            "ledger": ledger.to_payload(),
+            "recommendations": [r.to_payload() for r in recall.recommendations],
+            "recall_diagnostics": recall.diagnostics,
         }
 
 
 @router.post("/bind")
 def bind_only(request: SessionQueryRequest) -> dict:
-    """Slate + LLM call 1 + deterministic validation, with no execution.
+    """Resolve + LLM call 1 + deterministic validation, with no execution.
 
-    Exactly one model call is made — there is no repair attempt, matching the
-    production contract (task24 §3.3).
+    Exactly one model call is made — there is no correction attempt here,
+    matching the production contract.
     """
     settings = get_settings()
     if request.active_source_model_id is None:
         return {"ok": False, "error": "an active model is required to bind a question"}
-    state = get_session_store().get_or_create(request.session_id)
     try:
         with session_scope() as session:
-            slate = build_slate(
-                session,
-                SlateInputs(
-                    question=request.question,
-                    source_model_id=request.active_source_model_id,
-                ),
-                settings=settings,
+            manifest = get_manifest_v002(session, request.active_source_model_id, settings)
+            projection = build_binder_projection(manifest)
+            ledger = build_ledger_skeleton(request.question)
+            recall = run_recall(
+                session, manifest, ledger, embedding_service_getter=get_embedding_service
             )
-            context = build_binder_context(
+            resolve_ledger(ledger, recall, manifest)
+            context = build_binder_context_v2(
                 request.question,
-                slate,
+                projection,
+                ledger,
+                recall,
                 settings=settings,
-                previous_scope=state.previous_scope,
-                active_source_model_id=request.active_source_model_id,
+                source_model_id=request.active_source_model_id,
             )
-            result = get_llm_client(settings).bind_query(context)
-    except LLMError as exc:
+            plan, usage = get_llm_client(settings).bind_query_v2(context)
+            validation = validate_plan(session, plan, ledger, manifest)
+    except (LLMError, ManifestV002UnavailableError) as exc:
         return {"ok": False, "error": str(exc)}
 
-    validation = validate_binding(result.plan, slate)
     return {
-        "ok": validation.valid,
-        "issues": [{"code": i.code, "detail": i.detail} for i in validation.all_issues()],
-        "dropped_modifiers": validation.silently_dropped_modifiers,
-        "binding": result.plan.model_dump(mode="json"),
-        "closures": [
-            {"part_id": p.part.part_id, "ifc_classes": list(p.closure.ifc_classes)}
-            for p in validation.parts
-        ],
-        "token_usage": result.usage.as_dict(),
+        "ok": all(
+            v.state.value in ("ready", "partial_executable") for v in validation.verdicts
+        ),
+        "gate_states": {v.part.part_id: v.state.value for v in validation.verdicts},
+        "issues": [i.to_payload() for i in validation.all_issues()],
+        "binding": plan.model_dump(mode="json"),
+        "token_usage": usage.as_dict() if usage is not None else None,
     }

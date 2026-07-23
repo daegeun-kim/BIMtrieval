@@ -54,10 +54,11 @@ def _shape(name: str, fields: int, occurrences: int, fields_each: float) -> Cont
         ("PROPRIETES_MUR", 12, 800, 9.0),
         # A single-field container.
         ("設備プロパティ", 1, 400, 1.0),
-        # Large but stable: 300 fields, and every occurrence carries them all.
-        ("bulk_but_consistent", 300, 50, 300.0),
+        # Large but stable AND genuinely shared: 300 fields carried by many
+        # more occurrences than there are field names.
+        ("bulk_but_consistent", 300, 5000, 300.0),
         # Wide-ish and slightly ragged, still far below the ratio threshold.
-        ("mixed_schema", 200, 90, 40.0),
+        ("mixed_schema", 200, 900, 40.0),
     ],
 )
 def test_a_container_with_a_stable_field_schema_stays_queryable(
@@ -157,10 +158,20 @@ def test_the_reason_states_a_source_limitation_not_a_pipeline_failure():
 
 
 def test_a_large_field_space_alone_does_not_trip_the_detector():
-    """Size is not the problem — instability is. A big, stable schema is fine."""
-    verdict = classify_container_structure(_shape("big_stable", 5000, 200, 5000.0))
+    """Size is not the problem — instability is. A big, stable, genuinely
+    SHARED schema (more occurrences than field names) is fine."""
+    verdict = classify_container_structure(_shape("big_stable", 5000, 20000, 5000.0))
 
     assert verdict.reliable is True
+
+
+def test_a_per_instance_schedule_matrix_is_withheld_even_when_consistent():
+    """task26 §4.4: a large container whose field names OUTNUMBER the
+    occurrences carrying them is per-instance schedule data, not a shared
+    property schema — even at schema_ratio ~1.0."""
+    verdict = classify_container_structure(_shape("per_instance_bag", 300, 50, 300.0))
+
+    assert verdict.reliable is False
 
 
 def test_an_unstable_shape_alone_does_not_trip_the_detector():

@@ -18,7 +18,7 @@ import ifcopenshell
 import ifcopenshell.util.element as ifc_util
 import ifcopenshell.util.unit as ifc_unit_util
 
-EXTRACTION_VERSION = "v001"
+EXTRACTION_VERSION = "v002"
 _MAX_DEPTH = 3  # max traversal depth for type/material resolution
 
 
@@ -163,36 +163,272 @@ def _resolve_classifications(entity: ifcopenshell.entity_instance) -> list[dict[
 
 
 # ---------------------------------------------------------------------------
+# Deterministic unit registry (task26 §4.3)
+# ---------------------------------------------------------------------------
+
+#: SI prefix multipliers (the subset IFC declares).
+_SI_PREFIX = {
+    "EXA": 1e18,
+    "PETA": 1e15,
+    "TERA": 1e12,
+    "GIGA": 1e9,
+    "MEGA": 1e6,
+    "KILO": 1e3,
+    "HECTO": 1e2,
+    "DECA": 1e1,
+    "": 1.0,
+    "DECI": 1e-1,
+    "CENTI": 1e-2,
+    "MILLI": 1e-3,
+    "MICRO": 1e-6,
+    "NANO": 1e-9,
+}
+
+#: Canonical output unit per IFC unit type.
+_CANONICAL_UNIT = {
+    "LENGTHUNIT": "m",
+    "AREAUNIT": "m2",
+    "VOLUMEUNIT": "m3",
+    "MASSUNIT": "kg",
+    "PLANEANGLEUNIT": "rad",
+    "TIMEUNIT": "s",
+}
+
+#: Dimension exponent for SI-prefixed derived units (area scales prefix^2, ...).
+_DIMENSION_EXPONENT = {"LENGTHUNIT": 1, "AREAUNIT": 2, "VOLUMEUNIT": 3}
+
+#: Conversion factors for common imperial units, to the canonical unit.
+_CONVERSION_NAMES = {
+    ("LENGTHUNIT", "FOOT"): 0.3048,
+    ("LENGTHUNIT", "INCH"): 0.0254,
+    ("AREAUNIT", "SQUARE FOOT"): 0.09290304,
+    ("VOLUMEUNIT", "CUBIC FOOT"): 0.028316846592,
+    ("MASSUNIT", "POUND"): 0.45359237,
+}
+
+#: IFC measure class -> unit type (None: unitless numeric).
+_MEASURE_UNIT_TYPE = {
+    "IfcLengthMeasure": "LENGTHUNIT",
+    "IfcPositiveLengthMeasure": "LENGTHUNIT",
+    "IfcNonNegativeLengthMeasure": "LENGTHUNIT",
+    "IfcAreaMeasure": "AREAUNIT",
+    "IfcVolumeMeasure": "VOLUMEUNIT",
+    "IfcMassMeasure": "MASSUNIT",
+    "IfcPlaneAngleMeasure": "PLANEANGLEUNIT",
+    "IfcTimeMeasure": "TIMEUNIT",
+    "IfcCountMeasure": None,
+    "IfcNumericMeasure": None,
+    "IfcReal": None,
+    "IfcInteger": None,
+    "IfcRatioMeasure": None,
+    "IfcPositiveRatioMeasure": None,
+    "IfcNormalisedRatioMeasure": None,
+}
+
+_unit_registry_cache: dict[int, dict[str, dict[str, Any]]] = {}
+
+
+def _named_unit_factor(unit: Any, unit_type: str) -> float | None:
+    """Deterministic factor from one project IfcNamedUnit to the canonical unit."""
+    if unit is None:
+        return None
+    try:
+        if unit.is_a("IfcSIUnit"):
+            prefix = str(getattr(unit, "Prefix", None) or "").upper()
+            multiplier = _SI_PREFIX.get(prefix)
+            if multiplier is None:
+                return None
+            return multiplier ** _DIMENSION_EXPONENT.get(unit_type, 1)
+        if unit.is_a("IfcConversionBasedUnit"):
+            name = str(getattr(unit, "Name", "") or "").upper()
+            if (unit_type, name) in _CONVERSION_NAMES:
+                return _CONVERSION_NAMES[(unit_type, name)]
+            # Resolve through the declared conversion factor when it is itself
+            # SI-based — deterministic, no guessing.
+            factor = getattr(unit, "ConversionFactor", None)
+            if factor is not None:
+                magnitude = _safe_scalar(getattr(factor, "ValueComponent", None))
+                base = getattr(factor, "UnitComponent", None)
+                base_factor = _named_unit_factor(base, unit_type) if base is not None else None
+                if isinstance(magnitude, (int, float)) and base_factor is not None:
+                    return float(magnitude) * base_factor
+    except Exception:
+        return None
+    return None
+
+
+def build_unit_registry(ifc_model: ifcopenshell.file) -> dict[str, dict[str, Any]]:
+    """{unit_type: {factor, unit}} for every project unit provably convertible.
+
+    A unit type absent from this registry means its numeric values keep an
+    UNKNOWN unit state: still stored, never normalized, never compared
+    cross-unit (task26 §4.3).
+    """
+    cached = _unit_registry_cache.get(id(ifc_model))
+    if cached is not None:
+        return cached
+    registry: dict[str, dict[str, Any]] = {}
+    for unit_type, canonical in _CANONICAL_UNIT.items():
+        try:
+            unit = ifc_unit_util.get_project_unit(ifc_model, unit_type)
+        except Exception:
+            unit = None
+        factor = _named_unit_factor(unit, unit_type)
+        if factor is not None:
+            registry[unit_type] = {"factor": factor, "unit": canonical}
+    _unit_registry_cache[id(ifc_model)] = registry
+    return registry
+
+
+def _annotate_measure(
+    entry: dict[str, Any],
+    measure: str | None,
+    registry: dict[str, dict[str, Any]],
+) -> None:
+    """Attach unit metadata to one numeric property/quantity entry.
+
+    States (task26 §4.3): `known` (normalized magnitude + canonical unit),
+    `unitless` (a genuine ratio/count), `unknown` (numeric, but no provable
+    unit contract — stored, never converted or aggregated cross-unit).
+    """
+    value = entry.get("value")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return
+    if measure:
+        entry["measure"] = measure
+    unit_type = _MEASURE_UNIT_TYPE.get(measure or "")
+    if measure and unit_type is None and measure in _MEASURE_UNIT_TYPE:
+        entry["unit_state"] = "unitless"
+        return
+    scale = registry.get(unit_type or "")
+    if unit_type and scale:
+        entry["unit_state"] = "known"
+        entry["normalized_value"] = round(float(value) * scale["factor"], 6)
+        entry["normalized_unit"] = scale["unit"]
+    else:
+        entry["unit_state"] = "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Property set extraction
 # ---------------------------------------------------------------------------
 
 
-def _extract_psets(entity: ifcopenshell.entity_instance) -> dict[str, Any]:
-    """Extract property sets as {pset_name: {prop_name: {value, type}}}."""
-    psets: dict[str, Any] = {}
+def _property_measures(
+    entity: ifcopenshell.entity_instance,
+) -> dict[tuple[str, str], str]:
+    """{(pset_name, prop_name): IFC measure class} for single-value properties.
+
+    Walks the entity's own property sets and its type's, so the measure type
+    declared by the exporter is preserved rather than collapsed to a Python
+    float (task26 §4.3).
+    """
+    measures: dict[tuple[str, str], str] = {}
+
+    def _walk_pset(pset: Any) -> None:
+        if pset is None or not pset.is_a("IfcPropertySet"):
+            return
+        pset_name = _safe_scalar(getattr(pset, "Name", None))
+        if not pset_name:
+            return
+        for prop in getattr(pset, "HasProperties", None) or []:
+            try:
+                if not prop.is_a("IfcPropertySingleValue"):
+                    continue
+                nominal = getattr(prop, "NominalValue", None)
+                prop_name = _safe_scalar(getattr(prop, "Name", None))
+                if nominal is not None and prop_name:
+                    measures.setdefault((pset_name, prop_name), nominal.is_a())
+            except Exception:
+                continue
+
     try:
+        for rel in getattr(entity, "IsDefinedBy", None) or []:
+            if rel.is_a("IfcRelDefinesByProperties"):
+                _walk_pset(getattr(rel, "RelatingPropertyDefinition", None))
+        entity_type = ifc_util.get_type(entity)
+        for pset in getattr(entity_type, "HasPropertySets", None) or []:
+            _walk_pset(pset)
+    except Exception:
+        pass
+    return measures
+
+
+def _extract_psets(
+    entity: ifcopenshell.entity_instance,
+    registry: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Extract property sets as {pset_name: {prop_name: {value, type, ...}}}.
+
+    Numeric entries additionally carry `measure`/`unit_state` and, when the
+    unit contract is provable, `normalized_value`/`normalized_unit`.
+    """
+    psets: dict[str, Any] = {}
+    registry = registry or {}
+    try:
+        measures = _property_measures(entity)
         raw = ifc_util.get_psets(entity, psets_only=True)
         for pset_name, props in (raw or {}).items():
             psets[pset_name] = {}
             for prop_name, prop_val in props.items():
                 if prop_name == "id":
                     continue
-                psets[pset_name][prop_name] = {
+                entry: dict[str, Any] = {
                     "value": _safe_scalar(prop_val),
                     "type": type(prop_val).__name__,
                 }
+                _annotate_measure(entry, measures.get((pset_name, prop_name)), registry)
+                psets[pset_name][prop_name] = entry
     except Exception as exc:
         psets["_extraction_error"] = str(exc)
     return psets
 
 
+#: IfcPhysicalQuantity subclass -> (value attribute, unit type).
+_QUANTITY_KINDS = {
+    "IfcQuantityLength": ("LengthValue", "LENGTHUNIT"),
+    "IfcQuantityArea": ("AreaValue", "AREAUNIT"),
+    "IfcQuantityVolume": ("VolumeValue", "VOLUMEUNIT"),
+    "IfcQuantityWeight": ("WeightValue", "MASSUNIT"),
+    "IfcQuantityCount": ("CountValue", None),
+    "IfcQuantityTime": ("TimeValue", "TIMEUNIT"),
+}
+
+
+def _quantity_kinds(
+    entity: ifcopenshell.entity_instance,
+) -> dict[tuple[str, str], str]:
+    """{(qset_name, qty_name): quantity class} from the actual quantity rows."""
+    kinds: dict[tuple[str, str], str] = {}
+    try:
+        for rel in getattr(entity, "IsDefinedBy", None) or []:
+            if not rel.is_a("IfcRelDefinesByProperties"):
+                continue
+            qset = getattr(rel, "RelatingPropertyDefinition", None)
+            if qset is None or not qset.is_a("IfcElementQuantity"):
+                continue
+            qset_name = _safe_scalar(getattr(qset, "Name", None))
+            if not qset_name:
+                continue
+            for qty in getattr(qset, "Quantities", None) or []:
+                qty_name = _safe_scalar(getattr(qty, "Name", None))
+                if qty_name:
+                    kinds.setdefault((qset_name, qty_name), qty.is_a())
+    except Exception:
+        pass
+    return kinds
+
+
 def _extract_qsets(
-    entity: ifcopenshell.entity_instance, ifc_model: ifcopenshell.file
+    entity: ifcopenshell.entity_instance,
+    ifc_model: ifcopenshell.file,
+    registry: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Extract quantity sets as {qset_name: {qty_name: {value, unit, ...}}}."""
     qsets: dict[str, Any] = {}
+    registry = build_unit_registry(ifc_model) if registry is None else registry
     try:
-        unit_scale = _get_project_length_unit(ifc_model)
+        kinds = _quantity_kinds(entity)
         raw = ifc_util.get_psets(entity, qtos_only=True)
         for qset_name, qtys in (raw or {}).items():
             qsets[qset_name] = {}
@@ -200,45 +436,22 @@ def _extract_qsets(
                 if qty_name == "id":
                     continue
                 entry: dict[str, Any] = {"value": _safe_scalar(qty_val), "provenance": "quantity"}
-                if isinstance(qty_val, (int, float)) and unit_scale:
-                    entry["unit"] = "project_unit"
-                    try:
-                        entry["normalized_value"] = round(float(qty_val) * unit_scale["factor"], 6)
-                        entry["normalized_unit"] = unit_scale["unit"]
-                    except Exception:
-                        pass
+                qty_class = kinds.get((qset_name, qty_name))
+                measure = None
+                if qty_class in _QUANTITY_KINDS:
+                    unit_type = _QUANTITY_KINDS[qty_class][1]
+                    # Reuse the measure annotation by mapping the quantity kind
+                    # onto its measure equivalent.
+                    measure = next(
+                        (m for m, t in _MEASURE_UNIT_TYPE.items() if t == unit_type), None
+                    ) if unit_type else "IfcCountMeasure"
+                _annotate_measure(entry, measure, registry)
+                if qty_class:
+                    entry["quantity_class"] = qty_class
                 qsets[qset_name][qty_name] = entry
     except Exception as exc:
         qsets["_extraction_error"] = str(exc)
     return qsets
-
-
-def _get_project_length_unit(ifc_model: ifcopenshell.file) -> dict[str, Any] | None:
-    """Return {factor, unit} to convert project length to metres."""
-    try:
-        unit = ifc_unit_util.get_project_unit(ifc_model, "LENGTHUNIT")
-        if unit is None:
-            return None
-        prefix = getattr(unit, "Prefix", None) or ""
-        si_name = getattr(getattr(unit, "Name", None), "value", None) or getattr(unit, "Name", None)
-        factor_map = {
-            ("MILLI", "METRE"): (0.001, "m"),
-            ("", "METRE"): (1.0, "m"),
-            ("CENTI", "METRE"): (0.01, "m"),
-            ("MILLI", "METER"): (0.001, "m"),
-            ("", "METER"): (1.0, "m"),
-        }
-        key = (str(prefix).upper(), str(si_name).upper() if si_name else "")
-        if key in factor_map:
-            f, u = factor_map[key]
-            return {"factor": f, "unit": u}
-        if si_name and "FOOT" in str(si_name).upper():
-            return {"factor": 0.3048, "unit": "m"}
-        if si_name and "INCH" in str(si_name).upper():
-            return {"factor": 0.0254, "unit": "m"}
-    except Exception:
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -343,15 +556,21 @@ def extract_canonical_json(
     except Exception as e:
         warnings.append(f"classification resolution failed: {e}")
 
+    registry = {}
+    try:
+        registry = build_unit_registry(ifc_model)
+    except Exception as e:
+        warnings.append(f"unit registry failed: {e}")
+
     psets: dict[str, Any] = {}
     try:
-        psets = _extract_psets(entity)
+        psets = _extract_psets(entity, registry)
     except Exception as e:
         warnings.append(f"pset extraction failed: {e}")
 
     qsets: dict[str, Any] = {}
     try:
-        qsets = _extract_qsets(entity, ifc_model)
+        qsets = _extract_qsets(entity, ifc_model, registry)
     except Exception as e:
         warnings.append(f"qset extraction failed: {e}")
 

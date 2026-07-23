@@ -1,22 +1,23 @@
-"""The Task 25 active query pipeline (§1 required data flow).
+"""The experiment2_v4 active query pipeline (task26).
 
     question + bounded history/selection
-      -> load and validate the complete active-model semantic manifest
-      -> typed constraint ledger
-      -> deterministic high-recall recommendations over the COMPLETE manifest
-      -> LLM call 1: manifest-aware semantic binding + decomposition
-      -> deterministic structural validation + ledger-coverage gate
-      -> optional ONE corrective LLM call, only for a proven recoverable gap
-      -> one authoritative execution per answer part
-      -> compact adjudicated answer packet
-      -> LLM call 2: uniform grounded answer
-      -> deterministic answer validation + same-predicate viewer identities
+      -> load and validate the v002 semantic manifest + binder projection
+      -> deterministic phrase-level requirement ledger (intent skeleton)
+      -> always-parallel recall channels + request-time value linking
+      -> ledger model resolution (states + partial policies)
+      -> LLM call 1: typed logical plan over the compact projection
+      -> ten-layer deterministic validation with per-part gates
+      -> optional ONE budget-gated corrective call for mechanical gaps only
+      -> per-part compilation + one authoritative execution each
+      -> adjudicated answer packet
+      -> LLM call 2: claim-citing grounded answer
+      -> deterministic claim validation (fallback never discards results)
+      -> viewer identities from each part's typed viewer set
 
-A normally-answered question uses exactly two LLM calls; a proven recoverable
-gap adds ONE correction; no request exceeds three. The binder selects any id in
-the complete manifest — the recommendations are advisory, not a gate — and every
-material request element is tracked through the typed ledger, so a dropped
-condition cannot be reported as a broader exact answer.
+A normally-answered question uses exactly two LLM calls; a proven mechanical
+binding gap adds ONE correction inside the USD budget; no request exceeds
+three. Failures degrade at the stage that owns them (§13): a correction or
+answer-writer failure never discards an already-executed deterministic result.
 """
 
 from __future__ import annotations
@@ -29,39 +30,43 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings, get_settings
-from app.llm.binder_context import build_binder_context, build_correction_context
-from app.llm.schemas import BindingPlan
-from app.query.binding.answer_validation import build_fallback_answer, validate_answer
-from app.query.binding.evidence import AnswerPartResult, ResultStatus
-from app.query.binding.execute import ExecutionContext, execute_answer_part
-from app.query.binding.ledger import build_ledger
-from app.query.binding.ledger_validation import LedgerCoverage, validate_ledger_coverage
-from app.query.binding.packet import AnswerPacket, build_answer_packet
+from app.llm.binder_context_v2 import (
+    build_binder_context_v2,
+    build_correction_context_v2,
+)
+from app.llm.budget import RequestBudget
+from app.llm.client import LLMError
+from app.llm.schemas_v2 import GroundedAnswerV2, LogicalPlan
+from app.query.binding.answer_validation_v2 import (
+    build_fallback_answer_v2,
+    validate_answer_v2,
+)
+from app.query.binding.execute_v2 import ExecutionContextV2, execute_part
+from app.query.binding.ledger_v2 import LedgerV2, build_ledger_skeleton
+from app.query.binding.packet_v2 import AnswerPacketV2, build_answer_packet_v2
 from app.query.binding.previous_scope import (
     PreviousScope,
-    capture_previous_scope,
     resolve_previous_entity_ids,
 )
-from app.query.binding.recommend import RecommendationInputs, build_recommendations
-from app.query.binding.schemas import CandidateSlate
-from app.query.binding.validate import BindingValidation, validate_binding
-from app.query.binding.viewer import ViewerHydration, hydrate_viewer_identities
-from app.query.semantic.manifest import (
-    ManifestUnavailableError,
-    get_semantic_manifest,
+from app.query.binding.recall import RecallResult, resolve_ledger, run_recall
+from app.query.binding.results_v2 import PartResultV2, ResultStatusV2
+from app.query.binding.validate_v2 import (
+    GateStateV2,
+    PlanValidation,
+    validate_plan,
+)
+from app.query.binding.viewer_v2 import ViewerHydrationV2, hydrate_viewer_v2
+from app.query.semantic.manifest_v002 import (
+    BinderProjection,
+    ManifestV002,
+    ManifestV002UnavailableError,
+    build_binder_projection,
+    get_manifest_v002,
 )
 
-__all__ = ["PipelineOutcome", "PipelineRequest", "GateState", "run_pipeline"]
+__all__ = ["PipelineOutcome", "PipelineRequest", "GateStateV2", "run_pipeline"]
 
-
-class GateState(str, Enum):
-    """The one deterministic gate state after binding (§4)."""
-
-    READY = "ready"
-    RECOVERABLE_BINDING_GAP = "recoverable_binding_gap"
-    NEEDS_CLARIFICATION = "needs_clarification"
-    MODEL_DATA_UNAVAILABLE = "model_data_unavailable"
-    INVALID = "invalid"
+PIPELINE_VERSION = "experiment2_v4"
 
 
 @dataclass
@@ -75,258 +80,381 @@ class PipelineRequest:
 
 
 @dataclass
-class PipelineOutcome:
-    answer: str
-    results: list[AnswerPartResult] = field(default_factory=list)
-    slate: CandidateSlate | None = None
-    binding: BindingPlan | None = None
-    validation: BindingValidation | None = None
-    packet: AnswerPacket | None = None
-    hydration: ViewerHydration = field(default_factory=ViewerHydration)
-    next_scope: PreviousScope | None = None
+class StageRecord:
+    name: str
+    status: str = "ok"
+    duration_ms: float = 0.0
+    payload: dict[str, Any] = field(default_factory=dict)
 
-    gate_state: GateState = GateState.INVALID
+    def to_payload(self) -> dict[str, Any]:
+        record: dict[str, Any] = {
+            "name": self.name,
+            "status": self.status,
+            "duration_ms": self.duration_ms,
+        }
+        if self.payload:
+            record.update(self.payload)
+        return record
+
+
+@dataclass
+class PipelineOutcome:
+    answer: str = ""
+    results: list[PartResultV2] = field(default_factory=list)
+    ledger: LedgerV2 | None = None
+    recall: RecallResult | None = None
+    plan: LogicalPlan | None = None
+    corrected_plan: LogicalPlan | None = None
+    validation: PlanValidation | None = None
+    packet: AnswerPacketV2 | None = None
+    raw_answer: GroundedAnswerV2 | None = None
+    hydration: ViewerHydrationV2 = field(default_factory=ViewerHydrationV2)
+    next_scope: PreviousScope | None = None
+    budget: RequestBudget = field(default_factory=RequestBudget)
+    projection: BinderProjection | None = None
+    manifest: ManifestV002 | None = None
+
+    terminal_stage: str = "response_delivery"
+    terminal_status: str = "success"
     needs_clarification: bool = False
     used_fallback: bool = False
     used_correction: bool = False
+    correction_skipped_reason: str | None = None
     answer_validation_failures: list[str] = field(default_factory=list)
-    used_general_knowledge: bool = False
     warnings: list[str] = field(default_factory=list)
-
-    stage_ms: dict[str, float] = field(default_factory=dict)
+    stages: list[StageRecord] = field(default_factory=list)
     statement_count: int = 0
-    slate_bytes: int = 0
-    packet_bytes: int = 0
     llm_calls: int = 0
 
     @property
-    def primary_result(self) -> AnswerPartResult | None:
+    def primary_result(self) -> PartResultV2 | None:
         return self.results[0] if self.results else None
+
+    def stage_ms(self) -> dict[str, float]:
+        return {s.name: s.duration_ms for s in self.stages}
+
+
+class _Stage:
+    """Timed stage recorder that always lands in the outcome's stage list."""
+
+    def __init__(self, outcome: PipelineOutcome, name: str) -> None:
+        self.record = StageRecord(name=name)
+        outcome.stages.append(self.record)
+        self._started = time.perf_counter()
+
+    def done(self, status: str = "ok", **payload: Any) -> None:
+        self.record.status = status
+        self.record.duration_ms = round((time.perf_counter() - self._started) * 1000.0, 1)
+        self.record.payload.update(payload)
 
 
 def run_pipeline(
     session: Session,
     request: PipelineRequest,
     *,
-    bind: Callable[[dict[str, Any]], BindingPlan],
-    answer: Callable[[dict[str, Any]], Any],
-    correct: Callable[[dict[str, Any]], BindingPlan] | None = None,
+    bind: Callable[[dict[str, Any]], tuple[LogicalPlan, Any]],
+    answer: Callable[[dict[str, Any]], tuple[GroundedAnswerV2, Any]],
+    correct: Callable[[dict[str, Any]], tuple[LogicalPlan, Any]] | None = None,
     settings: Settings | None = None,
     embedding_service_getter: Callable[[], Any] | None = None,
 ) -> PipelineOutcome:
-    """Run one question end to end.
-
-    `bind`, `correct`, and `answer` are injected so the pipeline is testable
-    without a provider. `correct` is optional — without it, a recoverable gap ends
-    as a clarification rather than a third call.
-    """
+    """Run one question end to end. `bind`/`correct`/`answer` are injected and
+    return (parsed, usage) so the pipeline is testable without a provider."""
     settings = settings or get_settings()
-    outcome = PipelineOutcome(answer="")
+    outcome = PipelineOutcome()
 
-    # -- 1. complete semantic manifest --------------------------------------
-    started = time.perf_counter()
+    # -- 1. manifest + projection -------------------------------------------
+    stage = _Stage(outcome, "manifest_load")
     try:
-        manifest = get_semantic_manifest(session, request.source_model_id, settings)
-    except ManifestUnavailableError as exc:
-        outcome.gate_state = GateState.MODEL_DATA_UNAVAILABLE
+        manifest = get_manifest_v002(session, request.source_model_id, settings)
+    except ManifestV002UnavailableError as exc:
+        stage.done("failed", error=str(exc))
+        outcome.terminal_stage = "manifest_load"
+        outcome.terminal_status = "manifest_unavailable"
         outcome.needs_clarification = True
         outcome.answer = "I can't answer questions about this model yet: " + str(exc) + "."
         outcome.warnings.append(str(exc))
         return outcome
-    outcome.stage_ms["manifest_load_ms"] = _elapsed(started)
+    outcome.manifest = manifest
+    projection = build_binder_projection(manifest)
+    outcome.projection = projection
+    stage.done(
+        capabilities=len(manifest.capabilities),
+        projection_tokens=projection.estimated_tokens,
+        projection_hash=projection.projection_hash[:16],
+        content_hash=manifest.content_hash[:16],
+    )
 
     previous_ids = resolve_previous_entity_ids(
         session, request.previous_scope, request.source_model_id
     )
 
-    # -- 2. typed constraint ledger -----------------------------------------
-    started = time.perf_counter()
-    ledger = build_ledger(
+    # -- 2. ledger skeleton ---------------------------------------------------
+    stage = _Stage(outcome, "ledger")
+    ledger = build_ledger_skeleton(
         request.question,
         previous_scope=request.previous_scope,
         selected_entities=request.selected_entities,
     )
-    outcome.stage_ms["ledger_build_ms"] = _elapsed(started)
+    outcome.ledger = ledger
+    stage.done(**ledger.size_report())
 
-    # -- 3. high-recall recommendations over the COMPLETE manifest ----------
-    started = time.perf_counter()
-    slate = build_recommendations(
+    # -- 3. recall + value linking + resolution -------------------------------
+    stage = _Stage(outcome, "recall")
+    recall = run_recall(
         session,
-        RecommendationInputs(
-            question=request.question,
-            source_model_id=request.source_model_id,
-            history=request.history,
-            selected_entities=request.selected_entities,
-            previous_scope=request.previous_scope,
-        ),
         manifest,
         ledger,
-        settings=settings,
         embedding_service_getter=embedding_service_getter,
     )
-    outcome.slate = slate
-    outcome.stage_ms["recommendation_ms"] = _elapsed(started)
-    outcome.slate_bytes = _payload_bytes(slate.to_prompt_payload())
+    resolve_ledger(ledger, recall, manifest)
+    outcome.recall = recall
+    stage.done(
+        recommendations=len(recall.recommendations),
+        value_links=sum(len(v) for v in recall.value_links.values()),
+        **recall.diagnostics,
+    )
 
-    # -- 4. LLM call 1: semantic binding ------------------------------------
-    started = time.perf_counter()
-    binder_context = build_binder_context(
+    # -- 4. LLM call 1: typed logical plan ------------------------------------
+    stage = _Stage(outcome, "binding_llm")
+    binder_context = build_binder_context_v2(
         request.question,
-        manifest,
-        slate,
+        projection,
         ledger,
+        recall,
         settings=settings,
+        source_model_id=request.source_model_id,
         history=request.history,
         selected_entities=request.selected_entities,
         previous_scope=request.previous_scope,
     )
-    plan = bind(binder_context)
-    outcome.binding = plan
-    outcome.llm_calls += 1
-    outcome.stage_ms["binding_llm_ms"] = _elapsed(started)
-
-    # -- 5. deterministic validation + ledger-coverage gate -----------------
-    started = time.perf_counter()
-    validation = validate_binding(plan, slate)
-    coverage = validate_ledger_coverage(plan, ledger)
-    gate = _gate(plan, validation, coverage)
-    outcome.stage_ms["binding_validation_ms"] = _elapsed(started)
-
-    # -- 6. optional ONE corrective binding ---------------------------------
-    if gate is GateState.RECOVERABLE_BINDING_GAP and correct is not None:
-        started = time.perf_counter()
-        correction_context = build_correction_context(
-            request.question,
-            manifest,
-            ledger,
-            plan,
-            _gate_failures(validation, coverage),
-            slate,
-            settings=settings,
+    try:
+        plan, usage = bind(binder_context)
+    except LLMError as exc:
+        stage.done("failed", error=str(exc)[:300])
+        outcome.terminal_stage = "binding_llm"
+        outcome.terminal_status = "provider_failure"
+        outcome.answer = (
+            "The language model is currently unavailable, so this question could not be "
+            "interpreted. Please try again shortly."
         )
-        plan = correct(correction_context)
-        outcome.binding = plan
-        outcome.llm_calls += 1
-        outcome.used_correction = True
-        validation = validate_binding(plan, slate)
-        coverage = validate_ledger_coverage(plan, ledger)
-        gate = _gate(plan, validation, coverage)
-        outcome.stage_ms["correction_llm_ms"] = _elapsed(started)
-
-    outcome.validation = validation
-    outcome.gate_state = gate
-
-    if gate in (
-        GateState.NEEDS_CLARIFICATION,
-        GateState.RECOVERABLE_BINDING_GAP,
-        GateState.INVALID,
-    ):
-        outcome.needs_clarification = True
-        outcome.answer = _clarification_text(plan, validation, coverage)
-        outcome.warnings.extend(coverage.failures()[:5])
-        outcome.warnings.extend(i.detail for i in validation.all_issues()[:5])
         return outcome
+    outcome.plan = plan
+    outcome.llm_calls += 1
+    if usage is not None:
+        outcome.budget.track_actual("binder", usage)
+    stage.done(parts=len(plan.answer_parts), dispositions=len(plan.dispositions))
 
-    # -- 7. one authoritative execution per answer part ---------------------
-    started = time.perf_counter()
-    context = ExecutionContext(
+    # -- 5. validation --------------------------------------------------------
+    stage = _Stage(outcome, "validation")
+    validation = validate_plan(
         session,
-        request.source_model_id,
-        slate,
-        settings=settings,
+        plan,
+        ledger,
+        manifest,
         selection_entity_ids=request.selection_entity_ids,
         previous_scope_entity_ids=previous_ids,
+    )
+    outcome.validation = validation
+    stage.done(
+        states={v.part.part_id: v.state.value for v in validation.verdicts},
+        issues=validation.layer_summary(),
+    )
+
+    # -- 6. optional ONE budget-gated correction ------------------------------
+    correctable = [
+        v for v in validation.verdicts if v.state is GateStateV2.CORRECTABLE_BINDING_GAP
+    ] or ([] if not validation.plan_issues else [None])
+    if correctable and correct is not None:
+        stage = _Stage(outcome, "correction")
+        estimate = outcome.budget.estimate_call(
+            "correction",
+            model=settings.get_correction_model(),
+            stable_prefix_bytes=len(projection.json_text.encode("utf-8")),
+            dynamic_bytes=4000,
+            max_output_tokens=settings.correction_max_output_tokens,
+            expect_cached_prefix=True,
+        )
+        reserve = outcome.budget.estimate_call(
+            "grounded_answerer",
+            model=settings.get_answer_model(),
+            stable_prefix_bytes=2000,
+            dynamic_bytes=8000,
+            max_output_tokens=settings.answer_max_output_tokens,
+        )
+        if not outcome.budget.allows_correction(estimate, reserve):
+            outcome.correction_skipped_reason = "budget"
+            stage.done("skipped", reason="budget")
+        else:
+            failures = [i.to_payload() for i in validation.correctable_issues()]
+            keep = [
+                v.part.part_id
+                for v in validation.verdicts
+                if v.state in (GateStateV2.READY, GateStateV2.PARTIAL_EXECUTABLE)
+            ]
+            expanded = _expanded_candidates(validation, recall)
+            correction_context = build_correction_context_v2(
+                request.question,
+                projection,
+                plan,
+                failures,
+                {"keep": keep, **expanded},
+                settings=settings,
+                source_model_id=request.source_model_id,
+            )
+            try:
+                corrected, usage = correct(correction_context)
+                outcome.corrected_plan = corrected
+                outcome.llm_calls += 1
+                outcome.used_correction = True
+                if usage is not None:
+                    outcome.budget.track_actual("correction", usage)
+                plan = corrected
+                validation = validate_plan(
+                    session,
+                    plan,
+                    ledger,
+                    manifest,
+                    selection_entity_ids=request.selection_entity_ids,
+                    previous_scope_entity_ids=previous_ids,
+                )
+                outcome.validation = validation
+                stage.done(
+                    states={v.part.part_id: v.state.value for v in validation.verdicts}
+                )
+            except LLMError as exc:
+                # §13: retain the initial valid parts; never replace the whole
+                # response with generic unavailability.
+                outcome.correction_skipped_reason = f"provider: {str(exc)[:120]}"
+                outcome.warnings.append(
+                    "a corrective binding call failed; answering with the parts that "
+                    "validated"
+                )
+                stage.done("failed", error=str(exc)[:300])
+
+    # -- 7. gate resolution ---------------------------------------------------
+    executable = validation.executable_verdicts()
+    clarification_states = [
+        v for v in validation.verdicts if v.state is GateStateV2.NEEDS_CLARIFICATION
+    ]
+    if not executable:
+        outcome.needs_clarification = True
+        outcome.terminal_stage = "validation"
+        if plan.needs_clarification and plan.clarification_question:
+            outcome.terminal_status = "clarification"
+            outcome.answer = plan.clarification_question
+        elif clarification_states:
+            outcome.terminal_status = "clarification"
+            outcome.answer = _ambiguity_question(validation, ledger)
+        else:
+            outcome.terminal_status = "unavailable"
+            outcome.answer = _unavailable_text(validation)
+        outcome.warnings.extend(
+            issue.detail for issue in validation.all_issues()[:5]
+        )
+        return outcome
+
+    # -- 8. execution ---------------------------------------------------------
+    stage = _Stage(outcome, "execution")
+    context = ExecutionContextV2(
+        session,
+        manifest,
+        settings=settings,
         embedding_service_getter=embedding_service_getter,
     )
-    results = [execute_answer_part(part, context) for part in validation.valid_parts]
+    results: list[PartResultV2] = []
+    for verdict in executable:
+        compiled = verdict.compiled
+        if compiled is None:
+            continue
+        result = execute_part(compiled, verdict.part.request_text, context)
+        for requirement in verdict.unavailable_requirements:
+            limitation_id = result.add_limitation(
+                "MANIFEST_CAPABILITY_GAP",
+                f"{requirement.source_text!r} is not determinable from this model"
+                + (f": {requirement.resolution_note}" if requirement.resolution_note else ""),
+            )
+            result.unknown_parts.append(requirement.source_text)
+            if result.status is ResultStatusV2.EXACT:
+                result.status = ResultStatusV2.PARTIAL
+            _ = limitation_id
+        results.append(result)
     outcome.results = results
     outcome.statement_count += sum(r.statement_count for r in results)
-    outcome.stage_ms["execution_ms"] = _elapsed(started)
+    stage.done(parts={r.part_id: r.status.value for r in results})
 
-    # -- 8. compact answer packet -------------------------------------------
-    started = time.perf_counter()
+    # -- 9. answer packet ------------------------------------------------------
+    stage = _Stage(outcome, "answer_packet")
     primary_visual = _primary_visual_part_id(plan, results)
-    packet = build_answer_packet(
+    clarifications = [
+        _ambiguity_question(validation, ledger)
+    ] if clarification_states else []
+    packet = build_answer_packet_v2(
         request.question,
         results,
         response_language=plan.response_language,
         primary_visual_part_id=primary_visual,
-        settings=settings,
+        clarifications=clarifications,
     )
     outcome.packet = packet
-    outcome.packet_bytes = _payload_bytes(packet.to_prompt_payload())
-    outcome.stage_ms["packet_build_ms"] = _elapsed(started)
+    stage.done(parts=len(packet.parts), facts=len(packet.fact_ids()))
 
-    # -- 9. LLM call: grounded answer ---------------------------------------
-    started = time.perf_counter()
-    generated = answer(packet.to_prompt_payload())
-    outcome.llm_calls += 1
-    outcome.stage_ms["answer_llm_ms"] = _elapsed(started)
-    outcome.used_general_knowledge = bool(getattr(generated, "used_general_knowledge", False))
-
-    # -- 10. deterministic response validation ------------------------------
-    started = time.perf_counter()
-    answer_validation = validate_answer(generated, packet, results)
-    if answer_validation.ok:
-        outcome.answer = generated.answer
-    else:
+    # -- 10. LLM call 2: grounded answer --------------------------------------
+    stage = _Stage(outcome, "answer_llm")
+    try:
+        generated, usage = answer(packet.to_prompt_payload())
+        outcome.raw_answer = generated
+        outcome.llm_calls += 1
+        if usage is not None:
+            outcome.budget.track_actual("grounded_answerer", usage)
+        stage.done()
+    except LLMError as exc:
+        # §13: the deterministic result stands; the writer is replaceable.
+        generated = None
         outcome.used_fallback = True
-        outcome.answer_validation_failures = answer_validation.failures
-        outcome.answer = build_fallback_answer(results)
+        outcome.answer = build_fallback_answer_v2(packet)
         outcome.warnings.append(
-            "the generated answer did not match the retrieved results, so a direct "
-            "summary of those results was returned instead"
+            "the answer-writing model was unavailable, so a direct summary of the "
+            "retrieved results is shown"
         )
-    outcome.stage_ms["answer_validation_ms"] = _elapsed(started)
+        stage.done("failed", error=str(exc)[:300])
 
-    # -- 11. viewer identities from the SAME result -------------------------
-    started = time.perf_counter()
-    hydration = hydrate_viewer_identities(session, results, primary_visual, settings)
+    # -- 11. answer validation / fallback --------------------------------------
+    if generated is not None:
+        stage = _Stage(outcome, "answer_validation")
+        answer_validation = validate_answer_v2(generated, packet)
+        if answer_validation.ok:
+            outcome.answer = generated.answer
+            stage.done()
+        else:
+            outcome.used_fallback = True
+            outcome.answer_validation_failures = answer_validation.failures
+            outcome.answer = build_fallback_answer_v2(packet)
+            outcome.warnings.append(
+                "the generated answer did not match the retrieved results, so a direct "
+                "summary of those results was returned instead"
+            )
+            stage.done("failed", failures=answer_validation.failures[:5])
+
+    # -- 12. viewer -------------------------------------------------------------
+    stage = _Stage(outcome, "viewer_hydration")
+    hydration = hydrate_viewer_v2(session, results, primary_visual, settings)
     outcome.hydration = hydration
     outcome.statement_count += hydration.statement_count
     outcome.warnings.extend(hydration.warnings)
-    outcome.stage_ms["viewer_hydration_ms"] = _elapsed(started)
-
-    outcome.next_scope = _capture_scope(results, primary_visual)
-    outcome.warnings.extend(_interpretation_notes(results))
-    return outcome
-
-
-# ---------------------------------------------------------------------------
-# Gate
-# ---------------------------------------------------------------------------
-
-
-def _gate(plan: BindingPlan, validation: BindingValidation, coverage: LedgerCoverage) -> GateState:
-    """Collapse binding + validation + coverage into one gate state (§4)."""
-    if plan.needs_clarification:
-        return GateState.NEEDS_CLARIFICATION
-
-    structural_ok = validation.valid and bool(validation.valid_parts)
-
-    if structural_ok and coverage.ok:
-        return GateState.READY
-
-    # An honest unavailable/ambiguous disposition that is otherwise well-formed is
-    # NOT a gap to correct — the parts execute and report the limitation (§4, §5).
-    if structural_ok and coverage.declared_failures and not _mechanical_gap(coverage):
-        return GateState.READY
-
-    if coverage.recoverable or not structural_ok:
-        return GateState.RECOVERABLE_BINDING_GAP
-
-    return GateState.INVALID
-
-
-def _mechanical_gap(coverage: LedgerCoverage) -> bool:
-    """True when something is missing/mis-kinded rather than honestly declared."""
-    return bool(
-        coverage.undisposed or coverage.mismatched or coverage.unsupported or coverage.invented
+    stage.done(
+        returned=len(hydration.primary_global_ids),
+        total=hydration.viewer_matches_total,
+        truncated=hydration.viewer_matches_truncated,
     )
 
-
-def _gate_failures(validation: BindingValidation, coverage: LedgerCoverage) -> list[str]:
-    return coverage.failures() + [i.detail for i in validation.all_issues()]
+    outcome.next_scope = _capture_scope(executable, results, primary_visual)
+    for result in results:
+        for note in result.interpretation_notes:
+            if note not in outcome.warnings:
+                outcome.warnings.append(note)
+    outcome.warnings = outcome.warnings[:12]
+    return outcome
 
 
 # ---------------------------------------------------------------------------
@@ -334,62 +462,104 @@ def _gate_failures(validation: BindingValidation, coverage: LedgerCoverage) -> l
 # ---------------------------------------------------------------------------
 
 
-def _elapsed(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000.0, 1)
+def _expanded_candidates(
+    validation: PlanValidation, recall: RecallResult
+) -> dict[str, Any]:
+    """Bounded expanded candidates/values for ONLY the failed requirements."""
+    failed_requirements = {
+        i.requirement_id for i in validation.correctable_issues() if i.requirement_id
+    }
+    candidates = [
+        r.to_payload()
+        for r in recall.recommendations
+        if r.requirement_id in failed_requirements
+    ]
+    value_matches = [
+        link.to_payload() | {"for": requirement_id}
+        for requirement_id, links in recall.value_links.items()
+        if requirement_id in failed_requirements
+        for link in links[:4]
+    ]
+    return {"candidates": candidates[:24], "value_matches": value_matches[:12]}
 
 
-def _payload_bytes(payload: dict[str, Any]) -> int:
-    from app.llm.serialization import dumps_context
+def _ambiguity_question(validation: PlanValidation, ledger: LedgerV2) -> str:
+    from app.query.binding.ledger_v2 import ResolutionState
 
-    return len(dumps_context(payload).encode("utf-8"))
+    ambiguous = [
+        r for r in ledger.required() if r.resolution is ResolutionState.AMBIGUOUS
+    ]
+    if ambiguous:
+        notes = "; ".join(
+            f"{r.source_text!r}: {r.resolution_note}" for r in ambiguous[:2] if r.resolution_note
+        )
+        return (
+            "That question has more than one reasonable reading — "
+            + (notes or "an ambiguous reference")
+            + ". Which interpretation do you mean?"
+        )
+    detail = next((i.detail for i in validation.all_issues()), None)
+    if detail:
+        return (
+            f"I couldn't answer that as asked: {detail}. I haven't answered a broader "
+            "version instead. Could you rephrase that part?"
+        )
+    return "Could you rephrase that question, or be more specific?"
 
 
-def _primary_visual_part_id(plan: BindingPlan, results: list[AnswerPartResult]) -> str | None:
+def _unavailable_text(validation: PlanValidation) -> str:
+    reasons = [
+        i.detail
+        for v in validation.verdicts
+        for i in v.issues
+        if not i.correctable
+    ]
+    for verdict in validation.verdicts:
+        for requirement in verdict.unavailable_requirements:
+            reasons.append(f"{requirement.source_text!r} is not recorded in this model")
+    if reasons:
+        return (
+            "This model's data cannot answer that: " + "; ".join(reasons[:2]) + ". "
+            "I haven't substituted a broader question instead."
+        )
+    return "This model's data cannot answer that question as asked."
+
+
+def _primary_visual_part_id(
+    plan: LogicalPlan, results: list[PartResultV2]
+) -> str | None:
     explicit = [p.part_id for p in plan.answer_parts if p.is_primary_visual]
     if len(explicit) == 1:
         return explicit[0]
-    visual = [r.part_id for r in results if r.has_visual_result]
-    return visual[0] if len(visual) == 1 else (visual[0] if visual else None)
+    visual = [
+        r.part_id
+        for r in results
+        if r.viewer_policy not in ("none", "") and r.is_answerable
+    ]
+    return visual[0] if visual else None
 
 
 def _capture_scope(
-    results: list[AnswerPartResult], primary_visual: str | None
+    verdicts: list[Any], results: list[PartResultV2], primary_visual: str | None
 ) -> PreviousScope | None:
+    from app.query.binding.previous_scope import capture_previous_scope_v2
+
     target = next((r for r in results if r.part_id == primary_visual), None)
     if target is None:
         target = next((r for r in results if r.is_answerable), None)
-    return capture_previous_scope(target) if target is not None else None
-
-
-def _clarification_text(
-    plan: BindingPlan, validation: BindingValidation, coverage: LedgerCoverage
-) -> str:
-    if plan.needs_clarification and plan.clarification_question:
-        return plan.clarification_question
-    detail = coverage.clarification() or validation.clarification()
-    if not detail:
-        return "Could you rephrase that question, or be more specific?"
-    return (
-        f"I couldn't answer that as asked: {detail}. "
-        "I haven't answered a broader version instead, because that would describe a "
-        "different set of objects. Could you rephrase that part?"
+    if target is None:
+        return None
+    compiled = next(
+        (v.compiled for v in verdicts if v.part.part_id == target.part_id), None
     )
+    try:
+        return capture_previous_scope_v2(compiled, target)
+    except Exception:  # noqa: BLE001 - follow-up scope is best-effort
+        return None
 
 
-def _interpretation_notes(results: list[AnswerPartResult]) -> list[str]:
-    notes: list[str] = []
-    for result in results:
-        if result.interpretation and result.interpretation not in notes:
-            notes.append(result.interpretation)
-    return notes[:6]
-
-
-def status_summary(results: list[AnswerPartResult]) -> dict[str, int]:
+def status_summary(results: list[PartResultV2]) -> dict[str, int]:
     tally: dict[str, int] = {}
     for result in results:
         tally[result.status.value] = tally.get(result.status.value, 0) + 1
     return tally
-
-
-def has_only_status(results: list[AnswerPartResult], status: ResultStatus) -> bool:
-    return bool(results) and all(r.status is status for r in results)

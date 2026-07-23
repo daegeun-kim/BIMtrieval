@@ -38,6 +38,7 @@ _GRANTED_TABLES = [
     "ifc_entities",
     "ifc_relationships",
     "relationship_members",
+    "entity_spatial_memberships",
     "rag_documents",
     "model_families",
     "source_model_catalog_entries",

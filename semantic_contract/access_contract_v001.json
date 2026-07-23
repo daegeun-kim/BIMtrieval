@@ -1,0 +1,201 @@
+{
+  "contract_version": "v001",
+  "description": "Versioned semantic access contract shared by ingestion manifest generation and backend resolution/validation/compilation (task26 §3.2). Declares the legal logical capabilities and symbolic physical access-path IDs. Contains no model occurrences, no SQL, no prompts.",
+  "uses": [
+    "target",
+    "filter",
+    "scope",
+    "group",
+    "aggregate",
+    "order",
+    "report",
+    "traverse",
+    "topic_context"
+  ],
+  "result_shapes": [
+    "entity_set",
+    "scalar",
+    "distribution",
+    "sample",
+    "profile",
+    "qualitative_evidence",
+    "graph_endpoints"
+  ],
+  "grains": ["entity", "value", "relationship", "storey", "floor", "model"],
+  "data_types": ["text", "number", "boolean"],
+  "operators_by_data_type": {
+    "text": ["equals", "not_equals", "contains", "starts_with", "one_of", "is_present", "is_missing"],
+    "number": ["equals", "not_equals", "greater_than", "greater_or_equal", "less_than", "less_or_equal", "between", "one_of", "is_present", "is_missing"],
+    "boolean": ["equals", "not_equals", "is_present", "is_missing"]
+  },
+  "coverage_states": {
+    "present_complete": {
+      "meaning": "every eligible subject carries a usable value",
+      "queryable": true,
+      "proves_exact_zero": true,
+      "supports_value_aggregate": true
+    },
+    "present_partial": {
+      "meaning": "some but not all eligible subjects carry a usable value",
+      "queryable": true,
+      "proves_exact_zero": false,
+      "supports_value_aggregate": "covered_subset_only"
+    },
+    "checked_absent": {
+      "meaning": "the extractor checked this capability for the subject class and no occurrence carries it",
+      "queryable": true,
+      "proves_exact_zero": true,
+      "proves_is_present_zero": true,
+      "proves_is_missing_full": true,
+      "supports_value_aggregate": false
+    },
+    "source_unresolvable": {
+      "meaning": "the source data does not present this fact in a reliably interpretable structure",
+      "queryable": false,
+      "proves_exact_zero": false,
+      "supports_value_aggregate": false
+    },
+    "extractor_unsupported": {
+      "meaning": "the extraction pipeline does not support this capability at all",
+      "queryable": false,
+      "proves_exact_zero": false,
+      "supports_value_aggregate": false
+    },
+    "extraction_failed": {
+      "meaning": "extraction was attempted for this capability and raised",
+      "queryable": false,
+      "proves_exact_zero": false,
+      "supports_value_aggregate": false
+    }
+  },
+  "unit_states": ["known", "unknown", "unitless", "not_applicable"],
+  "value_policies": ["enumerated", "request_lookup", "none"],
+  "accessors": {
+    "entity.class": {
+      "kinds": ["class"],
+      "grain": "entity",
+      "uses": ["target", "topic_context"],
+      "result_shapes": ["entity_set", "scalar", "sample", "distribution"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "json.attribute": {
+      "kinds": ["field"],
+      "grain": "entity",
+      "uses": ["filter", "group", "report", "order", "aggregate"],
+      "result_shapes": ["entity_set", "scalar", "distribution"],
+      "data_types": ["text", "number", "boolean"],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "json.property_value": {
+      "kinds": ["field"],
+      "grain": "entity",
+      "uses": ["filter", "group", "report", "order", "aggregate"],
+      "result_shapes": ["entity_set", "scalar", "distribution"],
+      "data_types": ["text", "number", "boolean"],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "json.quantity_value": {
+      "kinds": ["field"],
+      "grain": "entity",
+      "uses": ["filter", "group", "report", "order", "aggregate"],
+      "result_shapes": ["entity_set", "scalar", "distribution"],
+      "data_types": ["number"],
+      "requires_unit": true,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "json.material_name": {
+      "kinds": ["field"],
+      "grain": "entity",
+      "uses": ["filter", "group", "report"],
+      "result_shapes": ["entity_set", "distribution"],
+      "data_types": ["text"],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "json.classification_field": {
+      "kinds": ["field"],
+      "grain": "entity",
+      "uses": ["filter", "group", "report"],
+      "result_shapes": ["entity_set", "distribution"],
+      "data_types": ["text"],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true
+    },
+    "spatial.effective_membership": {
+      "kinds": ["spatial"],
+      "grain": "entity",
+      "uses": ["scope", "group"],
+      "result_shapes": ["entity_set", "distribution"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": true,
+      "notes": "Compiles against normalized entity_spatial_memberships. The backend adapter may use the denormalized scalar storey only as an internal fast path when per-class coverage is proven complete; the logical plan never changes by class."
+    },
+    "relationship.member_edge": {
+      "kinds": ["traversal"],
+      "grain": "relationship",
+      "uses": ["traverse"],
+      "result_shapes": ["graph_endpoints", "entity_set"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": "endpoint_dependent"
+    },
+    "derived.physical_floor": {
+      "kinds": ["derived_floor"],
+      "grain": "floor",
+      "uses": ["scope", "group", "target"],
+      "result_shapes": ["entity_set", "scalar", "distribution"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": true,
+      "viewer_hydratable": false
+    },
+    "derived.building_profile": {
+      "kinds": ["derived_profile"],
+      "grain": "model",
+      "uses": ["target"],
+      "result_shapes": ["profile"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": false,
+      "viewer_hydratable": false
+    },
+    "derived.thematic_profile": {
+      "kinds": ["derived_profile"],
+      "grain": "model",
+      "uses": ["target"],
+      "result_shapes": ["profile", "qualitative_evidence"],
+      "data_types": [],
+      "requires_unit": false,
+      "can_prove_absence": false,
+      "viewer_hydratable": false
+    }
+  },
+  "id_rules": {
+    "max_semantic_id_length": 120,
+    "kind_by_prefix": {
+      "cls": "class",
+      "attr": "field",
+      "prop": "field",
+      "qty": "field",
+      "mat": "field",
+      "cla": "field",
+      "path": "traversal",
+      "floor": "derived_floor",
+      "storey": "class",
+      "derived": "derived_profile"
+    }
+  }
+}

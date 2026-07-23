@@ -66,6 +66,7 @@ def search_kind(
     top_k: int,
     threshold: float,
     scope_entity_ids: list[int] | None = None,
+    scope_entity_select: sa.Select | None = None,
 ) -> list[RagCandidate]:
     """Independent per-kind pgvector search (spec_v004 §7).
 
@@ -75,6 +76,10 @@ def search_kind(
     meaningful scope — it returns nothing rather than widening, because "the
     structured predicate matched nothing" and "no scope was requested" are
     different facts and must not produce the same answer.
+
+    `scope_entity_select` is the task26 §10.6 database-side form: a SELECT of
+    entity ids compiled from the same authoritative predicate, applied as an
+    `IN (subquery)` so a 100k-entity scope never materializes into Python.
     """
     check_compatibility(session, source_model_id, source_kind)
     document_type = _KIND_DOCUMENT_TYPE[source_kind]
@@ -95,6 +100,8 @@ def search_kind(
     ]
     if scope_entity_ids is not None and source_kind == "entity":
         predicates.append(_RD.c.entity_id.in_(list(scope_entity_ids)))
+    if scope_entity_select is not None and source_kind == "entity":
+        predicates.append(_RD.c.entity_id.in_(scope_entity_select))
 
     stmt = (
         sa.select(

@@ -53,6 +53,10 @@ class PreviousScope:
     description: str = ""
     #: A few example ids, useful only for diagnostics — NEVER the scope itself.
     example_entity_ids: tuple[int, ...] = field(default_factory=tuple)
+    #: task26: the compiled WHERE expression of the accepted part, stored
+    #: in-process so the follow-up re-executes the exact same predicate. Takes
+    #: precedence over `filters` when present.
+    where_expr: Any = None
 
     def matches_model(self, source_model_id: int | None) -> bool:
         """§7: clear the scope when the stored model does not match the request."""
@@ -92,6 +96,34 @@ def capture_previous_scope(result: Any, description: str = "") -> PreviousScope 
     )
 
 
+def capture_previous_scope_v2(compiled: Any, result: Any) -> PreviousScope | None:
+    """Store an accepted v4 answer part as a re-executable scope (task26 §8.3).
+
+    The compiled part's own base WHERE is kept, so "of those" re-executes the
+    exact accepted predicate — never a capped id list.
+    """
+    if result is None or compiled is None:
+        return None
+    if result.status.value not in ("exact", "zero", "partial"):
+        return None
+    matched = None
+    entity_set = getattr(result, "result", None)
+    if entity_set is not None:
+        matched = getattr(entity_set, "matched_cardinality", None)
+    return PreviousScope(
+        source_model_id=compiled.source_model_id,
+        ifc_classes=tuple(compiled.target_classes),
+        filters=None,
+        scope_entity_ids=None,
+        part_id=result.part_id,
+        status=result.status.value,
+        exact_count=matched,
+        description=result.request_text,
+        example_entity_ids=tuple(e.entity_id for e in result.examples[:5]),
+        where_expr=compiled.base_where(),
+    )
+
+
 def resolve_previous_entity_ids(
     session: Session, scope: PreviousScope | None, source_model_id: int | None
 ) -> list[int]:
@@ -103,6 +135,14 @@ def resolve_previous_entity_ids(
     """
     if scope is None or not scope.matches_model(source_model_id):
         return []
+
+    if scope.where_expr is not None:
+        return [
+            row[0]
+            for row in session.execute(
+                sa.select(_ET.c.id).where(scope.where_expr).order_by(_ET.c.id)
+            )
+        ]
 
     where = _ET.c.source_model_id == scope.source_model_id
     if scope.ifc_classes:

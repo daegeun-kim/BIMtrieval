@@ -289,6 +289,67 @@ class RelationshipMember(Base):
 
 
 # ---------------------------------------------------------------------------
+# Stage 1 (extension): normalized effective spatial membership (task26 §4.2)
+# ---------------------------------------------------------------------------
+
+
+class EntitySpatialMembership(Base):
+    """One entity-to-storey membership fact, with typed provenance.
+
+    Zero-to-many rows per entity. `source_kind` is the bounded relationship path
+    that established the membership (`contained`, `aggregated`,
+    `contained>aggregated`, ...). The denormalized `canonical_json.storey` scalar
+    remains a fast observation, but THIS table is the definition of spatial
+    membership — it is what manifest generation, floor derivation, SQL
+    predicates, RAG scoping, and viewer hydration read.
+    """
+
+    __tablename__ = "entity_spatial_memberships"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_model_id = Column(
+        Integer, ForeignKey("ifc_source_models.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_id = Column(Integer, ForeignKey("ifc_entities.id", ondelete="CASCADE"))
+    entity_global_id = Column(Text, nullable=False)
+    storey_entity_id = Column(Integer, ForeignKey("ifc_entities.id", ondelete="CASCADE"))
+    storey_global_id = Column(Text, nullable=False)
+    source_relationship_id = Column(
+        Integer, ForeignKey("ifc_relationships.id", ondelete="SET NULL")
+    )
+    #: The bounded relationship-path signature: 'contained', 'aggregated', or a
+    #: '>'-joined composition such as 'contained>aggregated'.
+    source_kind = Column(Text, nullable=False)
+    hop_count = Column(Integer, nullable=False)
+    #: 'resolved' | 'dangling' (an endpoint has no ifc_entities row) |
+    #: 'ambiguous' (this entity reaches more than one distinct storey).
+    resolution_status = Column(Text, nullable=False)
+    #: True for the entity's minimal-hop membership when it is unambiguous.
+    is_primary = Column(Boolean, nullable=False, default=False)
+    #: IFC relationship role/path description, without copying source JSON.
+    provenance = Column(Text)
+
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_status IN ('resolved', 'dangling', 'ambiguous')",
+            name="ck_esm_resolution_status",
+        ),
+        UniqueConstraint(
+            "source_model_id",
+            "entity_global_id",
+            "storey_global_id",
+            "source_kind",
+            name="uq_esm_model_entity_storey_kind",
+        ),
+        Index("ix_esm_model_entity", "source_model_id", "entity_id"),
+        Index("ix_esm_model_entity_gid", "source_model_id", "entity_global_id"),
+        Index("ix_esm_model_storey_gid", "source_model_id", "storey_global_id"),
+        Index("ix_esm_model_storey_entity", "source_model_id", "storey_entity_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Catalog-metadata tables (spec_v002 §5). Additive tables ingestion owns and
 # migrates via db_admin/apply_catalog_migration.py; referenced by ifc_source_models.
 # ---------------------------------------------------------------------------

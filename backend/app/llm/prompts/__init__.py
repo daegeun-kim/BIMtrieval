@@ -21,19 +21,6 @@ from pathlib import Path
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
-#: Task 25 LLM call 1: manifest-aware semantic binder and decomposer. Selects
-#: manifest semantic IDs, decomposes into answer parts, and disposes every
-#: required constraint-ledger item. Emits no SQL, table/column names, graph text,
-#: retrieval limits, or a global SQL/RAG/graph mode.
-BINDER_PROMPT_VERSION = "binder_v002"
-#: Task 25 conditional corrective binder: same schema, retried only around the
-#: typed gate failures of a proven recoverable gap.
-CORRECTION_PROMPT_VERSION = "correction_v001"
-#: Final call: expresses already-adjudicated answer parts. Selects nothing, and
-#: its structured claims are validated against the answer packet.
-GROUNDED_ANSWERER_PROMPT_VERSION = "grounded_answerer_v001"
-
-
 @lru_cache(maxsize=8)
 def load_prompt(version: str) -> str:
     path = _PROMPT_DIR / f"{version}.md"
@@ -42,13 +29,22 @@ def load_prompt(version: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def binder_prompt() -> str:
-    return load_prompt(BINDER_PROMPT_VERSION)
+#: task26 (experiment2_v4) prompts: typed logical algebra binder over the v002
+#: binder projection, compact correction, claim-citing answerer. These are the
+#: only prompts the active pipeline uses (the Task 24/25 prompts were retired
+#: with the pipeline they served, task26 §16).
+BINDER_V3_PROMPT_VERSION = "binder_v003"
+CORRECTION_V2_PROMPT_VERSION = "correction_v002"
+GROUNDED_ANSWERER_V2_PROMPT_VERSION = "grounded_answerer_v002"
 
 
-def correction_prompt() -> str:
-    return load_prompt(CORRECTION_PROMPT_VERSION)
+def binder_prompt_v3() -> str:
+    return load_prompt(BINDER_V3_PROMPT_VERSION)
 
 
-def grounded_answerer_prompt() -> str:
-    return load_prompt(GROUNDED_ANSWERER_PROMPT_VERSION)
+def correction_prompt_v2() -> str:
+    return load_prompt(CORRECTION_V2_PROMPT_VERSION)
+
+
+def grounded_answerer_prompt_v2() -> str:
+    return load_prompt(GROUNDED_ANSWERER_V2_PROMPT_VERSION)

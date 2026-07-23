@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # backend/app/evaluation/ (spec_v005 §16).
     query_log_path: str = "logs/query_events.jsonl"
     failure_case_path: str = "logs/failure_cases.jsonl"
+    # task26 §14: the one permanent, Git-tracked, append-only query trace. Its
+    # default lives under the tracked evaluation/ dir. Overridable (env
+    # `query_trace_path`) so tests write to a temp file and never pollute the
+    # committed log.
+    query_trace_path: str | None = None
     enable_dev_endpoints: bool = False
     # Opt-in local terminal tracing (task13 §1), enabled only by BIM_RAG_TRACE=1.
     # Disabled by default, not required in .env, never enabled automatically in

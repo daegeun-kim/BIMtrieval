@@ -243,6 +243,44 @@ class RagDocument(Base):
     )
 
 
+class EntitySpatialMembership(Base):
+    """Normalized effective entity-to-storey membership (task26 §4.2).
+
+    Created and populated by ingestion; strictly read-only here. This table —
+    not the denormalized `canonical_json.storey` scalar — is the definition of
+    spatial membership for predicates, RAG scoping, floor grouping, and viewer
+    hydration.
+    """
+
+    __tablename__ = "entity_spatial_memberships"
+    __allow_unmapped__ = True
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_model_id = Column(
+        Integer, ForeignKey("ifc_source_models.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_id = Column(Integer, ForeignKey("ifc_entities.id", ondelete="CASCADE"))
+    entity_global_id = Column(Text, nullable=False)
+    storey_entity_id = Column(Integer, ForeignKey("ifc_entities.id", ondelete="CASCADE"))
+    storey_global_id = Column(Text, nullable=False)
+    source_relationship_id = Column(
+        Integer, ForeignKey("ifc_relationships.id", ondelete="SET NULL")
+    )
+    source_kind = Column(Text, nullable=False)
+    hop_count = Column(Integer, nullable=False)
+    resolution_status = Column(Text, nullable=False)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    provenance = Column(Text)
+
+    __table_args__ = (
+        Index("ix_esm_model_entity", "source_model_id", "entity_id"),
+        Index("ix_esm_model_entity_gid", "source_model_id", "entity_global_id"),
+        Index("ix_esm_model_storey_gid", "source_model_id", "storey_global_id"),
+        Index("ix_esm_model_storey_entity", "source_model_id", "storey_entity_id"),
+        {"extend_existing": True},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Catalog-metadata tables (spec_v002 §5; created by ingestion migration).
 # Read by the backend model catalog. Backend never writes these.

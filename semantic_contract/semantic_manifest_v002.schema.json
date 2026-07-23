@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bim_rag/semantic_manifest_v002.schema.json",
+  "title": "Semantic manifest v002",
+  "description": "Deterministic per-model semantic artifact (task26 §5). One normalized capability namespace; per subject-class applicability and coverage; traversal contracts; derived floors and profiles. No SQL, no occurrence dumps, no embeddings.",
+  "type": "object",
+  "required": ["identity", "content"],
+  "additionalProperties": false,
+  "properties": {
+    "identity": {
+      "type": "object",
+      "required": [
+        "source_model_id",
+        "file_fingerprint",
+        "extraction_version",
+        "manifest_schema_version",
+        "builder_version",
+        "contract_version",
+        "content_hash"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "source_model_id": { "type": "integer", "minimum": 1 },
+        "file_fingerprint": { "type": "string", "minLength": 1 },
+        "file_name": { "type": "string" },
+        "ifc_schema": { "type": ["string", "null"] },
+        "extraction_version": { "type": "string", "minLength": 1 },
+        "manifest_schema_version": { "const": "v002" },
+        "builder_version": { "type": "string", "minLength": 1 },
+        "contract_version": { "const": "v001" },
+        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "content": {
+      "type": "object",
+      "required": [
+        "entity_total",
+        "class_inventory",
+        "capabilities",
+        "traversals",
+        "derived_floors",
+        "profiles",
+        "spatial_membership",
+        "storeys"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entity_total": { "type": "integer", "minimum": 0 },
+        "class_inventory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["ifc_class", "count"],
+            "additionalProperties": false,
+            "properties": {
+              "ifc_class": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/capability" }
+        },
+        "traversals": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/traversal" }
+        },
+        "derived_floors": { "$ref": "#/$defs/derived_floors" },
+        "profiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profile" }
+        },
+        "spatial_membership": { "$ref": "#/$defs/spatial_membership" },
+        "storeys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "global_id"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/semantic_id" },
+              "global_id": { "type": "string", "minLength": 1 },
+              "name": { "type": ["string", "null"] },
+              "elevation": { "type": ["number", "null"] }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semantic_id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "coverage_state": {
+      "enum": [
+        "present_complete",
+        "present_partial",
+        "checked_absent",
+        "source_unresolvable",
+        "extractor_unsupported",
+        "extraction_failed"
+      ]
+    },
+    "use": {
+      "enum": [
+        "target",
+        "filter",
+        "scope",
+        "group",
+        "aggregate",
+        "order",
+        "report",
+        "traverse",
+        "topic_context"
+      ]
+    },
+    "applicability_entry": {
+      "type": "object",
+      "required": ["subject", "coverage", "known_count", "eligible_count"],
+      "additionalProperties": false,
+      "properties": {
+        "subject": { "$ref": "#/$defs/semantic_id" },
+        "coverage": { "$ref": "#/$defs/coverage_state" },
+        "known_count": { "type": "integer", "minimum": 0 },
+        "eligible_count": { "type": "integer", "minimum": 0 },
+        "distinct_value_count": { "type": "integer", "minimum": 0 },
+        "unit_state": { "enum": ["known", "unknown", "unitless", "not_applicable"] },
+        "unit": { "type": ["string", "null"] },
+        "can_prove_absence": { "type": "boolean" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["id", "kind", "label", "grain", "uses", "accessor", "executable", "applicability"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/semantic_id" },
+        "kind": { "enum": ["class", "field", "spatial", "derived_floor", "derived_profile"] },
+        "label": { "type": "string", "minLength": 1 },
+        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+        "grain": { "enum": ["entity", "value", "relationship", "storey", "floor", "model"] },
+        "uses": { "type": "array", "items": { "$ref": "#/$defs/use" }, "minItems": 0 },
+        "data_type": { "enum": ["text", "number", "boolean"] },
+        "operators": { "type": "array", "items": { "type": "string" } },
+        "accessor": { "type": "string", "minLength": 1 },
+        "executable": { "type": "boolean" },
+        "limitation": { "type": ["string", "null"] },
+        "applicability": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/applicability_entry" }
+        },
+        "value_policy": { "enum": ["enumerated", "request_lookup", "none"] },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["value", "count"],
+            "additionalProperties": false,
+            "properties": {
+              "value": { "type": "string" },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "provenance": { "type": "array", "items": { "type": "string" }, "maxItems": 8 },
+        "physical": {
+          "type": "object",
+          "description": "Backend-only structured addressing; never serialized into the binder projection.",
+          "required": ["source"],
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": ["attribute", "type_fact", "column", "property_sets", "quantity_sets", "materials", "classifications"]
+            },
+            "set": { "type": ["string", "null"] },
+            "field": { "type": "string" },
+            "path": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "traversal": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "relationship",
+        "from_role",
+        "to_role",
+        "direction",
+        "from_classes",
+        "to_classes",
+        "relationship_count",
+        "accessor",
+        "max_supported_hops"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/semantic_id" },
+        "kind": { "const": "traversal" },
+        "relationship": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+        "from_role": { "type": "string", "minLength": 1 },
+        "to_role": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["outgoing", "incoming"] },
+        "from_classes": { "type": "array", "items": { "type": "string" } },
+        "to_classes": { "type": "array", "items": { "type": "string" } },
+        "relationship_count": { "type": "integer", "minimum": 0 },
+        "resolved_from_count": { "type": "integer", "minimum": 0 },
+        "resolved_to_count": { "type": "integer", "minimum": 0 },
+        "endpoint_fact_resolvable": { "type": "boolean" },
+        "endpoint_entity_resolvable": { "type": "boolean" },
+        "endpoint_viewer_hydratable": { "type": "boolean" },
+        "accessor": { "const": "relationship.member_edge" },
+        "max_supported_hops": { "type": "integer", "minimum": 1, "maximum": 3 }
+      }
+    },
+    "derived_floors": {
+      "type": "object",
+      "required": ["derivation_version", "bands", "reference_basis"],
+      "additionalProperties": false,
+      "properties": {
+        "derivation_version": { "type": "string", "minLength": 1 },
+        "reference_index": { "type": ["integer", "null"] },
+        "reference_basis": { "enum": ["elevation_zero", "lowest_band", "none"] },
+        "interpretation_note": { "type": "string" },
+        "bands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "index",
+              "storey_global_ids",
+              "elevation_min",
+              "elevation_max",
+              "classification",
+              "evidence",
+              "reasons"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/semantic_id" },
+              "index": { "type": "integer", "minimum": 0 },
+              "occupiable_ordinal": { "type": ["integer", "null"], "minimum": 1 },
+              "storey_global_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              "storey_names": { "type": "array", "items": { "type": ["string", "null"] } },
+              "elevation_min": { "type": "number" },
+              "elevation_max": { "type": "number" },
+              "classification": { "enum": ["occupiable", "non_occupiable_reference", "uncertain"] },
+              "confidence": { "enum": ["high", "medium", "low"] },
+              "reasons": { "type": "array", "items": { "type": "string" } },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": ["id", "kind", "label", "accessor", "uses"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/semantic_id" },
+        "kind": { "const": "derived_profile" },
+        "label": { "type": "string", "minLength": 1 },
+        "aliases": { "type": "array", "items": { "type": "string" }, "maxItems": 12 },
+        "accessor": { "enum": ["derived.building_profile", "derived.thematic_profile"] },
+        "uses": { "type": "array", "items": { "$ref": "#/$defs/use" } }
+      }
+    },
+    "spatial_membership": {
+      "type": "object",
+      "required": ["by_class"],
+      "additionalProperties": false,
+      "properties": {
+        "by_class": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["ifc_class", "direct_count", "aggregated_count", "effective_count", "total_count"],
+            "additionalProperties": false,
+            "properties": {
+              "ifc_class": { "type": "string", "minLength": 1 },
+              "direct_count": { "type": "integer", "minimum": 0 },
+              "aggregated_count": { "type": "integer", "minimum": 0 },
+              "effective_count": { "type": "integer", "minimum": 0 },
+              "total_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

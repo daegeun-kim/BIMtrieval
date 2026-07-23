@@ -1,15 +1,17 @@
-"""Task 24 model-aware semantic binding.
+"""experiment2_v4 binding: the deterministic machinery around the two LLM calls.
 
-Deterministic machinery that runs *around* the two principal LLM calls:
+    ledger_v2   -> phrase-level typed requirement ledger (intent skeleton)
+    recall      -> always-parallel recommendation channels + value linking
+    validate_v2 -> ten-layer deterministic validation with per-part gates
+    compile_v2  -> typed relational compiler over the access contract
+    execute_v2  -> operation-specific execution + result variants
+    packet_v2 / answer_validation_v2 / viewer_v2 -> answer packet, claim
+                   validation with deterministic fallback, typed viewer sets
 
-    slate      -> the bounded, query-specific candidate slate (LLM call 1 input)
-    schemas    -> typed candidate + binding records
-    lexical    -> text/identifier normalization and token matching
-    values     -> value normalization against a field's own value vocabulary
-    spans      -> detected modifier spans and scope-vs-condition typing
-    closure    -> IFC semantic closure of a bound subject
-    validate   -> binding validation before any authoritative query runs
-
-Nothing in this package calls an LLM or executes a retrieval; it decides *what*
-is executable and hands that decision to the execution layer.
+`spans`, `lexical`, `previous_scope`, `concept_vectors`, and `value_link` are the
+supporting utilities; the typed logical algebra lives in `app.llm.schemas_v2`.
+Nothing here calls an LLM or executes retrieval directly; it decides what is
+executable and hands that decision to the execution layer. The Task 24/25
+slate/validate/compile/execute stack was retired with the pipeline it served
+(task26 §16).
 """

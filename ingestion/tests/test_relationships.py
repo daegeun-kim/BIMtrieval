@@ -111,7 +111,7 @@ def test_relationship_canonical_json_meta_fields():
     assert cj["meta"]["global_id"] == "R1"
     assert cj["meta"]["step_id"] == 100
     assert cj["meta"]["ifc_class"] == "IfcRelAggregates"
-    assert cj["meta"]["extraction_version"] == "v001"
+    assert cj["meta"]["extraction_version"] == "v002"
 
 
 def test_relationship_canonical_json_endpoints_present():
