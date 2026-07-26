@@ -19,11 +19,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
+import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.api.schemas.request import SessionQueryRequest
 from app.api.schemas.response import EvidenceSummary, ModelCandidate, QueryResponseEnvelope
+from app.db.models import IfcSourceModel, SourceModelCatalogEntry
 from app.shared.types import AnswerBasis, QueryRoute, QueryScope, ResponseStatus
 from app.viewer.actions import build_await_confirmation_actions
 
@@ -31,6 +32,9 @@ __all__ = ["answer_catalog_question", "is_catalog_question", "load_catalog_model
 
 #: Bounded catalog read. A catalog is a short list by nature.
 _MAX_MODELS = 50
+
+_SM = IfcSourceModel.__table__
+_CE = SourceModelCatalogEntry.__table__
 
 
 def is_catalog_question(active_source_model_id: int | None) -> bool:
@@ -44,13 +48,26 @@ def load_catalog_models(session: Session) -> list[dict[str, Any]]:
     `file_name` is read so a model with no display name can still be identified.
     Nothing here is derived or invented: every field is a stored column, and a
     missing one stays missing.
+
+    The display metadata lives in `source_model_catalog_entries`, not in
+    `ifc_source_models`: selecting `display_name` from the source-model table
+    raised `UndefinedColumn` and turned every catalog question into a pipeline
+    error (task27 §5). The outer join keeps a model with no catalog row listed
+    under its filename.
     """
     rows = session.execute(
-        text(
-            "SELECT id, display_name, version_label, is_current, status, file_name, ifc_schema "
-            "FROM ifc_source_models ORDER BY id LIMIT :cap"
-        ),
-        {"cap": _MAX_MODELS},
+        sa.select(
+            _SM.c.id,
+            _CE.c.display_name,
+            _CE.c.version_label,
+            _CE.c.is_current,
+            _CE.c.status,
+            _SM.c.file_name,
+            _SM.c.ifc_schema,
+        )
+        .select_from(_SM.outerjoin(_CE, _CE.c.source_model_id == _SM.c.id))
+        .order_by(_SM.c.id)
+        .limit(_MAX_MODELS)
     ).mappings()
     return [dict(row) for row in rows]
 

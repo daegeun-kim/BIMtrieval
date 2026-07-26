@@ -33,13 +33,10 @@ from app.query.binding.ledger_v2 import (
     RequirementRole,
     ResolutionState,
 )
-from app.query.binding.lexical import identifier_tokens, singularize
+from app.query.binding.lexical import identifier_tokens, singularize, stems_match
+from app.query.binding.multilingual import english_equivalents
 from app.query.binding.value_link import ValueLink, link_values
-from app.query.semantic.manifest_v002.schema import (
-    Capability,
-    FloorBand,
-    ManifestV002,
-)
+from app.query.semantic.manifest_v002.schema import FloorBand, ManifestV002
 from app.query.semantic.spatial import BOTTOM_WORDS, ORDINAL_WORDS, TOP_WORDS
 
 __all__ = ["SlotRecommendation", "RecallResult", "run_recall", "resolve_ledger"]
@@ -97,6 +94,8 @@ class RecallResult:
     value_links: dict[str, list[ValueLink]] = field(default_factory=dict)
     floor_candidates: dict[str, list[str]] = field(default_factory=dict)
     floor_notes: dict[str, str] = field(default_factory=dict)
+    #: Qualifier words the authoritative value scan found nowhere in the model.
+    absent_qualifiers: dict[str, list[str]] = field(default_factory=dict)
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def for_requirement(self, requirement_id: str) -> list[SlotRecommendation]:
@@ -129,6 +128,12 @@ def _tokens(value: str) -> set[str]:
     return {singularize(t) for t in identifier_tokens(_normalize(value))} - {"ifc", ""}
 
 
+def _query_tokens(value: str) -> set[str]:
+    """Requirement-side tokens, plus the English equivalent of any non-English
+    word so a question in another language reaches the same concepts (§2)."""
+    return _tokens(value) | {singularize(t) for t in english_equivalents(value)}
+
+
 def _trigrams(value: str) -> set[str]:
     padded = f"  {_normalize(value)} "
     return {padded[i : i + 3] for i in range(len(padded) - 2)}
@@ -147,6 +152,11 @@ class _Concept:
     accessor: str
     executable: bool
     enumerated_values: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+
+
+def _aliases(concept: _Concept) -> tuple[str, ...]:
+    return concept.aliases
 
 
 def _concept_pool(manifest: ManifestV002) -> list[_Concept]:
@@ -175,6 +185,7 @@ def _concept_pool(manifest: ManifestV002) -> list[_Concept]:
                 accessor=capability.accessor,
                 executable=capability.executable,
                 enumerated_values=tuple(v for v, _ in capability.values),
+                aliases=capability.aliases,
             )
         )
     for traversal in manifest.traversals.values():
@@ -190,6 +201,7 @@ def _concept_pool(manifest: ManifestV002) -> list[_Concept]:
                 coverage="present_complete",
                 accessor="relationship.member_edge",
                 executable=True,
+                aliases=traversal.aliases,
             )
         )
     for profile in manifest.profiles.values():
@@ -205,6 +217,7 @@ def _concept_pool(manifest: ManifestV002) -> list[_Concept]:
                 coverage="present_complete",
                 accessor=profile.accessor,
                 executable=True,
+                aliases=profile.aliases,
             )
         )
     return pool
@@ -212,7 +225,7 @@ def _concept_pool(manifest: ManifestV002) -> list[_Concept]:
 
 def _lexical_channel(text: str, pool: list[_Concept]) -> list[tuple[str, float]]:
     """Exact/normalized alias + identifier + singular/plural matching."""
-    query_tokens = _tokens(text)
+    query_tokens = _query_tokens(text)
     normalized_query = _normalize(text)
     if not query_tokens:
         return []
@@ -221,7 +234,11 @@ def _lexical_channel(text: str, pool: list[_Concept]) -> list[tuple[str, float]]
         concept_tokens = _tokens(concept.search_text)
         if not concept_tokens:
             continue
-        if _normalize(concept.label) == normalized_query:
+        # An exact match on the label OR on any recorded alias is the strongest
+        # lexical signal there is; restricting it to the label alone left an
+        # alias-only concept ("floors" for the derived floor count) below
+        # unrelated partial matches (task27 §2).
+        if normalized_query in {_normalize(a) for a in (concept.label, *_aliases(concept))}:
             scored.append((concept.semantic_id, 20.0))
             continue
         overlap = query_tokens & concept_tokens
@@ -237,6 +254,24 @@ def _lexical_channel(text: str, pool: list[_Concept]) -> list[tuple[str, float]]
             )
     scored.sort(key=lambda item: (-item[1], item[0]))
     return scored[:24]
+
+
+def _exact_channel(text: str, pool: list[_Concept]) -> list[tuple[str, float]]:
+    """Concepts whose label or one recorded alias IS the requirement phrase.
+
+    Its own channel rather than a score inside the lexical one, because fusion
+    combines RANKS: an exact name match that shared a rank with an unrelated
+    value-channel hit lost the tie-break on alphabetical id order (task27 §2).
+    """
+    normalized = _normalize(text)
+    if not normalized:
+        return []
+    matched = [
+        c.semantic_id
+        for c in pool
+        if normalized in {_normalize(a) for a in (c.label, *c.aliases) if a}
+    ]
+    return [(semantic_id, 1.0) for semantic_id in sorted(matched)]
 
 
 def _typo_channel(text: str, pool: list[_Concept]) -> list[tuple[str, float]]:
@@ -327,8 +362,18 @@ _ROLE_COMPATIBLE_USES: dict[RequirementRole, frozenset[str]] = {
 }
 
 
+#: A requested OUTPUT is normally a field to report, but "a summary", "the
+#: circulation of this building", "made of" ask for a derived PROFILE, whose only
+#: permitted use is `target`. Without this exception every descriptive question
+#: resolved `not_representable` while the concept that answers it was ranked
+#: first (task27 §2, §5).
+_PROFILE_KINDS = frozenset({"derived_profile"})
+
+
 def _use_for(concept: _Concept, role: RequirementRole) -> str | None:
     compatible = _ROLE_COMPATIBLE_USES.get(role, frozenset())
+    if role is RequirementRole.OUTPUT and concept.kind in _PROFILE_KINDS:
+        compatible = compatible | {"target"}
     for use in concept.uses:
         if use in compatible:
             return use
@@ -459,9 +504,10 @@ def run_recall(
                     service, [r.source_text for r in material]
                 )
 
-    per_slot_lists: dict[str, list[SlotRecommendation]] = {}
+    fused_lists: dict[str, list[tuple[str, float, dict[str, int]]]] = {}
     for requirement in material:
         channel_lists: dict[str, list[tuple[str, float]]] = {}
+        channel_lists["exact"] = _exact_channel(requirement.source_text, pool)
         channel_lists["alias"] = _lexical_channel(requirement.source_text, pool)
         channel_lists["typo"] = _typo_channel(requirement.source_text, pool)
 
@@ -478,6 +524,12 @@ def run_recall(
                 )
             ),
         )
+        if not links and session is not None:
+            links, absent = _qualifier_value_links(
+                session, requirement, manifest, channel_lists["alias"], pool
+            )
+            if absent:
+                result.absent_qualifiers[requirement.requirement_id] = absent
         if links:
             result.value_links[requirement.requirement_id] = links
             channel_lists["value"] = _value_channel(links)
@@ -492,10 +544,25 @@ def run_recall(
                 requirement, ledger, manifest
             )
 
-        fused = _fuse({k: v for k, v in channel_lists.items() if v})
-        per_slot_lists[requirement.requirement_id] = _to_recommendations(
-            requirement, fused, pool, per_slot
+        fused_lists[requirement.requirement_id] = _fuse(
+            {k: v for k, v in channel_lists.items() if v}
         )
+
+    # §7.3 ordering pass: a filter/group/report field is ranked JOINTLY with the
+    # part's likely target, so `Pset_WallCommon.IsExternal` outranks the same
+    # field name on beams and doors for a question about walls. Eligibility is
+    # untouched — this only reorders (task27 §2).
+    preferred = _preferred_subjects(material, fused_lists, pool)
+    per_slot_lists: dict[str, list[SlotRecommendation]] = {
+        requirement.requirement_id: _to_recommendations(
+            requirement,
+            fused_lists[requirement.requirement_id],
+            pool,
+            per_slot,
+            preferred_subjects=preferred.get(requirement.part_hint, frozenset()),
+        )
+        for requirement in material
+    }
 
     result.recommendations = _apply_global_cap(per_slot_lists, total)
 
@@ -515,11 +582,41 @@ def run_recall(
     return result
 
 
+def _preferred_subjects(
+    material: list[LedgerRequirement],
+    fused_lists: dict[str, list[tuple[str, float, dict[str, int]]]],
+    pool: list[_Concept],
+) -> dict[str, frozenset[str]]:
+    """Per part hint, the subject classes its likely target names.
+
+    Read from the part's TARGET requirement's own fused list — the top-ranked
+    class concepts — so no extra channel or database work is needed.
+    """
+    by_id = {c.semantic_id: c for c in pool}
+    out: dict[str, set[str]] = {}
+    for requirement in material:
+        if requirement.role is not RequirementRole.TARGET:
+            continue
+        subjects = out.setdefault(requirement.part_hint, set())
+        classes = 0
+        for semantic_id, _score, _ranks in fused_lists.get(requirement.requirement_id, []):
+            concept = by_id.get(semantic_id)
+            if concept is None or concept.kind != "class" or not concept.executable:
+                continue
+            subjects.add(concept.semantic_id)
+            classes += 1
+            if classes >= 3:
+                break
+    return {part: frozenset(subjects) for part, subjects in out.items()}
+
+
 def _to_recommendations(
     requirement: LedgerRequirement,
     fused: list[tuple[str, float, dict[str, int]]],
     pool: list[_Concept],
     per_slot: int,
+    *,
+    preferred_subjects: frozenset[str] = frozenset(),
 ) -> list[SlotRecommendation]:
     by_id = {c.semantic_id: c for c in pool}
     compatible: list[SlotRecommendation] = []
@@ -548,10 +645,108 @@ def _to_recommendations(
         # merely-similar incompatible one, whatever the embedding said.
         (compatible if record.executable else incompatible).append(record)
 
+    compatible = _rank_for_role(compatible, requirement.role, preferred_subjects)
     keep = compatible[:per_slot]
     if len(keep) < per_slot:
         keep.extend(incompatible[: per_slot - len(keep)])
     return keep
+
+
+#: The use a requirement's role really wants. A slot admits related uses so a
+#: phrase can decompose ("external walls" -> a class plus a field), but the use
+#: the role NAMES must still be offered first.
+_ROLE_PRIMARY_USE: dict[RequirementRole, str] = {
+    RequirementRole.TARGET: "target",
+    RequirementRole.FILTER: "filter",
+    RequirementRole.GROUP: "group",
+    RequirementRole.OUTPUT: "report",
+    RequirementRole.TRAVERSAL: "traverse",
+}
+
+
+def _rank_for_role(
+    records: list[SlotRecommendation],
+    role: RequirementRole,
+    preferred_subjects: frozenset[str],
+) -> list[SlotRecommendation]:
+    """Two stable partitions over the fused order; eligibility is untouched.
+
+    1. a concept offered for the use the role names outranks one admitted only
+       through a related use (a class before a field for a target slot);
+    2. a field applicable to the part's likely target outranks same-named fields
+       for incompatible classes.
+    """
+    if not records:
+        return records
+    primary = _ROLE_PRIMARY_USE.get(role)
+    if primary:
+        records = [r for r in records if r.use_as == primary] + [
+            r for r in records if r.use_as != primary
+        ]
+    if not preferred_subjects:
+        return records
+    applicable: list[SlotRecommendation] = []
+    neutral: list[SlotRecommendation] = []
+    other: list[SlotRecommendation] = []
+    for record in records:
+        if not record.applicable_subjects:
+            neutral.append(record)
+        elif set(record.applicable_subjects) & preferred_subjects:
+            applicable.append(record)
+        else:
+            other.append(record)
+    return applicable + neutral + other
+
+
+def _qualifier_value_links(
+    session: Session,
+    requirement: LedgerRequirement,
+    manifest: ManifestV002,
+    alias_hits: list[tuple[str, float]],
+    pool: list[_Concept],
+) -> tuple[list[ValueLink], list[str]]:
+    """Value-link a phrase's QUALIFIER when its head noun named a class.
+
+    "parking spaces", "toilet rooms", "D2 doors": the head noun resolves to a
+    class through the alias channel, so no value lookup ran for the whole
+    phrase — and the qualifier, which is what the model actually records as a
+    stored name/category/material, was never resolved at all (task27 §2). The
+    qualifier tokens are looked up individually through the SAME authoritative
+    value-linking stage, which may then propose a typed target-plus-filter plan.
+    """
+    if requirement.role not in (RequirementRole.TARGET, RequirementRole.FILTER):
+        return [], []
+    tokens = [t for t in _WORD_SPLIT_RE.findall(requirement.source_text) if len(t) > 2]
+    if len(tokens) < 2:
+        return [], []
+    head_tokens: set[str] = set()
+    by_id = {c.semantic_id: c for c in pool}
+    for semantic_id, _score in alias_hits[:4]:
+        concept = by_id.get(semantic_id)
+        if concept is not None:
+            head_tokens |= _tokens(concept.search_text)
+    if not head_tokens:
+        return [], []
+    links: list[ValueLink] = []
+    absent: list[str] = []
+    for token in tokens:
+        stem = singularize(_normalize(token))
+        if any(stems_match(stem, known) or stem == known for known in head_tokens):
+            continue  # part of the head concept's own name, not a qualifier
+        found = link_values(
+            session, manifest.source_model_id, token, manifest, allow_sql=True
+        )
+        if found:
+            links.extend(found)
+        else:
+            absent.append(token)
+    return links[:MAX_QUALIFIER_LINKS], absent
+
+
+#: Qualifier value matches kept per requirement (advisory hints only).
+MAX_QUALIFIER_LINKS = 8
+
+_WORD_SPLIT_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 
 def _apply_global_cap(
@@ -613,11 +808,26 @@ def resolve_ledger(
                 requirement.resolution = ResolutionState.NOT_REPRESENTABLE
                 requirement.resolution_note = "no matching executable concept in this model"
 
+        absent = recall.absent_qualifiers.get(requirement.requirement_id)
+        if absent:
+            requirement.value_scan_absent = True
+            note = (
+                "no value recorded anywhere in this model matches "
+                + ", ".join(repr(word) for word in absent[:3])
+            )
+            requirement.resolution_note = (
+                f"{requirement.resolution_note}; {note}"
+                if requirement.resolution_note
+                else note
+            )
+
         if requirement.role is RequirementRole.TARGET:
             targets_resolvable[requirement.part_hint] = (
                 targets_resolvable.get(requirement.part_hint, False)
                 or requirement.resolution is ResolutionState.RESOLVABLE
             )
+
+    _merge_duplicate_qualifiers(ledger, manifest)
 
     # Partial policies: an unresolvable FILTER on a resolvable target keeps a
     # safe contextual base set; an unresolvable OUTPUT metric has none (§6.5).
@@ -630,6 +840,57 @@ def resolve_ledger(
             requirement.partial_policy = "return_base_set_as_context_only"
         elif requirement.role is RequirementRole.OUTPUT:
             requirement.partial_policy = "no_safe_result"
+
+
+def _merge_duplicate_qualifiers(ledger: LedgerV2, manifest: ManifestV002) -> None:
+    """Discharge a qualifier fragment already represented by a sibling filter.
+
+    "how many spaces are categorised as rooms?" produced TWO filter
+    requirements: `rooms`, which resolved to the space Category field, and
+    `categorised`, which resolved to nothing and therefore reported the whole
+    answer as partial with a "not determinable" caveat. The unresolvable
+    fragment names the very field its sibling bound, so the resolved
+    field/value filter discharges the complete qualifier phrase and no
+    duplicate unavailable fragment is retained (task27 §2, §4).
+    """
+    for requirement in ledger.requirements:
+        if (
+            requirement.role is not RequirementRole.FILTER
+            or requirement.resolution is not ResolutionState.NOT_REPRESENTABLE
+            or not requirement.required
+        ):
+            continue
+        phrase_tokens = _tokens(requirement.source_text)
+        if not phrase_tokens:
+            continue
+        for sibling in ledger.requirements:
+            if (
+                sibling is requirement
+                or sibling.part_hint != requirement.part_hint
+                or sibling.role
+                not in (RequirementRole.FILTER, RequirementRole.TARGET, RequirementRole.GROUP)
+                or sibling.resolution is not ResolutionState.RESOLVABLE
+            ):
+                continue
+            representing = None
+            for candidate_id in sibling.candidate_ids[:4]:
+                record = manifest.get(candidate_id)
+                if record is None:
+                    continue
+                covered = _tokens(getattr(record, "search_text", "")) | _tokens(candidate_id)
+                if covered and all(
+                    any(token == known or stems_match(token, known) for known in covered)
+                    for token in phrase_tokens
+                ):
+                    representing = candidate_id
+                    break
+            if representing is not None:
+                requirement.required = False
+                requirement.resolution = ResolutionState.RESOLVABLE
+                requirement.resolution_note = (
+                    f"already represented by {sibling.source_text!r} bound to {representing}"
+                )
+                break
 
 
 def _resolve_scope(requirement: LedgerRequirement, recall: RecallResult) -> None:

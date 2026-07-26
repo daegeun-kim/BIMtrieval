@@ -44,6 +44,7 @@ from app.query.binding.answer_validation_v2 import (
 from app.query.binding.execute_v2 import ExecutionContextV2, execute_part
 from app.query.binding.ledger_v2 import LedgerV2, build_ledger_skeleton
 from app.query.binding.packet_v2 import AnswerPacketV2, build_answer_packet_v2
+from app.query.binding.phrasing import humanize_text
 from app.query.binding.previous_scope import (
     PreviousScope,
     resolve_previous_entity_ids,
@@ -292,7 +293,7 @@ def run_pipeline(
                 for v in validation.verdicts
                 if v.state in (GateStateV2.READY, GateStateV2.PARTIAL_EXECUTABLE)
             ]
-            expanded = _expanded_candidates(validation, recall)
+            expanded = _expanded_candidates(validation, recall, plan, manifest)
             correction_context = build_correction_context_v2(
                 request.question,
                 projection,
@@ -463,9 +464,17 @@ def run_pipeline(
 
 
 def _expanded_candidates(
-    validation: PlanValidation, recall: RecallResult
+    validation: PlanValidation,
+    recall: RecallResult,
+    plan: LogicalPlan,
+    manifest: ManifestV002,
 ) -> dict[str, Any]:
-    """Bounded expanded candidates/values for ONLY the failed requirements."""
+    """Bounded expanded candidates/values for ONLY the failed requirements.
+
+    Also names, per failing node, the exact invalid fragment and the valid ids
+    that could replace it (§3): the recorded corrections re-emitted the same
+    invented `semantic_id` because nothing told them which string was rejected.
+    """
     failed_requirements = {
         i.requirement_id for i in validation.correctable_issues() if i.requirement_id
     }
@@ -480,7 +489,66 @@ def _expanded_candidates(
         if requirement_id in failed_requirements
         for link in links[:4]
     ]
-    return {"candidates": candidates[:24], "value_matches": value_matches[:12]}
+    return {
+        "candidates": candidates[:24],
+        "value_matches": value_matches[:12],
+        "invalid_fragments": _invalid_fragments(validation, plan, manifest),
+    }
+
+
+def _invalid_fragments(
+    validation: PlanValidation, plan: LogicalPlan, manifest: ManifestV002
+) -> list[dict[str, Any]]:
+    """`{node, invalid_semantic_id, replace_with}` for each unknown id."""
+    invalid: dict[tuple[str, str], dict[str, Any]] = {}
+    for issue in validation.correctable_issues():
+        if issue.layer != "identity" or not issue.part_id or not issue.node_id:
+            continue
+        part = next((p for p in plan.answer_parts if p.part_id == issue.part_id), None)
+        if part is None:
+            continue
+        for node_id, (kind, semantic_id) in _plan_part_nodes(part).items():
+            if node_id != issue.node_id or manifest.get(semantic_id) is not None:
+                continue
+            invalid[(issue.part_id, node_id)] = {
+                "part_id": issue.part_id,
+                "node_id": node_id,
+                "node_kind": kind,
+                "invalid_semantic_id": semantic_id,
+                "replace_with": _nearest_ids(semantic_id, kind, manifest),
+            }
+    return list(invalid.values())[:8]
+
+
+def _plan_part_nodes(part: Any) -> dict[str, tuple[str, str]]:
+    from app.query.binding.validate_v2 import _part_nodes
+
+    return _part_nodes(part)
+
+
+def _nearest_ids(invalid: str, kind: str, manifest: ManifestV002) -> list[str]:
+    """Valid ids of the right kind whose words overlap the rejected string."""
+    from app.query.binding.lexical import identifier_tokens
+
+    wanted_use = {
+        "target": "target",
+        "filter": "filter",
+        "group": "group",
+        "aggregate": "aggregate",
+        "report": "report",
+    }.get(kind)
+    tokens = identifier_tokens(invalid)
+    scored: list[tuple[int, str]] = []
+    for semantic_id, capability in manifest.capabilities.items():
+        if not capability.executable:
+            continue
+        if wanted_use and not capability.supports_use(wanted_use):
+            continue
+        overlap = len(tokens & identifier_tokens(capability.search_text))
+        if overlap:
+            scored.append((-overlap, semantic_id))
+    scored.sort()
+    return [semantic_id for _score, semantic_id in scored[:6]]
 
 
 def _ambiguity_question(validation: PlanValidation, ledger: LedgerV2) -> str:
@@ -491,7 +559,9 @@ def _ambiguity_question(validation: PlanValidation, ledger: LedgerV2) -> str:
     ]
     if ambiguous:
         notes = "; ".join(
-            f"{r.source_text!r}: {r.resolution_note}" for r in ambiguous[:2] if r.resolution_note
+            f"{r.source_text!r}: {humanize_text(r.resolution_note)}"
+            for r in ambiguous[:2]
+            if r.resolution_note
         )
         return (
             "That question has more than one reasonable reading — "
@@ -501,15 +571,23 @@ def _ambiguity_question(validation: PlanValidation, ledger: LedgerV2) -> str:
     detail = next((i.detail for i in validation.all_issues()), None)
     if detail:
         return (
-            f"I couldn't answer that as asked: {detail}. I haven't answered a broader "
-            "version instead. Could you rephrase that part?"
+            f"I couldn't answer that as asked: {humanize_text(detail)}. I haven't answered "
+            "a broader version instead. Could you rephrase that part?"
         )
     return "Could you rephrase that question, or be more specific?"
 
 
 def _unavailable_text(validation: PlanValidation) -> str:
+    """Plain-language "this model doesn't record that" (task27 §6).
+
+    The reasons come from validation issues written for engineers, so they pass
+    through the same humanizing rewrite the answers use: a user was told
+    "prop:Pset_RoofCommon.TotalArea cannot be aggregated (unproven unit
+    contract)" when the honest answer is that this model records no area with a
+    usable unit.
+    """
     reasons = [
-        i.detail
+        humanize_text(i.detail)
         for v in validation.verdicts
         for i in v.issues
         if not i.correctable
@@ -519,10 +597,11 @@ def _unavailable_text(validation: PlanValidation) -> str:
             reasons.append(f"{requirement.source_text!r} is not recorded in this model")
     if reasons:
         return (
-            "This model's data cannot answer that: " + "; ".join(reasons[:2]) + ". "
-            "I haven't substituted a broader question instead."
+            "This model does not record what that question needs: "
+            + "; ".join(r for r in reasons[:2] if r)
+            + ". I haven't answered a broader version instead."
         )
-    return "This model's data cannot answer that question as asked."
+    return "This model's recorded data cannot answer that question as asked."
 
 
 def _primary_visual_part_id(

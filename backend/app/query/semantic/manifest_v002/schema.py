@@ -422,4 +422,51 @@ def parse_manifest_v002(document: dict[str, Any]) -> ManifestV002:
             total_count=int(record["total_count"]),
         )
 
+    _add_derived_counts(manifest)
     return manifest
+
+
+#: Derived counts over the manifest's own floor derivation. Selectable like any
+#: other target so "how many floors does this building have?" is one scalar node
+#: instead of a hand-enumerated union of every band id — the shape that produced
+#: an invented band id in the recorded trace (task27 §5).
+DERIVED_FLOOR_COUNT_ID = "count:floor_levels"
+DERIVED_OCCUPIABLE_FLOOR_COUNT_ID = "count:occupiable_floor_levels"
+
+
+def _add_derived_counts(manifest: ManifestV002) -> None:
+    """Attach the derived floor-level counts as ordinary selectable records.
+
+    Derived from the artifact's own `derived_floors` block, so nothing is
+    re-ingested and the manifest's integrity hash is untouched.
+    """
+    if not manifest.floors.bands:
+        return
+    total = len(manifest.floors.bands)
+    occupiable = len(manifest.floors.occupiable_bands())
+    for semantic_id, label, aliases, value in (
+        (
+            DERIVED_FLOOR_COUNT_ID,
+            "floor levels",
+            ("floors", "levels", "storeys", "stories", "number of floors", "how many floors"),
+            total,
+        ),
+        (
+            DERIVED_OCCUPIABLE_FLOOR_COUNT_ID,
+            "occupiable floor levels",
+            ("occupiable floors", "usable floors", "habitable floors"),
+            occupiable,
+        ),
+    ):
+        manifest.capabilities[semantic_id] = Capability(
+            semantic_id=semantic_id,
+            kind="derived_count",
+            label=label,
+            aliases=aliases,
+            grain="model",
+            uses=("target",),
+            data_type="number",
+            accessor="derived.physical_floor",
+            executable=True,
+            physical={"source": "derived_floor_count", "value": value},
+        )

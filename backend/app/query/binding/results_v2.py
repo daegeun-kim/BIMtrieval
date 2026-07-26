@@ -205,9 +205,12 @@ class QualitativeEvidenceResult:
     excerpts: list[EvidenceExcerpt] = field(default_factory=list)
     scope_kind: str = "structured"  # structured | unscoped_fallback
     truncated_evidence: bool = False
+    #: `{IfcClass: retrieved document count}` for the objects the retrieved text
+    #: actually describes — a theme's relevant structured subjects (task27 §5).
+    subject_classes: dict[str, int] = field(default_factory=dict)
 
     def facts(self, part_id: str) -> list[dict[str, Any]]:
-        return [
+        facts = [
             {
                 "fact_id": f"{part_id}:evidence_scope",
                 "kind": "count",
@@ -215,6 +218,16 @@ class QualitativeEvidenceResult:
                 "meaning": "objects in the structured scope the evidence describes",
             }
         ]
+        if self.subject_classes:
+            facts.append(
+                {
+                    "fact_id": f"{part_id}:evidence_subjects",
+                    "kind": "class_breakdown",
+                    "value": dict(self.subject_classes),
+                    "meaning": "kinds of object the retrieved descriptions are about",
+                }
+            )
+        return facts
 
 
 @dataclass
@@ -276,8 +289,20 @@ class PartResultV2:
     extra_facts: list[dict[str, Any]] = field(default_factory=list)
 
     def add_limitation(self, code: str, text: str) -> str:
+        """Record one limitation in the words a user can read (task27 §6).
+
+        Humanizing HERE rather than in the answer prompt is deliberate: this text
+        reaches the final answerer, the deterministic fallback, and the trace,
+        and all three must say "fire rating is not recorded for every object"
+        rather than "prop:Pset_WallCommon.FireRating is partially covered on the
+        target classes".
+        """
+        from app.query.binding.phrasing import humanize_text
+
         limitation_id = f"{self.part_id}:lim{len(self.limitations) + 1}"
-        self.limitations.append({"limitation_id": limitation_id, "code": code, "text": text})
+        self.limitations.append(
+            {"limitation_id": limitation_id, "code": code, "text": humanize_text(text) or text}
+        )
         return limitation_id
 
     @property
@@ -302,16 +327,20 @@ class PartResultV2:
         if self.is_contextual:
             payload["contextual_only"] = True
             payload["context_reason"] = self.context_reason
+        from app.query.binding.phrasing import humanize_text
+
         if self.known_parts:
-            payload["known"] = self.known_parts[:6]
+            payload["known"] = [humanize_text(t) for t in self.known_parts[:6]]
         if self.unknown_parts:
-            payload["unknown"] = self.unknown_parts[:6]
+            payload["unknown"] = [humanize_text(t) for t in self.unknown_parts[:6]]
         if self.limitations:
             payload["limitations"] = self.limitations[:6]
         if self.interpretation_notes:
-            payload["interpretation"] = self.interpretation_notes[:4]
+            payload["interpretation"] = [humanize_text(n) for n in self.interpretation_notes[:4]]
         if not self.coverage_complete:
-            payload["coverage_incomplete"] = self.coverage_reasons[:4]
+            payload["not_recorded_for_every_object"] = [
+                humanize_text(r) for r in self.coverage_reasons[:4]
+            ]
         if self.examples:
             payload["examples"] = [e.to_payload() for e in self.examples[:5]]
         if self.evidence is not None and self.evidence.excerpts:

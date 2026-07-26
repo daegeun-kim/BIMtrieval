@@ -117,6 +117,9 @@ def build_correction_context_v2(
         "keep": expanded.get("keep", []),
         "expanded_candidates": expanded.get("candidates", [])[:24],
         "expanded_value_matches": expanded.get("value_matches", [])[:12],
+        # The exact rejected string per failing node, with valid ids of the same
+        # kind that could replace it (task27 §3).
+        "invalid_fragments": expanded.get("invalid_fragments", [])[:8],
     }
     return {
         "projection_json": projection.json_text,

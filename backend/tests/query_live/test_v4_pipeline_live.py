@@ -38,7 +38,7 @@ from app.query.binding.results_v2 import (
     ResultStatusV2,
     SampleResult,
 )
-from app.query.binding.validate_v2 import GateStateV2, validate_plan
+from app.query.binding.validate_v2 import validate_plan
 from app.query.semantic.manifest_v002 import get_manifest_v002
 
 MODEL_2 = 2
@@ -246,7 +246,6 @@ def test_a_wrong_class_field_fails_applicability_before_sql(live_session, manife
 
 
 def test_partial_coverage_filter_cannot_prove_a_false_zero(live_session, manifest2):
-    fire = manifest2.capabilities["prop:Pset_WallCommon.FireRating"]
     part = AnswerPartV2(
         part_id="P1",
         request_text="how many walls are rated ZZ999?",
@@ -266,3 +265,192 @@ def test_partial_coverage_filter_cannot_prove_a_false_zero(live_session, manifes
     # No wall has this rating, but the field is only partially covered, so this
     # is PARTIAL (cannot prove real-world absence), not an EXACT zero.
     assert result.status is ResultStatusV2.PARTIAL
+
+
+# ---------------------------------------------------------------------------
+# task27 §5 — the execution/evidence gaps the recorded traces proved
+# ---------------------------------------------------------------------------
+
+
+def test_a_material_distribution_executes_over_the_material_array(live_session, manifest2):
+    """A grouped distribution over a multi-valued array field compiles and runs.
+
+    The recorded run failed at dry compilation with "no scalar value expression
+    for physical source 'materials'", so the question could not be answered at
+    all.
+    """
+    part = AnswerPartV2(
+        part_id="P1",
+        request_text="what are the doors made of?",
+        result_kind=ResultKind.DISTRIBUTION,
+        target=TargetNode(node_id="t1", semantic_id="cls:IfcDoor"),
+        group=GroupNode(node_id="g1", semantic_id="mat:material.name"),
+        aggregate=AggregateNode(node_id="a1", function=AggregateFunction.COUNT),
+        order=OrderNode(node_id="o1"),
+        viewer_set=ViewerSetPolicy.REQUESTED,
+    )
+    result = _compile_and_run(live_session, manifest2, part)
+    assert result.status in (ResultStatusV2.EXACT, ResultStatusV2.PARTIAL)
+    distribution = result.result
+    assert isinstance(distribution, DistributionResult)
+    assert len(distribution.buckets) > 1
+    # Bucket counts describe objects, so none may exceed the base set.
+    assert all(b.count <= distribution.base_cardinality for b in distribution.buckets)
+    assert distribution.covered_cardinality <= distribution.base_cardinality
+
+
+def test_a_derived_floor_count_answers_without_enumerating_bands(live_session, manifest2):
+    """The floor count is one target, not a union of every band id."""
+    from app.query.semantic.manifest_v002.schema import (
+        DERIVED_FLOOR_COUNT_ID,
+        DERIVED_OCCUPIABLE_FLOOR_COUNT_ID,
+    )
+
+    part = AnswerPartV2(
+        part_id="P1",
+        request_text="how many floors does this building have?",
+        result_kind=ResultKind.SCALAR,
+        target=TargetNode(node_id="t1", semantic_id=DERIVED_FLOOR_COUNT_ID),
+        aggregate=AggregateNode(node_id="a1", function=AggregateFunction.COUNT),
+        viewer_set=ViewerSetPolicy.NONE,
+    )
+    result = _compile_and_run(live_session, manifest2, part)
+    assert result.status is ResultStatusV2.EXACT
+    assert result.result.value == len(manifest2.floors.bands)
+    assert result.statement_count == 0
+
+    occupiable = AnswerPartV2(
+        part_id="P1",
+        request_text="how many occupiable floors are there?",
+        result_kind=ResultKind.SCALAR,
+        target=TargetNode(node_id="t1", semantic_id=DERIVED_OCCUPIABLE_FLOOR_COUNT_ID),
+        aggregate=AggregateNode(node_id="a1", function=AggregateFunction.COUNT),
+        viewer_set=ViewerSetPolicy.NONE,
+    )
+    result = _compile_and_run(live_session, manifest2, occupiable)
+    assert result.result.value == len(manifest2.floors.occupiable_bands())
+
+
+def test_a_thematic_profile_reports_relevant_subjects_not_an_empty_scope(
+    live_session, manifest2, embedding_service
+):
+    """A theme profile must describe SOMETHING recorded, or say why it cannot.
+
+    The recorded run returned the generic building profile with
+    `evidence_scope=0` and declared the theme unavailable — a bounded retrieval
+    miss presented as absence.
+    """
+    part = AnswerPartV2(
+        part_id="P1",
+        request_text="describe how people move through this building",
+        result_kind=ResultKind.PROFILE,
+        target=TargetNode(node_id="t1", semantic_id="derived:thematic_profile"),
+        evidence_theme="movement between levels",
+        viewer_set=ViewerSetPolicy.NONE,
+    )
+    compiled = compile_part(live_session, part, manifest2)
+    context = ExecutionContextV2(
+        live_session, manifest2, embedding_service_getter=lambda: embedding_service
+    )
+    result = execute_part(compiled, part.request_text, context)
+    assert result.status is not ResultStatusV2.UNAVAILABLE
+    assert result.evidence is not None
+    assert result.evidence.excerpts, "a theme profile retrieved no text at all"
+    assert result.evidence.subject_classes, "no structured subject was reported"
+    assert result.result.structured.get("theme")
+
+
+def test_the_catalog_lists_every_model_with_its_recorded_name(live_session):
+    """The catalog query runs against the real schema (it raised UndefinedColumn)."""
+    from app.query.catalog_answer import load_catalog_models
+
+    rows = load_catalog_models(live_session)
+    assert rows
+    for row in rows:
+        assert row["id"]
+        assert row["display_name"] or row["file_name"]
+
+
+# ---------------------------------------------------------------------------
+# task27 — one end-to-end pipeline smoke test with NO provider call
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_runs_end_to_end_without_a_provider(live_session, manifest2):
+    """Bind/answer are injected, so the whole chain runs with zero LLM calls.
+
+    Covers ledger -> recall -> normalization -> validation -> compile -> execute
+    -> packet -> answer validation -> viewer, and asserts the delivered answer is
+    grounded and free of internal wording.
+    """
+    from app.llm.schemas_v2 import ClaimKind, GroundedAnswerV2, GroundedClaim
+    from app.query.binding.phrasing import banned_terms_in
+    from app.query.binding.pipeline import PipelineRequest, run_pipeline
+
+    def _bind(context):
+        assert "projection_json" in context and "payload" in context
+        ledger = context["payload"]["requirement_ledger"]["requirements"]
+        target = next(r for r in ledger if r.get("role") == "target")
+        plan = LogicalPlan(
+            response_language="en",
+            answer_parts=[
+                AnswerPartV2(
+                    part_id=target["part"],
+                    request_text="how many doors are in this building?",
+                    result_kind=ResultKind.SCALAR,
+                    target=TargetNode(node_id="t1", semantic_id="cls:IfcDoor"),
+                    aggregate=AggregateNode(node_id="a1", function=AggregateFunction.COUNT),
+                    scope=ScopeNode(node_id="s1", kind=ScopeKindV2.ACTIVE_MODEL),
+                    viewer_set=ViewerSetPolicy.REQUESTED,
+                    is_primary_visual=True,
+                )
+            ],
+            dispositions=[
+                RequirementDisposition(
+                    requirement_id=r["id"],
+                    disposition=DispositionKind.BOUND,
+                    part_id=target["part"],
+                    node_ids=["cls:IfcDoor"],  # a semantic id: relinked in code
+                )
+                for r in ledger
+                if r.get("required")
+            ],
+        )
+        return plan, None
+
+    def _answer(payload):
+        fact = payload["answer_parts"][0]["facts"][0]
+        return (
+            GroundedAnswerV2(
+                answer=f"There are {fact['value']} doors in this model.",
+                answer_part_ids=[payload["answer_parts"][0]["part_id"]],
+                claims=[
+                    GroundedClaim(
+                        kind=ClaimKind.FACT,
+                        cited_id=fact["fact_id"],
+                        value=str(fact["value"]),
+                    )
+                ],
+            ),
+            None,
+        )
+
+    def _correct(_context):  # pragma: no cover - a valid plan needs no correction
+        raise AssertionError("a valid plan must not trigger a correction")
+
+    outcome = run_pipeline(
+        live_session,
+        PipelineRequest(question="how many doors are in this building?", source_model_id=MODEL_2),
+        bind=_bind,
+        answer=_answer,
+        correct=_correct,
+    )
+    assert outcome.terminal_status == "success"
+    assert outcome.llm_calls == 2
+    assert not outcome.used_correction
+    assert not outcome.used_fallback, outcome.answer_validation_failures
+    assert outcome.results and outcome.results[0].status is ResultStatusV2.EXACT
+    assert not banned_terms_in(outcome.answer)
+    assert outcome.hydration.primary_global_ids
+    # The disposition named a semantic id; code relinked it to the local handle.
+    assert outcome.validation.normalization.relinked_references

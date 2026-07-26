@@ -9,6 +9,7 @@ from app.query.binding.answer_validation_v2 import (
     validate_answer_v2,
 )
 from app.query.binding.packet_v2 import build_answer_packet_v2
+from app.query.binding.phrasing import banned_terms_in
 from app.query.binding.results_v2 import (
     DistributionBucketV2,
     DistributionResult,
@@ -156,11 +157,20 @@ def test_fallback_summarizes_results_deterministically():
     assert "880" in fallback
 
 
-def test_context_only_result_is_labeled_in_fallback():
+def test_context_only_result_is_distinguished_in_fallback():
+    """A contextual figure must be readable AND still marked as not the answer.
+
+    Task 27 §6 replaced the internal `Context only:` label with plain language,
+    so the assertion is on the distinction the label existed to make: the count
+    is present, the requested condition is disclaimed, and no internal wording
+    survives.
+    """
     part = _entity_part(6)
     part.is_contextual = True
     part.context_reason = "accessibility is not recorded"
     part.request_text = "accessible ramps"
     packet = build_answer_packet_v2("accessible ramps?", [part])
     fallback = build_fallback_answer_v2(packet)
-    assert "Context only" in fallback
+    assert "6" in fallback
+    assert "not the specific condition asked for" in fallback
+    assert not banned_terms_in(fallback)

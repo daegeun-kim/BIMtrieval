@@ -24,7 +24,6 @@ from app.llm.schemas_v2 import (
     AnswerPartV2,
     DispositionKind,
     LogicalPlan,
-    LogicalOperator,
     RequirementDisposition,
     ResultKind,
     ViewerSetPolicy,
@@ -37,6 +36,11 @@ from app.query.binding.ledger_v2 import (
     ResolutionState,
 )
 from app.query.binding.lexical import identifier_tokens, singularize, stems_match
+from app.query.binding.multilingual import english_equivalents
+from app.query.binding.plan_normalize import (
+    NormalizationReport,
+    normalize_plan_bookkeeping,
+)
 from app.query.semantic.manifest_v002.schema import Capability, ManifestV002
 
 __all__ = [
@@ -95,6 +99,8 @@ class PlanValidation:
     plan_issues: list[ValidationIssue] = field(default_factory=list)
     needs_clarification: bool = False
     clarification_question: str | None = None
+    #: What deterministic bookkeeping repair did before the layers ran (§3).
+    normalization: NormalizationReport = field(default_factory=NormalizationReport)
 
     def all_issues(self) -> list[ValidationIssue]:
         out = list(self.plan_issues)
@@ -170,6 +176,10 @@ def validate_plan(
         needs_clarification=plan.needs_clarification,
         clarification_question=plan.clarification_question,
     )
+    # Bookkeeping the model should never have had to keep: canonical local node
+    # handles and disposition relinking, done in code so the one corrective call
+    # is spent on real semantic gaps (§3).
+    validation.normalization = normalize_plan_bookkeeping(plan, ledger)
 
     # ---- layer 1: schema/structural ---------------------------------------
     part_ids = [p.part_id for p in plan.answer_parts]
@@ -274,6 +284,10 @@ def _part_nodes(part: AnswerPartV2) -> dict[str, tuple[str, str]]:
         nodes[part.aggregate.node_id] = ("aggregate", part.aggregate.semantic_id or "count")
     if part.order is not None:
         nodes[part.order.node_id] = ("order", part.order.by)
+    # Reported fields are addressable too: a disposition for a requested OUTPUT
+    # legitimately names the projection that reports it (§4).
+    for index, semantic_id in enumerate(part.projections, start=1):
+        nodes.setdefault(f"p{index}", ("report", semantic_id))
     return nodes
 
 
@@ -289,6 +303,7 @@ def _structural_issues(
         + (1 if part.group else 0)
         + (1 if part.aggregate else 0)
         + (1 if part.order else 0)
+        + len(part.projections)
     ):
         issues.append(
             ValidationIssue(
@@ -621,6 +636,13 @@ def _contribution_issues(
             continue
 
         if disposition.disposition in (DispositionKind.AMBIGUOUS, DispositionKind.UNAVAILABLE):
+            if requirement.value_scan_absent:
+                # An exhaustive stored-value scan found the qualifier nowhere in
+                # the model, so `unavailable` is the honest disposition, not a
+                # silently dropped condition (§2).
+                part_id = disposition.part_id or requirement.part_hint
+                unavailable_map.setdefault(part_id, []).append(requirement)
+                continue
             if requirement.resolution is ResolutionState.RESOLVABLE and requirement.role in (
                 RequirementRole.TARGET,
                 RequirementRole.FILTER,
@@ -760,13 +782,15 @@ def _uncovered_tokens(
     covering: set[str] = set()
     part = next((p for p in plan.answer_parts if p.part_id == part_id), None)
     for _kind, semantic_id in referenced:
-        record = manifest.get(semantic_id.split(",")[0])
-        if record is not None:
-            covering |= _tokens(getattr(record, "search_text", getattr(record, "label", "")))
+        for candidate in semantic_id.split(","):
+            record = manifest.get(candidate)
+            if record is not None:
+                covering |= _tokens(getattr(record, "search_text", getattr(record, "label", "")))
     if part is not None:
-        # Union peer subjects cover their own words: "stairs and ramps" ->
-        # union [cls:IfcStair, cls:IfcRamp] covers both "stairs" and "ramps".
-        for union_id in part.target.union_semantic_ids:
+        # Union peer subjects contribute to the requirements they represent:
+        # "stairs and ramps" -> union [cls:IfcStair, cls:IfcRamp] covers both
+        # "stairs" and "ramps", whichever member is the primary target (§4).
+        for union_id in (part.target.semantic_id, *part.target.union_semantic_ids):
             record = manifest.get(union_id)
             if record is not None:
                 covering |= _tokens(getattr(record, "search_text", getattr(record, "label", "")))
@@ -774,19 +798,36 @@ def _uncovered_tokens(
             for value in (node.value_text, *node.value_list):
                 if value:
                     covering |= _tokens(value)
+        for semantic_id in part.projections:
+            record = manifest.get(semantic_id)
+            if record is not None:
+                covering |= _tokens(getattr(record, "search_text", getattr(record, "label", "")))
         if part.evidence_theme:
             covering |= _tokens(part.evidence_theme)
     # Morphology-tolerant: "rated" is covered by "rating", "bearing" by
     # "bears". This check exists to catch a DROPPED qualifier, so a near-miss
     # on inflection must not trigger a pointless correction: two tokens of
     # length >= 4 sharing a 3-character prefix count as covered.
-    def _covered(token: str) -> bool:
+    def _covered_by(token: str) -> bool:
         for candidate in covering:
             if stems_match(token, candidate):
                 return True
             if len(token) >= 4 and len(candidate) >= 4 and token[:3] == candidate[:3]:
                 return True
         return False
+
+    def _covered(token: str) -> bool:
+        # A word in another supported language is checked through its English
+        # equivalent as well: the concept it correctly links to carries English
+        # labels, so a lexical token check must not invalidate a valid binding
+        # (§4). The word itself still counts, so nothing is admitted that the
+        # concept does not actually name.
+        if _covered_by(token):
+            return True
+        return any(
+            _covered_by(singularize(equivalent))
+            for equivalent in english_equivalents(token)
+        )
 
     return {token for token in phrase_tokens if len(token) > 2 and not _covered(token)}
 

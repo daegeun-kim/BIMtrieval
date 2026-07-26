@@ -780,3 +780,168 @@ single-path route. Scoped graph seeding therefore has nothing to scope in the ac
 This is a pre-existing Task 17 gap, not a Task 23 regression. The mechanism a scoped traversal needs
 already exists — `select_scope_entity_ids` returns exactly the constrained seed set — so wiring
 graph execution into the group pipeline is the only remaining work.
+
+
+## Task 27 amendment — stage-boundary repairs in the experiment2_v4 pipeline
+
+The Task 26 pipeline (deterministic requirement ledger → always-parallel recall → one typed
+logical plan → ten-layer validation → contract-driven compilation → one execution per part →
+answer packet → claim-citing answer) is unchanged in shape: same stages, same typed algebra, same
+three configured roles (binder `gpt-5.4-nano` medium, correction `gpt-5.4-nano` high, answerer
+`gpt-5.4-mini` low), two LLM calls for a normally-answered question and at most one correction.
+
+Task 27 repaired the stage that OWNED each recorded failure. No downstream stage compensates for
+incorrect upstream state, and no correctness gate was weakened.
+
+### 1. Ledger construction (`binding/ledger_v2.py`, `binding/spans.py`)
+
+- **Coordinated peer subjects.** A content run is split on `,`, `;`, `and`, `or`, `/`, `&`, `+`, so
+  a list of nouns is a list of requirements. Language asking for ONE combined figure (`total`,
+  `combined`, `altogether`, `together`, `overall`, `sum`) makes the peers TARGETs of the SAME part —
+  one union. Without it they become independent requests, each with its own part hint (`P1`,
+  `P1_2`, `P1_3`) and its own target. Previously the second noun of any list became a filter on the
+  first, so a coordinated count lost every subject after the first one.
+- **Requested-output markers.** A run consisting only of words that name "whatever you have"
+  (`details`, `information`, `properties`, `attributes`, `data`, `values`, `overview`) is a
+  non-required OUTPUT requirement, never an occurrence target. Verbs of selection (`pick`,
+  `choose`, `select`, `fetch`, `identify`) joined the structural vocabulary.
+- **Parts with no subject merge left.** After the skeleton is built, a part with no TARGET
+  requirement hands its requirements to the previous part. "Pick a sample X and show me its
+  details" is therefore ONE part: one sample operation, one occurrence target, limit one, and the
+  requested report fields.
+- **No duplicate unresolvable fragment.** A requested-output phrase overlapping a span already
+  typed as material (a floor reference, a quoted value, a comparison) is not emitted a second time.
+  And after model resolution, an unresolvable FILTER requirement whose every token is named by a
+  sibling's resolved capability is discharged by that sibling: it becomes non-required with a note
+  naming the binding that represents it. A resolved field/value filter discharges the COMPLETE
+  qualifier phrase it represents.
+- **Non-English normalization** (`binding/multilingual.py`). One shared lexicon of function words
+  and everyday subject nouns for Swedish, Dutch, German, and Norwegian/Danish, diacritic-folded.
+  Function words join the ledger's structural vocabulary; subject nouns map onto the English token
+  every manifest label is derived from; whole-artefact nouns join the scope-reference vocabulary so
+  building-wide topic language stays context, never a filter, in every supported language.
+
+### 2. Recall (`binding/recall.py`, `binding/concept_vectors.py`)
+
+- **The dense channel actually runs.** `get_concept_vector_index` called `embed_texts`, a method
+  the backend's `EmbeddingService` has never had; the bare `except` around it reported
+  `dense_available: false` for every recorded request. `concept_vectors.batch_embed` now resolves
+  whichever batch API the service exposes (`embed_texts`, else `embed_documents`, else per-text
+  `embed_query`).
+- **An exact name match is its own channel.** Fusion combines RANKS, so an exact label/alias match
+  that tied with an unrelated value-channel hit lost on alphabetical id order. `_exact_channel`
+  contributes it separately.
+- **Two stable ordering passes, never an eligibility change.** A concept offered for the use the
+  requirement's role NAMES outranks one admitted through a related use (a class before a field for
+  a target slot); then a field applicable to the part's likely target — read from the target
+  requirement's own fused list — outranks same-named fields for incompatible classes. A field for
+  the wrong class is still offered, just not first.
+- **Descriptive outputs reach the derived profiles.** An OUTPUT requirement admits a
+  `derived_profile` whose only permitted use is `target`, so "a summary", "the circulation of this
+  building", "made of" resolve instead of reporting `not_representable` while the concept that
+  answers them ranked first.
+- **Qualifier value linking.** When a phrase's head noun resolves to a class, the qualifier tokens
+  are looked up individually through the same authoritative value-linking stage, which may then
+  propose a typed target-plus-filter plan. When an exhaustive stored-value scan matches a qualifier
+  nowhere in the model, the requirement records `value_scan_absent`, and an `unavailable`
+  disposition for it is honest rather than a silently dropped condition.
+
+### 3. Binder bookkeeping is done in code (`binding/plan_normalize.py`)
+
+`node_id` is a LOCAL handle and `semantic_id` is an exact manifest id; nothing distinguished them,
+so the binder wrote semantic ids into `node_id`, where the 24-character bound truncates them
+mid-token (`prop:Pset_WallCommon.IsU`, `agg:count_stairs_plus_r{`). Valid plans then failed filter
+provenance and lexical coverage for conditions that were in fact bound.
+
+Before validation runs, deterministically and with no model call:
+
+1. every node takes a canonical handle from its position and kind — `t1`, `f1..fn`, `s1`, `v1..vn`,
+   `g1`, `a1`, `o1`, and `p1..pn` for reported projections;
+2. each disposition's node references resolve onto those handles by exact match against the handle,
+   the original node id, or the node's semantic id;
+3. a reference matching nothing is repaired ONLY when the mapping is unique — the requirement's
+   role names one node kind and the part holds exactly one node of it. Two candidates is ambiguous,
+   nothing is guessed, and validation fails safely;
+4. duplicate part ids are made unique, and a disposition with no `part_id` attaches to the only
+   part when there is only one.
+
+No semantic id, operator, value, target, or disposition kind is ever changed. The binder prompt
+states the two identifier kinds explicitly, carries a small set of schema-generic structural shapes
+(no benchmark question, model fact, or expected answer), and ends with a mechanical self-check. The
+correction input names the exact rejected string per failing node with valid ids of the same kind
+that may replace it.
+
+### 4. Validation (`binding/validate_v2.py`)
+
+Accepts a semantically valid plan when provenance is mechanically clear; still rejects a dropped
+requested condition, an invented narrowing filter, an incompatible field, and a silently broadened
+target.
+
+- Union members contribute to the requirements they represent: the primary target and every union
+  peer cover their own words, whichever member is primary.
+- Projections are addressable nodes (`p1..pn`), so a disposition for a requested OUTPUT may name
+  the projection that reports it.
+- Lexical coverage is checked through a word's English equivalent as well as the word itself, so an
+  inflection, a synonym, or another supported language cannot invalidate a valid binding.
+- All filter-provenance checks compare normalized local node ids.
+- An `unavailable` disposition is accepted for a requirement whose exhaustive value scan found
+  nothing, and still rejected for one that resolved against the manifest.
+
+### 5. Execution and evidence (`binding/compile_v2.py`, `binding/execute_v2.py`)
+
+- **Multi-valued array distribution.** `json.material_name` and `json.classification_field` have no
+  scalar path, so a material distribution failed dry compilation outright. An `array_element` group
+  spec unnests the array; buckets count DISTINCT objects, the covered figure is the objects with
+  any value (never the bucket sum), and the viewer highlights only the objects the buckets describe.
+- **Derived floor counts.** `count:floor_levels` and `count:occupiable_floor_levels` are attached at
+  manifest parse time from the artifact's own floor derivation — no re-ingestion, no change to the
+  integrity hash. Each is an ordinary selectable target answering a scalar question with ZERO
+  database statements, and refuses to be filtered. The binder no longer enumerates band ids in a
+  union (the shape that produced an invented band id).
+- **Thematic profiles describe their theme.** A theme's relevant structured subjects are the classes
+  of the objects its bounded retrieval actually returned, reported with their model counts beside
+  the retrieved excerpts. A profile's evidence search is restricted to entity documents, because
+  relationship text records no subject class. When nothing clears the primary similarity threshold
+  the part is PARTIAL with an explicit limitation — the closest recorded objects, never a claim that
+  the theme is absent from the real building.
+- **A vector-index miss is never absence.** When a nearest-neighbour search returns ZERO rows, the
+  same bounded query is repeated exactly with index scans disabled for that statement, and the
+  interpretation notes record it. A healthy index never returns an empty answer for a non-empty
+  scope, so this costs nothing once the index is sound.
+- **Catalog schema.** Catalog display metadata lives in `source_model_catalog_entries`, joined to
+  `ifc_source_models` by `source_model_id`. Selecting `display_name` from the source-model table
+  raised `UndefinedColumn` and turned every catalog question into a pipeline error.
+
+### 6. User-facing answers (`binding/phrasing.py`, `binding/answer_validation_v2.py`)
+
+One rewrite table turns internal sentences into plain language, and it is applied where the text is
+CREATED — `add_limitation`, coverage reasons, interpretation notes, known/unknown parts — so the
+same wording reaches the answerer, the deterministic fallback, and the trace. Property names are
+humanized (`prop:Pset_WallCommon.FireRating` → "fire rating").
+
+`grounded_answerer_v002` is rules only, with no examples. Answers lead with the direct result in
+ordinary language, say "this model", describe an exact absence as no such objects being present,
+describe partial data as what is recorded and what remains unknown, never equate "no value recorded"
+with a false real-world property, and omit limitations when an exact result has none.
+
+Deterministic answer validation moved in both directions, because the recorded run failed both ways:
+
+- **Less strict about citations.** A claim is checked against every citable value of the fact it
+  names — a grouped extremum carries a bucket key AND a count — and an id that exists in the packet
+  is accepted whatever claim kind carries it. Six recorded answers were discarded over bookkeeping
+  of this kind and replaced by the fallback.
+- **Stricter about prose.** An answer is rejected when it uses internal vocabulary (target class,
+  match/matches, zero match, predicate, coverage, semantic id, packet, an internal status label, or
+  a literal semantic identifier), when it sets `disclosed_limitation` without a recorded limitation,
+  when it adds uncertainty to an exact unqualified result, or when it says information was not
+  provided while the results contain it.
+
+The deterministic fallback follows the same rules for exact, zero, partial, and unavailable results;
+the pipeline's own unavailable and clarification prose passes through the same rewrite.
+
+### 7. Preserved decisions
+
+Configured models, reasoning efforts, and roles unchanged. No added LLM call, agent loop, router,
+judge, model-written SQL, retrieval store, framework, ontology, or database. Binder projection
+still the compact complete universe under the same USD request budget. No exact-query fallback,
+expected-count rule, or model-specific behavior exists.

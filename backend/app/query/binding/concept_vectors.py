@@ -62,6 +62,22 @@ def _concept_texts(manifest: ManifestV002) -> list[tuple[str, str]]:
     return [(sid, text) for sid, text in out if text.strip()]
 
 
+def batch_embed(embedding_service: Any, texts: list[str]) -> list[list[float]]:
+    """Embed several texts with whatever batch API the service exposes.
+
+    The backend's `EmbeddingService` offers `embed_documents` (bounded batch) and
+    `embed_query` (batch size one); it has never had an `embed_texts` method, so
+    calling that name silently disabled the dense recall channel for every
+    request — `dense_available: false` in every recorded trace (task27 §2). This
+    resolves the real method instead of assuming a name.
+    """
+    for name in ("embed_texts", "embed_documents"):
+        method = getattr(embedding_service, name, None)
+        if callable(method):
+            return list(method(texts))
+    return [embedding_service.embed_query(text) for text in texts]
+
+
 def get_concept_vector_index(
     manifest: ManifestV002,
     embedding_service: Any,
@@ -83,7 +99,7 @@ def get_concept_vector_index(
     if not pairs:
         return None
     try:
-        vectors = embedding_service.embed_texts([text for _, text in pairs])
+        vectors = batch_embed(embedding_service, [text for _, text in pairs])
         matrix = np.asarray(vectors, dtype="float32")
         norms = np.clip(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-9, None)
         matrix = matrix / norms
@@ -108,7 +124,7 @@ def embed_query_texts(
     if not distinct:
         return {}
     try:
-        vectors = embedding_service.embed_texts(distinct)
+        vectors = batch_embed(embedding_service, distinct)
     except Exception:  # noqa: BLE001
         return None
     return {text: np.asarray(vec, dtype="float32") for text, vec in zip(distinct, vectors)}

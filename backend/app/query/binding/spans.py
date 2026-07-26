@@ -40,6 +40,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+from app.query.binding.multilingual import SCOPE_NOUNS as MULTILINGUAL_SCOPE_NOUNS
 from app.query.semantic.spatial import (
     BOTTOM_WORDS,
     FLOOR_WORDS,
@@ -154,11 +155,21 @@ _SELECTION_RE = re.compile(
 
 #: Nouns that denote the modelled artefact as a WHOLE. General vocabulary, not a
 #: list of question phrases: any determiner may precede them, and any question
-#: naming one of them without a positional qualifier is selecting scope.
-_SCOPE_NOUNS = ("building", "model", "project", "structure", "facility", "site plan")
+#: naming one of them without a positional qualifier is selecting scope. The
+#: non-English forms come from the shared multilingual lexicon so building-wide
+#: topic language stays context in every supported language (task27 §2).
+_SCOPE_NOUNS = (
+    "building",
+    "model",
+    "project",
+    "structure",
+    "facility",
+    "site plan",
+    *MULTILINGUAL_SCOPE_NOUNS,
+)
 _SCOPE_RE = re.compile(
     r"\b((?:the|this|that|our|whole|entire|active|current|complete|full)\s+)*"
-    r"(?:" + "|".join(_SCOPE_NOUNS) + r")\b",
+    r"(?:" + "|".join(sorted(_SCOPE_NOUNS, key=len, reverse=True)) + r")\b",
     re.IGNORECASE,
 )
 

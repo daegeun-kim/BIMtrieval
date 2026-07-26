@@ -188,10 +188,14 @@ class TraversalSpec:
 @dataclass
 class GroupSpec:
     node_id: str
-    kind: str  # "floor" | "field"
+    kind: str  # "floor" | "field" | "array_element"
     label_expr: Any = None
     bands: tuple[FloorBand, ...] = ()
     capability: Capability | None = None
+    #: For `array_element`: the canonical-JSON array and element field whose
+    #: values form the buckets ("materials"/"name", "classifications"/"code").
+    array_key: str | None = None
+    array_field: str | None = None
 
 
 @dataclass
@@ -218,6 +222,9 @@ class CompiledPart:
     aggregate_capability: Capability | None = None
     order_direction: str | None = None
     limit: int | None = None
+    #: A whole-model figure the manifest already derived (e.g. floor levels):
+    #: the answer needs no row scan at all (§5).
+    derived_value: int | None = None
     projections: list[ProjectionSpec] = field(default_factory=list)
     traversals: list[TraversalSpec] = field(default_factory=list)
     evidence_theme: str | None = None
@@ -451,6 +458,45 @@ def spatial_membership_expr(source_model_id: int, storey_global_ids: tuple[str, 
     return sa.or_(scalar, membership)
 
 
+#: Accessors whose values live in a canonical-JSON ARRAY rather than a scalar
+#: path. They can be grouped, but only by unnesting the array (§10.5).
+_ARRAY_GROUP_ACCESSORS: dict[str, str] = {
+    "json.material_name": "materials",
+    "json.classification_field": "classifications",
+}
+
+
+def array_group_spec(node_id: str, capability: Capability) -> GroupSpec | None:
+    """Group-by over a multi-valued array field ("what are the doors made of").
+
+    `field_value_expr` has no scalar path for an array source, so a material
+    distribution failed to compile at all (`no scalar value expression for
+    physical source 'materials'`, task27 §5). The bucket key is the array
+    element's field; one object contributing two materials counts once per
+    material, which is what a "what materials" question asks for, and the
+    covered/base denominators keep that distinction visible.
+    """
+    array_key = _ARRAY_GROUP_ACCESSORS.get(capability.accessor)
+    if array_key is None:
+        return None
+    physical = capability.physical or {}
+    return GroupSpec(
+        node_id=node_id,
+        kind="array_element",
+        capability=capability,
+        array_key=array_key,
+        array_field=physical.get("field") or "name",
+    )
+
+
+def array_element_expr(array_key: str, element_field: str) -> tuple[Any, Any]:
+    """`(from_clause, value_expr)` for one unnested canonical-JSON array field."""
+    element = sa.func.jsonb_array_elements(_ET.c.canonical_json[array_key]).table_valued(
+        "value", joins_implicitly=True
+    )
+    return element, element.c.value.op("->>")(element_field)
+
+
 def floor_group_spec(node_id: str, manifest: ManifestV002) -> GroupSpec:
     """Group-by-floor: every storey maps onto its derived band label (§10.5)."""
     bands = tuple(manifest.floors.bands)
@@ -527,6 +573,30 @@ def compile_part(
             compiled.interpretation_notes.append(
                 f"counted the {target.label} family: {', '.join(compiled.target_classes)}"
             )
+    elif isinstance(target, Capability) and target.kind == "derived_count":
+        value = (target.physical or {}).get("value")
+        if not isinstance(value, int):
+            raise CompileFailure(
+                part.target.node_id,
+                "COMPILER_ACCESS_GAP",
+                f"{part.target.semantic_id} carries no derived value",
+            )
+        if part.result_kind not in (ResultKind.SCALAR, ResultKind.ENTITY_SET):
+            raise CompileFailure(
+                part.target.node_id,
+                "COMPILER_ACCESS_GAP",
+                "a derived count answers a scalar question",
+            )
+        if part.filters:
+            raise CompileFailure(
+                part.target.node_id,
+                "COMPILER_ACCESS_GAP",
+                f"{part.target.semantic_id} is one already-derived figure and cannot be "
+                "filtered; target the objects themselves to apply a condition",
+            )
+        compiled.derived_value = value
+        compiled.interpretation_notes.append(f"{target.label} derived from this model's storeys")
+        accessors_used[part.target.node_id] = target.accessor
     elif part.target.semantic_id in manifest.profiles:
         accessors_used[part.target.node_id] = manifest.profiles[part.target.semantic_id].accessor
         if part.result_kind not in (ResultKind.PROFILE, ResultKind.QUALITATIVE_EVIDENCE):
@@ -654,7 +724,7 @@ def compile_part(
                     "COMPILER_ACCESS_GAP",
                     f"{part.group.semantic_id} is not groupable",
                 )
-            compiled.group = GroupSpec(
+            compiled.group = array_group_spec(part.group.node_id, capability) or GroupSpec(
                 node_id=part.group.node_id,
                 kind="field",
                 label_expr=field_value_expr(capability),

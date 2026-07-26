@@ -51,6 +51,32 @@ class AnswerPacketV2:
                     return fact.get("value", fact.get("count"))
         return None
 
+    #: Fact keys a claim may legitimately assert. A grouped extremum carries a
+    #: bucket key AND its count; a scalar carries its value, covered and
+    #: eligible denominators (task27 §6).
+    _CITABLE_KEYS = ("value", "count", "key", "base", "covered", "eligible")
+
+    def fact_values(self, fact_id: str) -> list[Any]:
+        """Every value of one fact a claim may cite, in order of directness."""
+        for part in self.parts:
+            for fact in part.facts():
+                if fact["fact_id"] != fact_id:
+                    continue
+                values = [fact[key] for key in self._CITABLE_KEYS if key in fact]
+                nested = fact.get("values")
+                if isinstance(nested, dict):
+                    values.extend(nested.keys())
+                    values.extend(nested.values())
+                buckets = fact.get("buckets")
+                if isinstance(buckets, list):
+                    for bucket in buckets:
+                        if isinstance(bucket, dict):
+                            values.extend(
+                                bucket[key] for key in ("key", "count") if key in bucket
+                            )
+                return values
+        return []
+
     def allowed_terms(self) -> set[str]:
         terms: set[str] = set()
         for part in self.parts:

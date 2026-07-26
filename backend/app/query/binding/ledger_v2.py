@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.query.binding.multilingual import FUNCTION_WORDS
 from app.query.binding.spans import ModifierKind, ModifierSpan, detect_spans
 
 __all__ = [
@@ -100,6 +101,10 @@ class LedgerRequirement:
     candidate_ids: list[str] = field(default_factory=list)
     resolution_note: str | None = None
     partial_policy: str = "none"
+    #: Set when an exhaustive stored-value scan found no value matching this
+    #: qualifier, so an `unavailable` disposition is honest rather than a
+    #: silently dropped condition (task27 §2).
+    value_scan_absent: bool = False
 
     @property
     def required_use(self) -> str | None:
@@ -128,6 +133,8 @@ class LedgerRequirement:
             payload["note"] = self.resolution_note
         if self.partial_policy != "none":
             payload["partial_policy"] = self.partial_policy
+        if self.value_scan_absent:
+            payload["no_stored_value_matches"] = True
         if self.limit_value is not None:
             payload["limit"] = self.limit_value
         if self.source != "question_span":
@@ -229,12 +236,20 @@ _PEER_SPLIT_RE = re.compile(
     re.I,
 )
 
+#: Language asking for ONE combined figure over coordinated peer subjects. With
+#: it, "stairs and ramps" is a single union target; without it, a coordinated
+#: list is a set of independent requests, each with its own part (task27 §2).
+_UNION_TOTAL_RE = re.compile(
+    r"\b(total|totals|combined|altogether|together|in total|overall|sum)\b", re.I
+)
+
 _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 
 #: Interrogatives, determiners, operation verbs, and grouping words that shape
 #: a request but are never themselves things to bind. NO domain noun.
-_STRUCTURAL_WORDS = frozenset(
-    """a all am an and any are as at be been being both but by can could did do does
+_STRUCTURAL_WORDS = (
+    frozenset(
+        """a all am an and any are as at be been being both but by can could did do does
     each every for from get give had has have how i if in into is it its just many
     me much must my of on or our out please show some tell than that the their them
     then there these they this those to total us was we were what when where which
@@ -242,10 +257,34 @@ _STRUCTURAL_WORDS = frozenset(
     select summarize summarise describe average sum min max most least fewest
     highest lowest compare list name enumerate per grouped group by made there
     contain contains have one single example examples sample samples instance
-    instances""".split()
+    instances either neither pick picks picked choose chose chosen fetch grab
+    identify provide want need know kindly also please combined altogether
+    together overall""".split()
+    )
+    | FUNCTION_WORDS
 )
 
-_OUTPUT_MARKERS = frozenset({"list", "show", "display", "name", "names", "detail", "details"})
+#: Words that name "whatever you have" rather than a concept to bind. A run made
+#: only of these is a (non-required) requested-output marker, never an occurrence
+#: target: the recorded defect was "details" becoming a target class (task27 §2).
+_OUTPUT_MARKERS = frozenset(
+    {
+        "list",
+        "show",
+        "display",
+        "name",
+        "names",
+        "detail",
+        "details",
+        "info",
+        "information",
+        "properties",
+        "attributes",
+        "data",
+        "values",
+        "overview",
+    }
+)
 
 
 class _Counter:
@@ -305,7 +344,33 @@ def build_ledger_skeleton(
                 source="selection",
             )
         )
+    _merge_targetless_parts(ledger)
     return ledger
+
+
+def _merge_targetless_parts(ledger: LedgerV2) -> None:
+    """Fold a part that names nothing to count into the part before it.
+
+    "Pick a sample door and show me its details" splits on "and show", but the
+    trailing segment has no subject of its own: its words qualify the FIRST
+    part's subject. Leaving it as a separate part invented a second occurrence
+    target out of "details" (task27 §2). A part with no target requirement
+    therefore hands its requirements to the previous part.
+    """
+    hints = ledger.part_hints()
+    with_target = {
+        r.part_hint for r in ledger.requirements if r.role is RequirementRole.TARGET
+    }
+    previous: str | None = None
+    for hint in hints:
+        if hint in with_target:
+            previous = hint
+            continue
+        if previous is None:
+            continue
+        for requirement in ledger.requirements:
+            if requirement.part_hint == hint:
+                requirement.part_hint = previous
 
 
 def _split_segments(question: str) -> list[tuple[int, int]]:
@@ -419,11 +484,25 @@ def _skeleton_for_segment(
         )
 
     # -- requested output ("materials of the doors", "made of") -------------
+    # A phrase already detected as a typed span is that span's requirement, not
+    # a second unresolvable output one: "What is on the top floor of this
+    # building?" produced BOTH a scope requirement for the floor and a duplicate
+    # `report` requirement for the same words, and the duplicate had no possible
+    # binding (task27 §2, §4).
+    span_claimed = {
+        position
+        for span in ledger.spans
+        if span.material and seg_start <= span.start < seg_end
+        for position in range(span.start, span.end)
+    }
     output_match = _OUTPUT_OF_RE.search(segment)
     if (
         output_match
         and not _EXTREMUM_RE.search(output_match.group(0))
         and not _SAMPLE_LANGUAGE_RE.search(output_match.group("output"))
+        and not span_claimed.intersection(
+            range(seg_start + output_match.start("output"), seg_start + output_match.end("output"))
+        )
     ):
         text = output_match.group("output").strip()
         if text and not all(w.casefold() in _STRUCTURAL_WORDS for w in _WORD_RE.findall(text)):
@@ -514,9 +593,13 @@ def _skeleton_for_segment(
     target_assigned = any(
         r.part_hint == part and r.role is RequirementRole.TARGET for r in ledger.requirements
     )
+    # Coordinated peer subjects ("doors, windows and stairs"): one combined
+    # figure was asked for, or several independent ones (task27 §2).
+    one_total = bool(_UNION_TOTAL_RE.search(segment))
+    peer_parts: list[str] = [part]
     previous_id: str | None = None
     or_group = 0
-    for run_text, run_start, run_end, after_or in runs:
+    for run_text, run_start, run_end, after_or, after_and in runs:
         if after_or and previous_id is not None:
             group = f"G{or_group}"
             previous = ledger.requirement(previous_id)
@@ -526,39 +609,54 @@ def _skeleton_for_segment(
             or_group += 1
             group = None
 
-        wants_output = any(
-            w.casefold() in _OUTPUT_MARKERS for w in _WORD_RE.findall(run_text)
-        )
-        role = RequirementRole.TARGET if not target_assigned else RequirementRole.FILTER
-        if wants_output and target_assigned:
-            role = RequirementRole.OUTPUT
+        markers = [w.casefold() for w in _WORD_RE.findall(run_text)]
+        only_output_markers = bool(markers) and all(w in _OUTPUT_MARKERS for w in markers)
+        run_part = part
+        if only_output_markers:
+            # "details", "information": a request to report what is recorded.
+            # Never a subject, and never a required binding of its own.
+            role, required = RequirementRole.OUTPUT, False
+        elif not target_assigned:
+            role, required = RequirementRole.TARGET, True
+        elif after_and and not after_or:
+            # A peer subject of the same list. One total -> peer targets of the
+            # same part (a union); otherwise an independent request of its own.
+            role, required = RequirementRole.TARGET, True
+            if not one_total:
+                run_part = f"{part}_{len(peer_parts) + 1}"
+                peer_parts.append(run_part)
+        else:
+            role, required = RequirementRole.FILTER, True
         requirement = LedgerRequirement(
             requirement_id=counter.next(),
             source_text=run_text,
             start=run_start,
             end=run_end,
             role=role,
-            required=True,
-            part_hint=part,
+            required=required,
+            part_hint=run_part,
             bool_group=f"G{or_group}" if after_or else None,
         )
         ledger.requirements.append(requirement)
         previous_id = requirement.requirement_id
-        target_assigned = True
+        if role is RequirementRole.TARGET:
+            target_assigned = True
 
-    # Link filters/orders/groups in this part to its first target.
-    target = next(
-        (
-            r
-            for r in ledger.requirements
-            if r.part_hint == part and r.role is RequirementRole.TARGET
-        ),
-        None,
-    )
-    if target is not None:
+    # Link filters/orders/groups in each of this segment's parts to its target.
+    for peer_part in peer_parts:
+        target = next(
+            (
+                r
+                for r in ledger.requirements
+                if r.part_hint == peer_part and r.role is RequirementRole.TARGET
+            ),
+            None,
+        )
+        if target is None:
+            continue
         for requirement in ledger.requirements:
             if (
-                requirement.part_hint == part
+                requirement.part_hint == peer_part
                 and requirement.role
                 in (
                     RequirementRole.FILTER,
@@ -624,15 +722,42 @@ def _role_for_span(span: ModifierSpan) -> RequirementRole | None:
 _OR_RE = re.compile(r"\bor\b", re.I)
 
 
+#: A comma or semicolon inside a segment separates coordinated peers just as
+#: "and" does; without this, "doors, windows" collapsed into ONE phrase whose
+#: second noun could never be a peer target of its own (task27 §2).
+_LIST_SEPARATOR_RE = re.compile(r"[,;/]|\band\b|\bor\b|&|\+", re.I)
+
+
 def _content_runs(
     question: str, seg_start: int, seg_end: int, claimed: set[int]
-) -> list[tuple[str, int, int, bool]]:
-    """Contiguous runs of meaningful words, with an or-link flag per run."""
-    runs: list[tuple[str, int, int, bool]] = []
+) -> list[tuple[str, int, int, bool, bool]]:
+    """Contiguous runs of meaningful words, each flagged with how it was joined.
+
+    Returns `(text, start, end, after_or, after_and)`: whether this run followed
+    a disjunction ("either external or load bearing") or a coordination of peer
+    subjects ("doors, windows and stairs").
+    """
+    runs: list[tuple[str, int, int, bool, bool]] = []
     current_start = -1
     current_end = -1
     after_or = False
+    after_and = False
     pending_or = False
+    pending_and = False
+
+    def _flush() -> None:
+        nonlocal current_start
+        if current_start >= 0:
+            runs.append(
+                (
+                    question[current_start:current_end],
+                    current_start,
+                    current_end,
+                    after_or,
+                    after_and,
+                )
+            )
+            current_start = -1
 
     for match in _WORD_RE.finditer(question, seg_start, seg_end):
         word = match.group(0)
@@ -643,17 +768,22 @@ def _content_runs(
             if current_start < 0:
                 current_start = match.start()
                 after_or = pending_or
+                after_and = pending_and
+            elif _LIST_SEPARATOR_RE.search(question, current_end, match.start()):
+                # A separator between two content words ends the run.
+                separator = question[current_end : match.start()]
+                _flush()
+                current_start = match.start()
+                after_or = bool(re.search(r"\bor\b", separator, re.I))
+                after_and = not after_or
             current_end = match.end()
             pending_or = False
+            pending_and = False
             continue
-        if current_start >= 0:
-            runs.append(
-                (question[current_start:current_end], current_start, current_end, after_or)
-            )
-            current_start = -1
+        _flush()
         pending_or = lowered == "or"
-    if current_start >= 0:
-        runs.append((question[current_start:current_end], current_start, current_end, after_or))
+        pending_and = lowered == "and"
+    _flush()
     return runs
 
 

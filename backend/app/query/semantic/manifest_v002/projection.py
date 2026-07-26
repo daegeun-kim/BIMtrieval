@@ -64,6 +64,14 @@ _LEGEND = {
         "floor": {"kind": "derived_floor", "accessor": "derived.physical_floor",
                   "uses": ["scope", "group", "target"]},
         "derived": {"kind": "derived_profile", "uses": ["target"]},
+        "count": {
+            "kind": "derived_count",
+            "accessor": "derived.physical_floor",
+            "uses": ["target"],
+            "note": "a whole-model count already derived by the backend: target it "
+            "directly with a scalar result and a count aggregate, never a union of "
+            "individual ids",
+        },
         "storey": {"kind": "storey", "accessor": "entity.class"},
     },
     "field_defaults": {
@@ -199,6 +207,7 @@ _KIND_DEFAULT_USES: dict[str, tuple[str, ...]] = {
     "spatial": ("scope", "group"),
     "derived_floor": ("scope", "group", "target"),
     "derived_profile": ("target",),
+    "derived_count": ("target",),
 }
 
 

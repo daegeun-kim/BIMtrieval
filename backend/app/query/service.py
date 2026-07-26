@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -508,14 +509,16 @@ def _record_outcome(query_trace: QueryTrace, outcome: PipelineOutcome) -> None:
     if outcome.corrected_plan is not None:
         query_trace.set(correction_output=outcome.corrected_plan.model_dump(mode="json"))
     if outcome.validation is not None:
-        query_trace.set(
-            validation={
-                "states": {
-                    v.part.part_id: v.state.value for v in outcome.validation.verdicts
-                },
-                "issues": [i.to_payload() for i in outcome.validation.all_issues()][:16],
-            }
-        )
+        validation_payload: dict[str, Any] = {
+            "states": {
+                v.part.part_id: v.state.value for v in outcome.validation.verdicts
+            },
+            "issues": [i.to_payload() for i in outcome.validation.all_issues()][:16],
+        }
+        normalization = outcome.validation.normalization.to_payload()
+        if normalization:
+            validation_payload["normalization"] = normalization
+        query_trace.set(validation=validation_payload)
         query_trace.set(
             physical_plans=[
                 v.compiled.diagnostics

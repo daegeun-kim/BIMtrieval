@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import Settings, get_settings
 from app.db.models import IfcEntity, RagDocument
 from app.llm.schemas_v2 import ResultKind, ViewerSetPolicy
-from app.query.binding.compile_v2 import CompiledPart, field_value_expr
+from app.query.binding.compile_v2 import CompiledPart, array_element_expr
 from app.query.binding.results_v2 import (
     DistributionBucketV2,
     DistributionResult,
@@ -118,6 +118,13 @@ def _execute_entity_set(
     compiled: CompiledPart, context: ExecutionContextV2, result: PartResultV2
 ) -> None:
     session = context.session
+    if compiled.derived_value is not None:
+        result.result = EntitySetResult(
+            scanned_cardinality=compiled.derived_value,
+            matched_cardinality=compiled.derived_value,
+        )
+        result.status = ResultStatusV2.EXACT
+        return
     scanned = session.execute(
         sa.select(sa.func.count()).select_from(_ET).where(compiled.scanned_where())
     ).scalar_one()
@@ -200,6 +207,16 @@ def _execute_scalar(
     compiled: CompiledPart, context: ExecutionContextV2, result: PartResultV2
 ) -> None:
     session = context.session
+    if compiled.derived_value is not None:
+        # An already-derived whole-model figure: exact, and no rows to scan.
+        result.result = ScalarResult(
+            function="count",
+            value=compiled.derived_value,
+            covered_cardinality=compiled.derived_value,
+            eligible_cardinality=compiled.derived_value,
+        )
+        result.status = ResultStatusV2.EXACT
+        return
     matched = session.execute(
         sa.select(sa.func.count()).select_from(_ET).where(compiled.base_where())
     ).scalar_one()
@@ -308,14 +325,43 @@ def _execute_distribution(
         )
         return
 
-    label = compiled.group.label_expr.label("bucket")
-    rows = session.execute(
-        sa.select(label, sa.func.count().label("n"))
-        .where(compiled.base_where())
-        .group_by(label)
-        .order_by(sa.desc("n"))
-    ).all()
-    result.statement_count += 1
+    if compiled.group.kind == "array_element":
+        # A multi-valued array field: buckets come from the unnested elements,
+        # and the objects carrying no element at all are the missing remainder.
+        _element, value_expr = array_element_expr(
+            compiled.group.array_key or "materials", compiled.group.array_field or "name"
+        )
+        label = value_expr.label("bucket")
+        rows = session.execute(
+            sa.select(label, sa.func.count(sa.distinct(_ET.c.id)).label("n"))
+            .select_from(_ET)
+            .where(compiled.base_where(), value_expr.isnot(None))
+            .group_by(label)
+            .order_by(sa.desc("n"))
+        ).all()
+        result.statement_count += 1
+        with_any = session.execute(
+            sa.select(sa.func.count())
+            .select_from(_ET)
+            .where(
+                compiled.base_where(),
+                _array_has_element(
+                    compiled.group.array_key or "materials",
+                    compiled.group.array_field or "name",
+                ),
+            )
+        ).scalar_one()
+        result.statement_count += 1
+        rows = [*rows, (None, base - int(with_any))] if base > int(with_any) else list(rows)
+    else:
+        label = compiled.group.label_expr.label("bucket")
+        rows = session.execute(
+            sa.select(label, sa.func.count().label("n"))
+            .where(compiled.base_where())
+            .group_by(label)
+            .order_by(sa.desc("n"))
+        ).all()
+        result.statement_count += 1
 
     band_labels = {
         band.semantic_id: _band_label(band) for band in compiled.group.bands
@@ -332,6 +378,11 @@ def _execute_distribution(
             )
         )
     covered = sum(b.count for b in buckets)
+    if compiled.group.kind == "array_element":
+        # One object may carry several values, so the bucket counts can exceed
+        # the base set: the covered figure is the objects with any value, not
+        # the bucket sum, or a distribution would look like a false total.
+        covered = max(0, base - missing)
 
     distribution = DistributionResult(
         base_cardinality=base,
@@ -349,6 +400,16 @@ def _execute_distribution(
             distribution.tie = ordered[compiled.limit].count == boundary
     result.result = distribution
     result.viewer_where = compiled.base_where() if covered else None
+    if compiled.group.kind == "array_element" and missing and covered:
+        # Highlight the objects the buckets actually describe, not every object
+        # of the class: the ones with no recorded value are not in the answer.
+        result.viewer_where = sa.and_(
+            compiled.base_where(),
+            _array_has_element(
+                compiled.group.array_key or "materials",
+                compiled.group.array_field or "name",
+            ),
+        )
 
     if missing:
         result.status = ResultStatusV2.PARTIAL
@@ -362,11 +423,48 @@ def _execute_distribution(
             ResultStatusV2.ZERO if compiled.coverage.complete else ResultStatusV2.PARTIAL
         )
     else:
-        result.status = ResultStatusV2.EXACT if compiled.coverage.complete else ResultStatusV2.PARTIAL
+        result.status = (
+            ResultStatusV2.EXACT if compiled.coverage.complete else ResultStatusV2.PARTIAL
+        )
         if not compiled.coverage.complete:
             result.add_limitation(
                 "COVERAGE_PROOF_GAP", "; ".join(compiled.coverage.reasons[:2])
             )
+
+
+def _exact_evidence_retry(
+    context: ExecutionContextV2, select: Any, result: PartResultV2
+) -> list[Any]:
+    """Re-run a nearest-neighbour search exactly when the index returned nothing.
+
+    An approximate vector index that answers a similarity search with ZERO rows
+    turns a bounded retrieval miss into "this model records nothing about that",
+    which is the one thing evidence must never become (task26 §11.2). The retry
+    disables index scans for this statement only, so the same bounded query runs
+    exactly. It costs nothing once the index is healthy, because a healthy index
+    never returns an empty answer for a non-empty scope.
+    """
+    try:
+        with context.session.begin_nested():
+            context.session.execute(sa.text("SET LOCAL enable_indexscan = off"))
+            rows = context.session.execute(select).all()
+    except sa.exc.SQLAlchemyError:
+        return []
+    result.statement_count += 2
+    if rows:
+        result.interpretation_notes.append(
+            "the model's text-similarity index returned nothing and the search was "
+            "repeated exactly"
+        )
+    return rows
+
+
+def _array_has_element(array_key: str, element_field: str) -> Any:
+    """EXISTS: this object carries at least one value in the given array field."""
+    element, value_expr = array_element_expr(array_key, element_field)
+    return sa.exists(
+        sa.select(sa.literal(1)).select_from(element).where(value_expr.isnot(None))
+    )
 
 
 def _band_label(band: Any) -> str:
@@ -445,7 +543,6 @@ def _sample_detail(
 def _execute_profile(
     compiled: CompiledPart, context: ExecutionContextV2, result: PartResultV2
 ) -> None:
-    session = context.session
     manifest = context.manifest
     structured: dict[str, Any] = {
         "entity_total": manifest.entity_total,
@@ -464,21 +561,45 @@ def _execute_profile(
     if material is not None and material.values:
         structured["top_materials"] = {v: c for v, c in material.values[:8]}
 
+    thematic = compiled.target_semantic_id == "derived:thematic_profile"
     profile = ProfileResult(structured=structured)
     result.result = profile
     result.status = ResultStatusV2.EXACT
 
+    # A THEMATIC profile has to be about its theme. Retrieving only the generic
+    # building profile left "describe the circulation" with an empty evidence
+    # scope and nothing to say (task27 §5). The theme's relevant STRUCTURED
+    # subjects are the classes of the objects the retrieval actually returned —
+    # read off the same bounded text search, so no theme lookup table, ontology,
+    # or second retrieval system is introduced.
     _attach_evidence(compiled, context, result, unscoped_allowed=True)
     if result.evidence is not None:
         profile.evidence_ids = [e.evidence_id for e in result.evidence.excerpts]
-    if compiled.target_semantic_id == "derived:thematic_profile" and (
-        result.evidence is None or not result.evidence.excerpts
-    ):
-        result.status = ResultStatusV2.UNAVAILABLE
-        result.add_limitation(
-            "EVIDENCE_SCOPE_ERROR",
-            "no relevant structured or textual facts resolve for this theme in the model",
+    if thematic:
+        structured["theme"] = compiled.evidence_theme or result.request_text
+        subjects = result.evidence.subject_classes if result.evidence else {}
+        if subjects:
+            structured["theme_subjects"] = {
+                ifc_class: manifest.class_inventory.get(ifc_class, described)
+                for ifc_class, described in subjects.items()
+            }
+            structured["theme_described_objects"] = sum(subjects.values())
+        strong = any(
+            excerpt.slice == "primary" for excerpt in (
+                result.evidence.excerpts if result.evidence else []
+            )
         )
+        if not strong:
+            # Bounded retrieval found nothing that clearly describes the theme.
+            # That is a limitation, never a claim that the theme is absent from
+            # the real building.
+            result.status = ResultStatusV2.PARTIAL
+            result.unknown_parts.append(structured["theme"])
+            result.add_limitation(
+                "EVIDENCE_SCOPE_ERROR",
+                "this model records no concept named by that theme, so the objects and "
+                "text below are the closest it holds, not a description of it",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -522,24 +643,34 @@ def _attach_evidence(
         scope_kind = "structured"
         predicates.append(_RD.c.entity_id.in_(compiled.id_select()))
     else:
+        # A profile has no structured target set of its own, so its evidence can
+        # only name the objects a theme is about through ENTITY documents;
+        # relationship text records no subject class (§5).
         scope_kind = "unscoped_fallback"
+        predicates.append(_RD.c.entity_id.isnot(None))
 
-    rows = context.session.execute(
+    select = (
         sa.select(
             _RD.c.id,
             _RD.c.source_kind,
             _RD.c.document_text,
             _RD.c.text_truncated,
+            _ET.c.ifc_class,
             (sa.literal(1.0) - distance).label("similarity"),
         )
+        .select_from(_RD.outerjoin(_ET, _ET.c.id == _RD.c.entity_id))
         .where(*predicates)
         .order_by(distance)
         .limit(context.settings.rag_facet_top_k + _DIVERSITY_SLICE)
-    ).all()
+    )
+    rows = context.session.execute(select).all()
     result.statement_count += 1
+    if not rows:
+        rows = _exact_evidence_retry(context, select, result)
 
     threshold = 0.5
     excerpts: list[EvidenceExcerpt] = []
+    subject_classes: dict[str, int] = {}
     primary_budget = context.settings.rag_facet_top_k
     diversity_budget = _DIVERSITY_SLICE
     truncated_any = False
@@ -554,6 +685,8 @@ def _attach_evidence(
         else:
             continue
         truncated_any = truncated_any or bool(row.text_truncated)
+        if row.ifc_class:
+            subject_classes[row.ifc_class] = subject_classes.get(row.ifc_class, 0) + 1
         excerpts.append(
             EvidenceExcerpt(
                 evidence_id=f"ev:{row.id}",
@@ -568,11 +701,14 @@ def _attach_evidence(
     scope_count = 0
     if isinstance(result.result, EntitySetResult):
         scope_count = result.result.matched_cardinality
+    else:
+        scope_count = sum(subject_classes.values())
     result.evidence = QualitativeEvidenceResult(
         scope_cardinality=scope_count,
         excerpts=excerpts,
         scope_kind=scope_kind,
         truncated_evidence=truncated_any,
+        subject_classes=subject_classes,
     )
     if truncated_any:
         result.add_limitation(
