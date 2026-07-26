@@ -54,7 +54,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 66
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=16857p/2081c · cost=$0.006904 · db=13 · 18278 ms*
 
@@ -78,7 +78,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 551
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15761p/981c · cost=$0.002814 · db=3 · 9469 ms*
 
@@ -100,7 +100,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 9
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=28591p/2819c · cost=$0.004726 · db=0 · 20664 ms*
 
@@ -124,7 +124,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** a clarification — model 1 has only one storey, so "second floor" cannot be resolved.
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=1 · tokens=69159p/1766c · cost=$0.016039 · db=0 · 17212 ms*
 
@@ -146,7 +146,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 1981
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15801p/1250c · cost=$0.003364 · db=3 · 13016 ms*
 
@@ -168,7 +168,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 720
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=17836p/1862c · cost=$0.006381 · db=14 · 13574 ms*
 
@@ -192,7 +192,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 1819
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=16808p/2076c · cost=$0.004608 · db=3 · 16262 ms*
 
@@ -214,7 +214,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 450
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=31286p/4274c · cost=$0.007084 · db=0 · 41018 ms*
 
@@ -238,7 +238,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 568
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15837p/1815c · cost=$0.004412 · db=3 · 16045 ms*
 
@@ -260,7 +260,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** 126
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=31009p/5793c · cost=$0.010932 · db=9 · 41186 ms*
 
@@ -284,7 +284,7 @@ The eleven questions first recorded under Task 23, re-run against the Task 24 pi
 
 **Expected:** a clarification — this model carries no quantity sets and no `OverallWidth` in canonical JSON, so width is genuinely unanswerable.
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=16898p/2007c · cost=$0.006213 · db=11 · 15383 ms*
 
@@ -314,7 +314,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 568
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15393p/906c · cost=$0.002820 · db=3 · 7785 ms*
 
@@ -336,7 +336,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 87 (81 stairs + 6 ramps)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=29538p/4478c · cost=$0.006989 · db=0 · 30784 ms*
 
@@ -360,7 +360,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 407
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15764p/1072c · cost=$0.002881 · db=3 · 12243 ms*
 
@@ -382,7 +382,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** a qualitative description of stairs (81), ramps (6), railings (59) and circulation spaces
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=29404p/9079c · cost=$0.014280 · db=1 · 76159 ms*
 
@@ -406,7 +406,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** an honest 'this model contains no cost information'
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=clarification · llm_calls=2 · tokens=27068p/1838c · cost=$0.003195 · db=0 · 16755 ms*
 
@@ -430,7 +430,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** none - this model has 0 IfcSpace objects on floor band 2
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=16200p/1992c · cost=$0.007383 · db=9 · 14144 ms*
 
@@ -454,7 +454,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** chrome metal (405), clear glass (42), glass (11)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=29516p/7761c · cost=$0.011089 · db=0 · 57747 ms*
 
@@ -478,7 +478,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** an honest 'the model does not record building use'
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=29182p/3268c · cost=$0.007140 · db=1 · 29430 ms*
 
@@ -503,7 +503,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 720 walls rated EI60
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=16125p/2953c · cost=$0.005900 · db=5 · 29477 ms*
 
@@ -525,7 +525,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 35
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=29909p/3148c · cost=$0.007702 · db=11 · 25200 ms*
 
@@ -549,7 +549,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** contents of floor band 9 (uppermost by elevation)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=clarification · llm_calls=1 · tokens=14674p/4213c · cost=$0.005851 · db=0 · 30207 ms*
 
@@ -571,7 +571,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** spaces connected to stairs; connectivity traversal is not executed by this pipeline
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=29447p/5937c · cost=$0.008795 · db=0 · 43371 ms*
 
@@ -595,7 +595,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** an honest 'no U-value/thermal data in this model'
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=28967p/6277c · cost=$0.009124 · db=0 · 48662 ms*
 
@@ -619,7 +619,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** a general summary of the building
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=17578p/2101c · cost=$0.007252 · db=1 · 14641 ms*
 
@@ -643,7 +643,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 137
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=clarification · llm_calls=2 · tokens=27045p/2947c · cost=$0.004577 · db=0 · 60292 ms*
 
@@ -667,7 +667,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 6 ramps exist; the model records no accessibility classification
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=29278p/4853c · cost=$0.008400 · db=3 · 36551 ms*
 
@@ -691,7 +691,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 16
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15952p/1957c · cost=$0.004341 · db=3 · 19437 ms*
 
@@ -713,7 +713,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** 9 floor levels (from 45 IfcBuildingStorey entities)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=28349p/5938c · cost=$0.008576 · db=0 · 43405 ms*
 
@@ -737,7 +737,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** cannot be determined - this model stores no area quantities for spaces
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=27718p/4998c · cost=$0.007275 · db=0 · 33446 ms*
 
@@ -761,7 +761,7 @@ Questions written as a real user would ask them, mixing BIM-expert and lay phras
 
 **Expected:** none - this model contains no parking spaces (0 parking-named objects)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=clarification · llm_calls=2 · tokens=28118p/6230c · cost=$0.008895 · db=0 · 48693 ms*
 
@@ -791,7 +791,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** 551
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15761p/1085c · cost=$0.002902 · db=3 · 10027 ms*
 
@@ -813,7 +813,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** 54
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=15968p/1665c · cost=$0.004446 · db=3 · 13434 ms*
 
@@ -841,7 +841,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** both models listed with their names
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=error · terminal=error · llm_calls=0 · tokens=0p/0c · cost=cost unavailable (None) · db=0 · 3 ms*
 
@@ -863,7 +863,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** one door with its bounded details
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=29032p/6920c · cost=$0.009941 · db=0 · 54024 ms*
 
@@ -887,7 +887,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** none - this model contains no escalators
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=27668p/3920c · cost=$0.005918 · db=0 · 32707 ms*
 
@@ -911,7 +911,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** refusal to assert a false count
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=29557p/3332c · cost=$0.005561 · db=0 · 26521 ms*
 
@@ -935,7 +935,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** 428
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=clarify · terminal=unavailable · llm_calls=2 · tokens=27614p/4084c · cost=$0.006112 · db=0 · 33127 ms*
 
@@ -961,7 +961,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** 551 doors, 428 windows, 81 stairs; floor band 4 has the most doors (142)
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=hybrid · terminal=success · llm_calls=3 · tokens=33683p/10801c · cost=$0.017781 · db=6 · 77447 ms*
 
@@ -985,7 +985,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** a materials description for model 1
 
-**Verdict:** _(to be assessed)_
+**Verdict:** FAIL
 
 *route=hybrid · terminal=success · llm_calls=2 · tokens=70097p/2856c · cost=$0.019826 · db=1 · 26012 ms*
 
@@ -1007,7 +1007,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** cannot be determined - this model stores no area quantities
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PARTIAL
 
 *route=clarify · terminal=unavailable · llm_calls=1 · tokens=14794p/1089c · cost=$0.001970 · db=0 · 8695 ms*
 
@@ -1029,7 +1029,7 @@ Chosen to exercise paths none of the earlier runs touched: a conversational foll
 
 **Expected:** a request for clarification
 
-**Verdict:** _(to be assessed)_
+**Verdict:** PASS
 
 *route=clarify · terminal=clarification · llm_calls=1 · tokens=14332p/884c · cost=$0.001621 · db=0 · 7745 ms*
 
