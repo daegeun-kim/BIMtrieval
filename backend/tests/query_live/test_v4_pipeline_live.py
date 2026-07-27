@@ -377,46 +377,70 @@ def test_the_catalog_lists_every_model_with_its_recorded_name(live_session):
 
 
 def test_pipeline_runs_end_to_end_without_a_provider(live_session, manifest2):
-    """Bind/answer are injected, so the whole chain runs with zero LLM calls.
+    """Resolve/ground/answer are injected, so the chain runs with zero LLM calls.
 
-    Covers ledger -> recall -> normalization -> validation -> compile -> execute
-    -> packet -> answer validation -> viewer, and asserts the delivered answer is
-    grounded and free of internal wording.
+    Covers intent -> ledger -> recall -> normalization -> validation ->
+    preservation -> compile -> execute -> viewer -> packet -> answer validation,
+    and asserts the delivered answer is grounded and free of internal wording.
     """
+    from app.llm.schemas_grounding import GroundedBindings, SlotBinding
     from app.llm.schemas_v2 import ClaimKind, GroundedAnswerV2, GroundedClaim
+    from app.llm.schemas_v5 import (
+        IntentOperation,
+        IntentPart,
+        IntentTarget,
+        ResolvedIntent,
+        VisualizationIntent,
+    )
     from app.query.binding.phrasing import banned_terms_in
     from app.query.binding.pipeline import PipelineRequest, run_pipeline
 
-    def _bind(context):
-        assert "projection_json" in context and "payload" in context
-        ledger = context["payload"]["requirement_ledger"]["requirements"]
-        target = next(r for r in ledger if r.get("role") == "target")
-        plan = LogicalPlan(
-            response_language="en",
-            answer_parts=[
-                AnswerPartV2(
-                    part_id=target["part"],
-                    request_text="how many doors are in this building?",
-                    result_kind=ResultKind.SCALAR,
-                    target=TargetNode(node_id="t1", semantic_id="cls:IfcDoor"),
-                    aggregate=AggregateNode(node_id="a1", function=AggregateFunction.COUNT),
-                    scope=ScopeNode(node_id="s1", kind=ScopeKindV2.ACTIVE_MODEL),
-                    viewer_set=ViewerSetPolicy.REQUESTED,
-                    is_primary_visual=True,
-                )
-            ],
-            dispositions=[
-                RequirementDisposition(
-                    requirement_id=r["id"],
-                    disposition=DispositionKind.BOUND,
-                    part_id=target["part"],
-                    node_ids=["cls:IfcDoor"],  # a semantic id: relinked in code
-                )
-                for r in ledger
-                if r.get("required")
-            ],
+    def _resolve(context):
+        payload = context["payload"]
+        # task28 §2: the resolver receives the complete conversation and no
+        # manifest at all.
+        assert payload["conversation"][-1]["content"].startswith("how many doors")
+        assert "projection_json" not in context
+        return (
+            ResolvedIntent(
+                normalized_request="how many doors are in this building?",
+                language="en",
+                topic="doors",
+                parts=[
+                    IntentPart(
+                        part_id="P1",
+                        request_text="how many doors are in this building?",
+                        operation=IntentOperation.COUNT,
+                        highlightable=True,
+                    )
+                ],
+                targets=[IntentTarget(target_id="T1", part_id="P1", text="doors")],
+                visualization=VisualizationIntent.PRIMARY_ONLY,
+            ),
+            None,
         )
-        return plan, None
+
+    def _ground(context):
+        assert "projection_json" in context and "payload" in context
+        # task30 §4: the grounding call receives the fixed structure and the
+        # slots needing an identity — never the transcript, and never a request
+        # to build a plan.
+        assert context["payload"]["resolved_request"]
+        assert "conversation" not in context["payload"]
+        slots = context["payload"]["slots"]
+        target_slot = next(s for s in slots if s["needs"] == "target")
+        # The part's shape was decided before this call, not by it.
+        assert context["payload"]["parts"][0]["result_kind"] == "scalar"
+        return (
+            GroundedBindings(
+                bindings=[
+                    SlotBinding(
+                        slot_id=target_slot["slot_id"], semantic_id="cls:IfcDoor"
+                    )
+                ]
+            ),
+            None,
+        )
 
     def _answer(payload):
         fact = payload["answer_parts"][0]["facts"][0]
@@ -441,16 +465,23 @@ def test_pipeline_runs_end_to_end_without_a_provider(live_session, manifest2):
     outcome = run_pipeline(
         live_session,
         PipelineRequest(question="how many doors are in this building?", source_model_id=MODEL_2),
-        bind=_bind,
+        resolve=_resolve,
+        ground=_ground,
         answer=_answer,
         correct=_correct,
     )
     assert outcome.terminal_status == "success"
-    assert outcome.llm_calls == 2
+    # §1: resolve + ground + answer for a normally answered question.
+    assert outcome.llm_calls == 3
     assert not outcome.used_correction
+    assert not outcome.used_deterministic_intent
     assert not outcome.used_fallback, outcome.answer_validation_failures
     assert outcome.results and outcome.results[0].status is ResultStatusV2.EXACT
     assert not banned_terms_in(outcome.answer)
     assert outcome.hydration.primary_global_ids
+    # §7: nothing of the resolved meaning went missing on the way to the plan.
+    assert outcome.preservation is not None and outcome.preservation.ok
+    # §9: the viewer identities are attributed to the part the answer describes.
+    assert outcome.hydration.contributing_part_ids() == ["P1"]
     # The disposition named a semantic id; code relinked it to the local handle.
     assert outcome.validation.normalization.relinked_references

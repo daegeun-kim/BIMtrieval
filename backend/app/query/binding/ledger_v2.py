@@ -1,19 +1,23 @@
-"""Deterministic retrieval-requirement ledger (task26 §6).
+"""Deterministic retrieval-requirement ledger (task26 §6, task30 §3).
 
 The ledger is a graph of typed REQUEST REQUIREMENTS, not a bag of meaningful
-words. Phase 1 (`build_ledger_skeleton`) detects structure from the question
-text alone: exact spans, phrases, operations, grouping/extremum/limit language,
-traversal intent, conjunctions, and inherited/selection references. Phase 2
-(model resolution, `app.query.binding.recall.resolve_ledger`) attaches
-candidate semantic IDs, applicability, and a resolution state from the manifest
-and the recall channels.
+words. Under Task 30 it has ONE job on the active path: carrying retrieval
+hints into recall.
 
-The LLM never creates or deletes requirements — it binds/decomposes them, and
-deterministic validation later checks that every material requirement's
-selected concepts CONTRIBUTE to a compatible logical node (§6.4). A multi-word
-phrase is ONE requirement; decomposition into target + qualifier is the
-binder's job, checked by token coverage at validation time, so no per-word
-item explosion and no silently droppable qualifier.
+`app.query.binding.obligations.build_recall_ledger` is what fills it — one
+requirement per typed obligation, so its `source_text` is a hint used to find
+backend candidates and nothing more. Such a ledger is marked `typed`, and no
+stage may then use its words to decide a role the resolver already established.
+The Task 28/29 machinery that derived roles from phrase shape is gone: it was
+the mechanism by which a resolved request lost its own structure.
+
+`build_ledger_skeleton` remains as the lexical path for the no-resolver case
+(the deterministic fallback and the dev endpoints). It detects structure from
+question text alone and is a retrieval aid and audit artifact only.
+
+Phase 2 (model resolution, `app.query.binding.recall.resolve_ledger`) is shared
+by both paths: it attaches candidate semantic IDs, applicability, and a
+resolution state from the manifest and the recall channels.
 
 Vocabulary here is structural English (interrogatives, operations, grouping
 words). No domain noun, model name, or expected answer appears.
@@ -95,6 +99,12 @@ class LedgerRequirement:
     span_kind: str | None = None
     #: Explicit limit value when the language fixed one ("one door" -> 1).
     limit_value: int | None = None
+    #: The resolved-intent handle this requirement represents (task28 §4): a
+    #: part id for a target/operation/output, a constraint id for everything
+    #: else. Empty only on the lexical fallback path. This is what lets
+    #: preservation checking say WHICH piece of user meaning went missing,
+    #: rather than which token did.
+    intent_ref: str | None = None
 
     # -- phase 2 (model resolution) -----------------------------------------
     resolution: ResolutionState = ResolutionState.UNRESOLVED
@@ -137,6 +147,8 @@ class LedgerRequirement:
             payload["no_stored_value_matches"] = True
         if self.limit_value is not None:
             payload["limit"] = self.limit_value
+        if self.intent_ref:
+            payload["from_intent"] = self.intent_ref
         if self.source != "question_span":
             payload["source"] = self.source
         return payload
@@ -147,6 +159,12 @@ class LedgerV2:
     question: str
     requirements: list[LedgerRequirement] = field(default_factory=list)
     spans: list[ModifierSpan] = field(default_factory=list)
+    #: True when the requirements ARE typed obligations from the resolved intent
+    #: (task30 §3). Their `source_text` is then a retrieval hint only, and no
+    #: stage may use it to decide a role the resolver already established — in
+    #: particular lexical coverage becomes a diagnostic signal rather than the
+    #: authority on whether meaning survived.
+    typed: bool = False
 
     def requirement(self, requirement_id: str) -> LedgerRequirement | None:
         return next(
@@ -167,6 +185,10 @@ class LedgerV2:
                 seen.append(requirement.part_hint)
         return seen
 
+    def for_intent(self, intent_ref: str) -> list[LedgerRequirement]:
+        """Every requirement derived from one intent part or constraint (§4)."""
+        return [r for r in self.requirements if r.intent_ref == intent_ref]
+
     def to_payload(self) -> dict[str, Any]:
         return {"requirements": [r.to_payload() for r in self.requirements]}
 
@@ -175,6 +197,7 @@ class LedgerV2:
             "requirements": len(self.requirements),
             "required": len(self.required()),
             "parts": len(self.part_hints()),
+            "from_intent": len([r for r in self.requirements if r.intent_ref]),
         }
 
 
@@ -297,7 +320,7 @@ class _Counter:
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: intent skeleton
+# Phase 1b: lexical intent skeleton (deterministic fallback path)
 # ---------------------------------------------------------------------------
 
 

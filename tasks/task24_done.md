@@ -40,7 +40,7 @@ IFC file, or test count.
 In particular:
 
 - no exact-query string matching;
-- no branches for individual phrases from `specs/test_query.md`;
+- no branches for individual phrases from `logs/test_query.md`;
 - no hard-coded expected counts;
 - no special handling for one named property value, object type, floor expression, or absent
   concept;
@@ -56,7 +56,7 @@ Every implementation change must enforce a general invariant, such as:
 - exact, zero, unavailable, and partial evidence are not interchangeable;
 - the final LLM cannot choose among unexecuted or competing semantic interpretations.
 
-The questions in `specs/test_query.md` are acceptance tests only. They must not be used as a source
+The questions in `logs/test_query.md` are acceptance tests only. They must not be used as a source
 of query-specific production rules. Add unrelated and paraphrased tests for every mechanism so a
 sample-specific patch cannot pass validation.
 
@@ -687,7 +687,7 @@ Measure separately:
 - viewer hydration time;
 - total response latency and tokens.
 
-Compare the complete Task 24 run against the timings recorded in `specs/test_query.md`. Provider
+Compare the complete Task 24 run against the timings recorded in `logs/test_query.md`. Provider
 latency varies, so acceptance is based on both end-to-end evidence and structural reductions. The
 new implementation must demonstrate fewer executed candidate queries, smaller final prompts, no
 extra LLM calls, and a lower median token/latency result across the same live suite.
@@ -860,7 +860,7 @@ Cover:
 ## 13.6 Anti-overfitting and metamorphic tests
 
 For each corrected mechanism, add at least one unrelated query or paraphrase that was not copied
-from `specs/test_query.md`.
+from `logs/test_query.md`.
 
 Also test that:
 
@@ -876,7 +876,7 @@ Also test that:
 
 ## 13.7 Full live suite
 
-Run every query in `specs/test_query.md` against its specified model and session behavior. Record:
+Run every query in `logs/test_query.md` against its specified model and session behavior. Record:
 
 - binding;
 - authoritative pre-answer result;

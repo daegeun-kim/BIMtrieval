@@ -38,3 +38,10 @@ frontend_openapi_snapshot.json
 ingestion/ifc_original/FOJAB_Landsarkivet.ifc
 ingestion/ifc_original/SampleArchitecture.ifc
 ingestion/ifc_original/Wellness_center_Sama.ifc
+
+# Task 29 transient evaluation artifacts. The human-readable iteration records
+# and reports in logs/ ARE tracked; these raw per-run dumps are not, and the
+# gate detail must stay out of the debugging process by design.
+logs/_dev_results_*.json
+logs/_gate_detail_*.json
+logs/_gate_trace_*.jsonl

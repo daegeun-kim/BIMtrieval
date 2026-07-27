@@ -16,8 +16,9 @@ BIM_RAG/
 ├── backend/     # FastAPI SQL/RAG/graph/hybrid query service (read-only on BIM data)
 ├── frontend/    # React/Three.js (That Open Fragments) BIM viewer + chat UI
 ├── scripts/     # local one-click dev launcher (Task 12)
-├── specs/       # authoritative blueprints (spec_v001 … spec_v006)
-├── tasks/       # smaller updates/fixes; merged into specs when done
+├── specs/       # authoritative project blueprints only (spec_v001 … spec_v007)
+├── tasks/       # individual implementation tasks for Claude
+├── logs/        # test-query reports, debugging records, and shared references
 └── docs/        # architecture and evaluation notes
 ```
 

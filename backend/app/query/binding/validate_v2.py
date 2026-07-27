@@ -643,11 +643,22 @@ def _contribution_issues(
                 part_id = disposition.part_id or requirement.part_hint
                 unavailable_map.setdefault(part_id, []).append(requirement)
                 continue
-            if requirement.resolution is ResolutionState.RESOLVABLE and requirement.role in (
-                RequirementRole.TARGET,
-                RequirementRole.FILTER,
-                RequirementRole.SCOPE,
-                RequirementRole.GROUP,
+            # task30 iteration 002: only a SUBJECT that recall resolved and the
+            # planner then declined is a mechanical gap worth a corrective call.
+            # A declined narrowing condition is an honest source limitation: the
+            # part still executes, degraded and disclosed.
+            #
+            # Treating every declined condition as a correctable gap is what
+            # turned v4/v5 into a refusal engine. The gap blocks execution, the
+            # one correction rarely changes the planner's mind, and the whole
+            # request then dies — including the parts that were perfectly
+            # answerable. v3, which had no such gate, answered 31 of 42
+            # benchmark cases against v4-revised's 25 and lost verdicts only by
+            # over-answering. Refusing an answerable request costs far more than
+            # answering it with a stated caveat.
+            if (
+                requirement.resolution is ResolutionState.RESOLVABLE
+                and requirement.role is RequirementRole.TARGET
             ):
                 issues.append(
                     ValidationIssue(
@@ -702,7 +713,17 @@ def _contribution_issues(
         # Token coverage for phrase requirements: every content token of the
         # phrase must be covered by the bound concepts/values, or the qualifier
         # was silently dropped (the "205 doors on the second floor" defect).
-        if requirement.role in (RequirementRole.TARGET, RequirementRole.FILTER):
+        #
+        # task30 §5: on a TYPED ledger this check is a diagnostic signal only.
+        # The obligation itself records whether it was bound or explicitly
+        # disposed, which is a stronger guarantee than word overlap — an
+        # unbound slot has no identity at all, so nothing can be silently
+        # substituted for it — and the words here are retrieval hints that were
+        # never meant to be covered concept-for-concept.
+        if not ledger.typed and requirement.role in (
+            RequirementRole.TARGET,
+            RequirementRole.FILTER,
+        ):
             uncovered = _uncovered_tokens(requirement, referenced, plan, part_id, manifest)
             if uncovered:
                 issues.append(

@@ -1,24 +1,32 @@
 """Top-level query service — the only entry point the HTTP layer calls.
 
-Implements the experiment2_v4 pipeline for one natural-language question:
+Implements the experiment2_v5 pipeline for one natural-language question:
 
     trace accumulator created FIRST (task26 §14.2)
     → session/selection validation
-    → v002 manifest + binder projection
-    → deterministic requirement ledger + always-parallel recall
-    → LLM call 1: typed logical plan
-    → ten-layer validation, optional budget-gated correction
+    → LLM call 1: semantic intent resolution over the COMPLETE conversation
+    → v002 manifest + capability projection
+    → intent-derived requirement ledger + always-parallel recall
+    → LLM call 2: grounding planner → typed logical plan
+    → ten-layer validation + semantic-preservation check, optional correction
+    → backend-justified clarification gate
     → per-part compilation + authoritative execution
-    → answer packet → LLM call 2 → claim validation / deterministic fallback
-    → typed viewer sets
+    → viewer identities from every requested highlightable part
+    → answer packet → LLM call 3 → claim validation / deterministic fallback
     → exactly ONE terminal record appended to the permanent query trace
 
-**Exactly two principal LLM calls** for a normally answered active-model
-question; one budget-gated correction at most; no request exceeds three.
-Provider failures degrade at the stage that owns them (§13). Every request —
-questions, catalog questions, reset, confirmation, early errors — appends one
-terminal record to `backend/app/evaluation/query_trace.jsonl`; the two v3 log
-files receive no further writes.
+**Exactly three principal LLM calls** for a normally answered active-model
+question — the two cheap planning calls of the one semantic planning boundary
+(task28 §1), plus the answer writer; one budget-gated correction at most, so no
+request exceeds four. Provider failures degrade at the stage that owns them.
+
+The complete conversation reaches the resolver: no turn window and no
+per-message truncation are applied on the normal path (§2). Pending
+clarification state and the last resolved intent live in the existing session
+mechanism, so a clarification answer completes the same plan (§3).
+
+Every request — questions, catalog questions, reset, confirmation, early errors
+— appends one terminal record to `backend/app/evaluation/query_trace.jsonl`.
 """
 
 from __future__ import annotations
@@ -46,13 +54,15 @@ from app.llm.client import (
     get_llm_client,
 )
 from app.llm.prompts import (
-    BINDER_V3_PROMPT_VERSION,
-    GROUNDED_ANSWERER_V2_PROMPT_VERSION,
+    GROUNDED_ANSWERER_V3_PROMPT_VERSION,
+    GROUNDING_BINDER_V1_PROMPT_VERSION,
+    INTENT_RESOLVER_V2_PROMPT_VERSION,
 )
 from app.query.binding.pipeline import (
     PIPELINE_VERSION,
     PipelineOutcome,
     PipelineRequest,
+    intent_trace_payload,
     run_pipeline,
     status_summary,
 )
@@ -122,8 +132,10 @@ class QueryService:
         query_trace.set(
             question=request.question,
             active_source_model_id=request.active_source_model_id,
+            # task28 §2: the trace records the conversation the resolver
+            # actually received, not a six-turn excerpt of it.
             history=[
-                {"role": t.role, "content": t.content} for t in request.history[-6:]
+                {"role": t.role, "content": t.content} for t in request.history
             ],
             selected_global_ids=list(request.selected_global_ids or [])[:200],
             selected_entity_ids=list(request.selected_entity_ids or [])[:200],
@@ -246,13 +258,17 @@ class QueryService:
 
         client = self._client()
         query_trace.set_versions(
+            pipeline=PIPELINE_VERSION,
+            intent_model=self.settings.get_intent_model(),
             binder_model=self.settings.get_binder_model(),
             correction_model=self.settings.get_correction_model(),
             answer_model=self.settings.get_answer_model(),
+            intent_effort=self.settings.resolved_intent_reasoning_effort,
             binder_effort=self.settings.binder_reasoning_effort,
             answer_effort=self.settings.answer_reasoning_effort,
-            binder_prompt=BINDER_V3_PROMPT_VERSION,
-            answer_prompt=GROUNDED_ANSWERER_V2_PROMPT_VERSION,
+            intent_prompt=INTENT_RESOLVER_V2_PROMPT_VERSION,
+            binder_prompt=GROUNDING_BINDER_V1_PROMPT_VERSION,
+            answer_prompt=GROUNDED_ANSWERER_V3_PROMPT_VERSION,
             service_tier=self.settings.openai_service_tier,
         )
         has_log = hasattr(client, "log")
@@ -321,23 +337,34 @@ class QueryService:
                 ):
                     previous = None
 
+                pending = state.pending_clarification
+                if pending is not None and not pending.matches_model(
+                    request.active_source_model_id
+                ):
+                    pending = None
+
                 try:
                     outcome = run_pipeline(
                         session,
                         PipelineRequest(
                             question=request.question,
                             source_model_id=request.active_source_model_id,
+                            # task28 §2: every available turn, intact. The
+                            # 20-turn window and 400-character truncation the v4
+                            # binder context applied are gone from this path.
                             history=[
                                 {"role": t.role, "content": t.content}
-                                for t in request.history[-self.settings.max_history_turns :]
+                                for t in request.history
                             ],
                             selected_entities=selected,
                             selection_entity_ids=selection.entity_ids,
                             previous_scope=previous,
+                            pending_clarification=pending,
                         ),
-                        bind=client.bind_query_v2,
-                        correct=client.correct_binding_v2,
-                        answer=client.generate_grounded_answer_v2,
+                        resolve=client.resolve_intent_v5,
+                        ground=client.ground_plan_v5,
+                        correct=client.correct_grounding_v5,
+                        answer=client.generate_grounded_answer_v5,
                         settings=self.settings,
                         embedding_service_getter=get_embedding_service,
                     )
@@ -461,6 +488,10 @@ class QueryService:
         state.active_source_model_id = request.active_source_model_id
         state.last_route = "hybrid"
         state.previous_scope = outcome.next_scope
+        # task28 §3: the pending clarification and the last resolved intent
+        # survive into the next turn, so an answer completes the same plan.
+        state.pending_clarification = outcome.next_pending_clarification
+        state.last_resolved_intent = outcome.intent
         state.last_primary_entity_ids = [
             e.entity_id for r in outcome.results for e in r.examples
         ][:200]
@@ -479,6 +510,15 @@ def _record_outcome(query_trace: QueryTrace, outcome: PipelineOutcome) -> None:
     """Move the pipeline's bounded diagnostics into the terminal record (§14.5)."""
     query_trace.extend_stages([s.to_payload() for s in outcome.stages])
     query_trace.terminal(outcome.terminal_stage, outcome.terminal_status)
+    # task28 §2: the resolved intent is preserved in the trace, with its turn
+    # provenance and any contract violation the sanitizer caught.
+    resolved = intent_trace_payload(outcome)
+    if resolved is not None:
+        query_trace.set(resolved_intent=resolved)
+    if outcome.preservation is not None:
+        query_trace.set(semantic_preservation=outcome.preservation.to_payload())
+    if outcome.clarification is not None:
+        query_trace.set(clarification=outcome.clarification.to_payload())
     if outcome.manifest is not None:
         query_trace.set_versions(
             manifest_schema="v002",
@@ -505,7 +545,7 @@ def _record_outcome(query_trace: QueryTrace, outcome: PipelineOutcome) -> None:
             },
         )
     if outcome.plan is not None:
-        query_trace.set(binder_output=outcome.plan.model_dump(mode="json"))
+        query_trace.set(grounding_output=outcome.plan.model_dump(mode="json"))
     if outcome.corrected_plan is not None:
         query_trace.set(correction_output=outcome.corrected_plan.model_dump(mode="json"))
     if outcome.validation is not None:
@@ -536,11 +576,15 @@ def _record_outcome(query_trace: QueryTrace, outcome: PipelineOutcome) -> None:
     query_trace.set(
         llm_calls=outcome.llm_calls,
         used_correction=outcome.used_correction,
+        used_deterministic_intent=outcome.used_deterministic_intent,
         correction_skipped_reason=outcome.correction_skipped_reason,
         used_fallback=outcome.used_fallback,
         answer_validation_failures=outcome.answer_validation_failures[:5],
         database_statements=outcome.statement_count,
         budget=outcome.budget.to_payload(),
+        # §9: the per-part viewer identities, so the delivered text, result
+        # summary, class counts, and highlighted ids can be checked to agree.
+        viewer_parts=outcome.hydration.to_payload(),
         warnings=outcome.warnings[:20],
     )
 

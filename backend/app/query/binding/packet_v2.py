@@ -20,10 +20,14 @@ __all__ = ["AnswerPacketV2", "build_answer_packet_v2"]
 
 @dataclass
 class AnswerPacketV2:
+    #: The resolved standalone request — the same authoritative interpretation
+    #: the plan was grounded from, so the answerer cannot re-read the raw
+    #: transcript and describe a different question (task28 §3, §9).
     question: str
     response_language: str = "en"
     parts: list[PartResultV2] = field(default_factory=list)
-    primary_visual_part_id: str | None = None
+    #: Every part whose identities the viewer will show (task28 §9).
+    visual_part_ids: list[str] = field(default_factory=list)
     clarifications: list[str] = field(default_factory=list)
 
     def part(self, part_id: str) -> PartResultV2 | None:
@@ -87,12 +91,12 @@ class AnswerPacketV2:
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "question": self.question,
+            "resolved_request": self.question,
             "response_language": self.response_language,
             "answer_parts": [p.to_packet_payload() for p in self.parts],
         }
-        if self.primary_visual_part_id:
-            payload["primary_visual_part_id"] = self.primary_visual_part_id
+        if self.visual_part_ids:
+            payload["visual_part_ids"] = list(self.visual_part_ids)
         if self.clarifications:
             payload["open_questions"] = self.clarifications[:3]
         terms = sorted(
@@ -108,13 +112,13 @@ def build_answer_packet_v2(
     parts: list[PartResultV2],
     *,
     response_language: str = "en",
-    primary_visual_part_id: str | None = None,
+    visual_part_ids: list[str] | None = None,
     clarifications: list[str] | None = None,
 ) -> AnswerPacketV2:
     return AnswerPacketV2(
         question=question,
         response_language=response_language,
         parts=parts,
-        primary_visual_part_id=primary_visual_part_id,
+        visual_part_ids=list(visual_part_ids or []),
         clarifications=list(clarifications or []),
     )

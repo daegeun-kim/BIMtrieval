@@ -8,8 +8,15 @@ compatibility field for existing backend tests — it must never override a
 conflicting GlobalId selection (spec_v006 §10.4).
 
 Both selection lists are capped at 5 (spec_v002 Section 15: "Limit selected
-viewer objects supplied to LLM context to five"). `history` is capped at 20
-turns as a bounded-history default (Section 16.3: "bounded history").
+viewer objects supplied to LLM context to five").
+
+`history` carries the COMPLETE conversation (task28 §2). The v4 20-turn cap was
+the API-level half of the turn selection the semantic resolver replaced: the
+resolver reads every turn intact, and the only bound that may withhold one is an
+explicit provider limit, which is counted and reported rather than applied
+silently. The cap that remains here is a request-size guard, not a context
+window, and rejecting an oversized request is deliberately visible rather than
+quietly dropping the turns a follow-up depends on.
 """
 
 from __future__ import annotations
@@ -20,7 +27,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MAX_SELECTED_ENTITY_IDS = 5
 MAX_SELECTED_GLOBAL_IDS = 5
-MAX_HISTORY_TURNS = 20
+#: Request-size guard only (task28 §2). Far above any real conversation, so the
+#: resolver's own explicit character budget — not this number — is what ever
+#: bounds the transcript.
+MAX_HISTORY_TURNS = 200
 
 
 class HistoryTurn(BaseModel):

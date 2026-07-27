@@ -59,6 +59,16 @@ class SessionState(BaseModel):
     # this state is process-local and never serialized to a client.
     previous_scope: Any = None
 
+    # --- Pending clarification + last resolved intent (task28 §3) ---
+    # What the previous response asked the user to decide, and the meaning it
+    # was blocking. Carrying them lets the next turn COMPLETE the same plan
+    # instead of parsing the answer as an unrelated new request, and stops the
+    # same decision being requested twice. Minimal and typed by design: §3
+    # forbids adding a memory service or database for this. `Any` for the same
+    # reason as `previous_scope` — process-local dataclasses, never serialized.
+    pending_clarification: Any = None
+    last_resolved_intent: Any = None
+
 
 def reset(state: SessionState) -> SessionState:
     """Return a fresh SessionState for the same session_id (spec_v005 §12).

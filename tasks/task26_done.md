@@ -2193,10 +2193,10 @@ Assert:
 
 ## 17.9 Full four-model evaluation
 
-Preserve `specs/test_query_v3.md`. Generate:
+Preserve `logs/test_query_v3.md`. Generate:
 
 ```text
-specs/test_query_v4.md
+logs/test_query_v4.md
 ```
 
 Run:
@@ -2323,7 +2323,7 @@ Task 26 is complete only when all of the following are true:
 - result, answer, and viewer sets are operation-specific and consistent;
 - answer/correction provider failures degrade at their own stage;
 - all four current models are reingested/regenerated and pass readiness checks;
-- `specs/test_query_v4.md` reports stage-level results across all four models;
+- `logs/test_query_v4.md` reports stage-level results across all four models;
 - every app request appends exactly one complete or explicitly terminal-incomplete
   record to `backend/app/evaluation/query_trace.jsonl`;
 - legacy logs are imported as explicit `experiment2_v3` records;

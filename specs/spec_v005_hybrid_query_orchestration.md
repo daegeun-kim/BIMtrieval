@@ -945,3 +945,231 @@ Configured models, reasoning efforts, and roles unchanged. No added LLM call, ag
 judge, model-written SQL, retrieval store, framework, ontology, or database. Binder projection
 still the compact complete universe under the same USD request budget. No exact-query fallback,
 expected-count rule, or model-specific behavior exists.
+
+---
+
+## Task 28 amendment — experiment2_v5: semantic intent and reliable pipeline transfer
+
+The Task 26/27 pipeline computed correct answers to questions it had quietly changed. Every
+deterministic layer proved the plan was internally well formed — real ids, compatible uses,
+applicable subjects, compilable nodes — and none proved the plan still expressed what the user
+meant. Task 28 is the systemic repair: user meaning is resolved ONCE, made authoritative, and
+carried intact through grounding, execution, answer, and viewer selection. Individual recorded
+failures were not patched, and no benchmark wording, expected value, model fact, IFC name, or
+semantic ID entered code, prompts, or tests.
+
+The typed plan, semantic access contracts, deterministic compilation and execution, result states,
+and grounded answer design are preserved unchanged.
+
+### 1. One semantic planning boundary, two cheap calls
+
+```text
+complete conversation
+    -> semantic intent resolver          (planning call 1)
+    -> normalized standalone request     (authoritative from here on)
+    -> deterministic backend recommendation
+    -> grounding planner                 (planning call 2)
+    -> validated typed plan
+    -> deterministic execution
+    -> grounded answer and viewer filter
+```
+
+Both planning calls reuse the existing cheap planning configuration: the resolver defaults to the
+binder model and effort (`intent_model` / `intent_reasoning_effort` override it, and
+`intent_max_output_tokens` is 4,000 because its output is a small typed object). No advanced
+planning model, router, runtime judge, agent loop, or provider was added. Neither call writes SQL.
+
+A normally-answered question is **three** LLM calls — resolve, ground, answer. One budget-gated
+mechanical correction may still fire, so no request exceeds four. The resolver is tracked as its
+own budget role, so cost is attributable per successfully answered request including correction and
+fallback work.
+
+### 2. Semantic intent resolver (`llm/schemas_v5.py`, `query/binding/intent.py`)
+
+Runs BEFORE the ledger and recall. It receives the current message, the complete conversation in
+original order, the active model identity and the minimal session facts needed to resolve a
+reference, and any pending clarification. It receives **no manifest, no projection, and no
+database**, which is why it is cheap despite carrying every turn — and why anything backend-shaped
+in its output can only have been invented.
+
+`serialize_conversation` passes every available turn intact: the v4 20-turn window and the
+400-character-per-message truncation are gone from this path, and the API request cap moved from 20
+to 200 turns as a request-size guard rather than a context window. Only an explicit provider
+character budget may withhold a turn; when it does, the oldest turns go, the count and reason are
+recorded in the trace and surfaced as a warning, and the current message is never the turn dropped.
+
+`ResolvedIntent` is model-neutral and compact: the normalized standalone request, language, active
+topic, one part per independently answerable request (with its operation, the user own words for
+its subject, the characteristics requested for reporting, and whether it is highlightable), typed
+constraints (attribute, comparison, spatial, relationship, grouping, previous result, selection —
+each with negation and OR grouping), visualization intent, superseded earlier constraints,
+structured unresolved slots, whether this message resolves a pending clarification, and per-element
+turn provenance.
+
+`sanitize_intent` enforces the contract deterministically: a manifest-style identifier, an IFC or
+property-set name, or a query fragment that the user did not themselves type is a violation, as is
+a constraint or slot naming a part that does not exist or provenance past the end of the
+conversation. `repair_intent` fixes only structurally impossible bookkeeping — an orphaned
+constraint is REATTACHED, never deleted, because deleting a condition is the defect, not the fix.
+
+`deterministic_intent` builds the same typed object with no provider, so an absent, unavailable, or
+contract-breaking resolver degrades to reading the current message verbatim rather than abandoning
+the request. It finds less; it invents nothing; the degradation is recorded.
+
+The resolved intent is preserved in the permanent query trace under `resolved_intent`, with its
+provenance, any contract violations, and the conversation diagnostics.
+
+### 3. Stateful conversation, not standalone reparsing
+
+The resolver reads the raw conversation; every stage after it reads the resolved request. Pending
+clarification state and the last resolved intent live in the existing `SessionState` (typed,
+process-local, minimal) — no memory service, summarizer, or database was added. A clarification
+answer completes the pending intent instead of being parsed as an unrelated new request.
+
+### 4. Ledger and recommendation subordinate to resolved intent
+
+`build_ledger_from_intent` is the active path. Requirements are phrase- and intent-level: one per
+part target, per requested output, and per constraint, each carrying the `intent_ref` handle of the
+meaning it represents. Grammatical role comes from the resolver typed constraint kind, not from
+word position — so a coherent concept is never split into independent word requirements and topic
+context can never become a filter. A positional floor condition becomes a SCOPE resolved through
+the derived bands; any other spatial condition becomes a FILTER that must resolve against a real
+capability or be reported unavailable, never forced into a band it does not name.
+
+`build_ledger_skeleton` (the lexical Task 26/27 path) remains as a deterministic retrieval aid and
+audit artifact for the no-resolver path. It is no longer authoritative for topic, target, or role.
+
+Recall itself is unchanged in mechanism — all channels, RRF fusion, value linking, dense
+similarity, role compatibility, and the ordering pass — but it now runs over intent-derived
+requirements, so its recommendations are phrase- and intent-level and aware of the intended target.
+
+### 5. Grounding planner (`llm/grounding_context_v5.py`, `grounding_planner_v001`)
+
+The v4 binder, narrowed. It receives the immutable normalized request, the typed intent, the
+structured requirements, bounded recommendations, exact value matches, and the same compact
+capability projection as its cacheable stable prefix. It does **not** receive the conversation:
+that was already resolved, and re-sending it invites reinterpretation of settled meaning.
+
+Its only job is to select supported semantic IDs and assemble the existing typed logical plan,
+mapping every requested target, operation, constraint, scope, output, and visualization request to
+a plan contribution or an explicit unsupported/ambiguous disposition. It may not reinterpret the
+conversation, replace the requested topic with a nearby backend concept, silently add or remove
+constraints, treat a backend limitation as uncertainty, or invent anything.
+
+The one corrective call is unchanged in budget and scope and receives the SAME intent object
+unchanged: a repair may change the plan, never what the user meant.
+
+### 6. Backend-justified, persistent clarification (`query/binding/clarification.py`)
+
+The gate verifies structured evidence rather than trusting a model-written question. Exactly two
+things justify asking: a BLOCKING unresolved slot in the resolved intent, or a required requirement
+the backend itself resolved to materially different plausible readings. Anything else is refused,
+recorded in the trace as `rejected`, and the request continues to whatever it can honestly answer.
+
+In particular, this model not recording the requested fact is a SOURCE LIMITATION and returns the
+correct unavailable or partial result with an explanation — it is never converted into a question
+that asks the user to supply data. Ordinary language, breadth, needing several capabilities, and a
+safe returnable part are likewise never grounds to ask.
+
+Only the smallest missing decisions are asked (at most two slot questions). A justified
+clarification persists as a `PendingClarification` carrying the blocked request and its slots, so
+the next turn completes the same plan, and a decision the user already supplied is never requested
+twice.
+
+### 7. Semantic preservation before execution (`query/binding/preservation.py`)
+
+A deterministic boundary check between resolved intent and grounded plan, run before compilation
+and again after any correction. Its verdicts fold into the existing per-part gates, and every part
+is re-gated afterwards, so a preservation failure cannot coexist with a `ready` verdict:
+
+- `INTENT_PART_DROPPED` — an independently answerable request produced neither a plan part nor an
+  explanation of why this model cannot serve it;
+- `INTENT_TARGET_DROPPED` / `INTENT_OUTPUT_DROPPED` — a subject or a requested detail is unbound
+  and undisposed;
+- `INTENT_CONSTRAINT_DROPPED` — a condition, scope, grouping, or relationship reached no
+  requirement or was left unaccounted; an explicit unavailable/ambiguous disposition is NOT a drop,
+  silence is;
+- `INTENT_CONSTRAINT_INVENTED` — a filter node whose cited requirement is not a stated condition,
+  or a part applying more narrowing conditions than the request states. A multi-word subject
+  licenses at most ONE qualifier filter (a phrase can decompose); a bare noun licenses none;
+- `INTENT_VISUALIZATION_DROPPED` — the request asks for matching objects to be shown and no part
+  selects a viewer set;
+- `UNRESOLVED_SLOT_EXECUTED` — a blocking slot coexists with an executable part. Deliberately NOT
+  correctable: the missing decision is the user's, and guessing it is not a repair.
+
+Correctable preservation issues feed the single existing corrective call. Meaning is never repaired
+here: no different intent is ever inferred to make a plan executable.
+
+### 8. Execution preserves information
+
+Execution is unchanged and remains backend-authoritative: the LLM selects only typed semantic
+operations, the compiler chooses parameterized access methods the semantic contract already
+authorizes, and applicability, coverage, direction, model isolation, and completeness determine
+exact / zero / partial / ambiguous / unavailable. An unsupported optional enrichment marks only
+itself unknown and downgrades the part to partial while the supported core figure survives;
+independent valid parts survive the failure of another.
+
+### 9. One result contract for text and visualization
+
+Viewer hydration now runs BEFORE the answer is written, so the packet names exactly the parts the
+viewer will show. The v4 assumption that exactly one part is the visualization authority is gone:
+`_visual_part_ids` derives the shown parts from the resolved visualization intent (all requested
+sets, the primary one, or none) and the plan, and `hydrate_viewer_v2` combines the exact identities
+of every such part, deduplicated, under one shared cap, with truncation disclosed per part rather
+than inferred from deduplication. `part_global_ids` retains the per-part identities, so the
+delivered text, result summary, viewer class counts, highlighted ids, and trace can be checked to
+agree; the trace records them under `viewer_parts`.
+
+Two safety rules survive: a zero, unavailable, or non-highlightable part contributes nothing and
+can never cause an unrelated broader set to be shown; and a contextual base set is used only when
+no requested set exists at all, so a broader stand-in never mixes into exact identities.
+
+The answer packet carries the RESOLVED request rather than the raw question, so the answerer cannot
+describe a different question from the one that was grounded. Answer validation gained two
+stable-identity checks alongside the existing claim/value comparison: naming a `part_id` that was
+never produced is rejected, and leaving an answered part of a multi-part request undescribed is
+rejected. The deterministic fallback uses the same authoritative facts and limitations.
+
+### 10. Rule-only prompts
+
+The active roster is four prompts, all declarative rules, field definitions, and output-schema
+instructions only — no examples, demonstrations, sample conversations, sample queries, sample
+plans, benchmark wording, expected outputs, or model-specific facts:
+
+| role | prompt |
+| --- | --- |
+| planning call 1 | `intent_resolver_v001` |
+| planning call 2 | `grounding_planner_v001` |
+| conditional repair | `correction_v003` |
+| final answer | `grounded_answerer_v003` |
+
+`binder_v003`, `correction_v002`, and `grounded_answerer_v002` were removed with the pipeline they
+served; all three carried worked examples, placeholder plan shapes, and literal IFC class and
+property-set names. `tests/binding/test_v5_preservation.py` enforces the contract on every prompt
+in `ACTIVE_PROMPT_VERSIONS`: no example markers, no manifest-style identifier or IFC/Pset name, and
+no quoted natural-language phrase.
+
+### 11. Cost and call accounting
+
+The resolver is priced as its own role through the existing versioned registry. Its input is the
+prompt plus the conversation only — never the projection — so it is small and does not grow with
+the model:
+
+| conversation | input tokens | resolver cost (`gpt-5.4-nano`, 400-900 output tokens) |
+| --- | ---: | --- |
+| single turn | ~1,460 | $0.00079 - $0.00142 |
+| 3-turn follow-up | ~1,540 | $0.00081 - $0.00143 |
+| 12-turn conversation | ~2,680 | $0.00104 - $0.00166 |
+
+Against the Task 27 measured mean of $0.008532/query, the added planning call is roughly 10-20% of
+a request. It is deliberately not offset in this task: whether fewer corrections and fallbacks
+recover it is a question for the next billed run, which Task 28 does not perform.
+
+### 12. Preserved decisions
+
+Typed logical algebra, semantic access contract, v002 manifest and its compact projection,
+compiler adapters, result variants, ten validation layers, the USD request budget, the permanent
+query trace, and the public query API are unchanged. No second query endpoint, feature flag,
+duplicate pipeline, new database, ontology framework, ingestion change, conversation summarizer,
+external memory, runtime evaluator, or agent architecture was added. No LLM generates SQL or
+overrides deterministic execution evidence, and no correctness gate was weakened.

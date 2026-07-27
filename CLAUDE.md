@@ -24,15 +24,21 @@ Goal:
 A tool development project for LLM integration for BIM information access and visualization.
 
 Rules:
-- Follow specs in /specs.
+- Follow project blueprints in `/specs` and the active implementation task in
+  `/tasks`. Use `/logs` for test-query reports, debugging records, and shared
+  evaluation references.
 - Work one spec version at a time.
 - when running, choose wisely whether the task is cpu friendly or gpu friendly. cpu: intel core ultra 9 285H, gpu: rtx 5080 laptop
 - Do not implement beyond the active spec.
 - Before coding, create a plan.
 - After coding, run tests.
 - All github actions should be done manually my the user. You do not have access
-- Keep experiment outputs out of Git unless explicitly approved.
-- /specs are blueprint of the project, /tasks are smaller updates, fix, and minor changes.
+- Keep transient experiment outputs out of Git unless explicitly approved.
+  Human-readable test and debugging records requested under `/logs` are approved
+  repository references.
+- `/specs` contains only project blueprints, `/tasks` contains individual
+  implementation tasks, and `/logs` contains test-query reports, debugging records,
+  and shared reference material.
 - after each task is performed inside /tasks, merge the content of task md into appropriate spec md file, and convert the name of task md file by adding "done". eg: (task01.md to task01_done.md)
 
 # Writing New Task Files

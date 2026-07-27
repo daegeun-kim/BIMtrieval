@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # defaults: the ~1MB manifest makes each binder call's input dominate cost, so
     # a cheap nano binder plus a low-effort mini answer writer cuts spend roughly
     # 20x while keeping the manifest+ledger accuracy machinery unchanged.
+    # task28 §1: the semantic planning boundary is two cheap calls. The intent
+    # resolver REUSES the binder's planning configuration by default — §1
+    # forbids introducing an advanced planning model or a router for it. Its
+    # output is a small typed object, so it needs a much smaller output ceiling
+    # than the plan; its input is the conversation, never the manifest.
+    intent_model: str | None = None
+    intent_reasoning_effort: str | None = None
+    intent_max_output_tokens: int = 4000
+
     binder_model: str = "gpt-5.4-nano"
     binder_reasoning_effort: str = "medium"
     binder_max_output_tokens: int = 16000
@@ -67,9 +76,18 @@ class Settings(BaseSettings):
     openai_retry_backoff_s: float = 1.5
 
     # Explicit per-role overrides, applied over the defaults above when set.
+    intent_model_override: str | None = None
     binder_model_override: str | None = None
     correction_model_override: str | None = None
     answer_model_override: str | None = None
+
+    def get_intent_model(self) -> str:
+        """The resolver's model — the binder's cheap planning model by default."""
+        return self.intent_model_override or self.intent_model or self.get_binder_model()
+
+    @property
+    def resolved_intent_reasoning_effort(self) -> str:
+        return self.intent_reasoning_effort or self.binder_reasoning_effort
 
     def get_binder_model(self) -> str:
         return self.binder_model_override or self.binder_model
@@ -103,7 +121,10 @@ class Settings(BaseSettings):
     rag_display_candidates: int = 10
     rag_internal_candidates_per_kind: int = 30
     max_selected_entity_ids: int = 5
-    max_history_turns: int = 20
+    # task28 §2: no longer a turn window on the question path — the semantic
+    # resolver receives every available turn. Retained as the request-size guard
+    # the API schema mirrors.
+    max_history_turns: int = 200
 
     # --- Hybrid evidence bounds (spec_v005 §10) ---
     # These bound only what the ANSWER LLM sees. They are deliberately separate

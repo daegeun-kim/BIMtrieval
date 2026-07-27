@@ -30,8 +30,8 @@ an LLM retrieval judge, model-written SQL, or more LLM calls to ordinary questio
 ## Generalization rule
 
 Do not implement a condition, mapping, prompt example, or fallback for any exact question, phrase,
-IFC filename, model ID, expected count, or value in `specs/test_query.md` or
-`specs/test_query_v2.md`. Those logs are acceptance evidence only.
+IFC filename, model ID, expected count, or value in `logs/test_query.md` or
+`logs/test_query_v2.md`. Those logs are acceptance evidence only.
 
 Every change must enforce a reusable invariant: complete semantic coverage, typed constraint
 provenance, correct IFC role/family semantics, source-model isolation, deterministic retrieval
@@ -426,7 +426,7 @@ non-standard-tier rate only when that rule exists in the versioned registry. If 
 unknown, print `cost unavailable` with the reason rather than reporting zero or a guessed amount.
 
 Print sufficient decimal precision for small calls and keep numeric totals available to diagnostics
-and `test_query_v3.md`, for example:
+and `logs/test_query_v3.md`, for example:
 
 ```text
 [OpenAI cost] binder=$0.012345 correction=$0.000000 answer=$0.004321 total=$0.016666 USD
@@ -592,8 +592,8 @@ work, authoritative result, final fallback, and viewer count.
 
 ## 9.6 Full suite
 
-Run every query/session sequence in `specs/test_query.md` against its specified model. Compare with
-`specs/test_query_v2.md` and create `specs/test_query_v3.md` with the same questions/expectations plus:
+Run every query/session sequence in `logs/test_query.md` against its specified model. Compare with
+`logs/test_query_v2.md` and create `logs/test_query_v3.md` with the same questions/expectations plus:
 
 - required semantic IDs and ledger constraints;
 - recommendation recall and initial/corrected binding;

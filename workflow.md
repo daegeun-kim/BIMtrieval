@@ -1,8 +1,9 @@
 # Workflow
 
 Authoritative, current development workflow for the three independent
-applications. `specs/` are the project blueprints; `tasks/` are smaller
-updates/fixes merged into the relevant spec when done.
+applications. `specs/` contain only project blueprints; `tasks/` contain individual
+implementation tasks for Claude; `logs/` contain test-query reports, debugging
+records, and shared evaluation references.
 
 ## Architecture boundary
 
@@ -57,4 +58,6 @@ Unimplemented placeholder (`frontend/`). Not built in the current task.
 - Plan before coding; run tests after coding.
 - After a task in `tasks/` is performed, merge its content into the appropriate
   spec and rename the task file `<name>_done.md`.
+- Keep test-query reports, evaluation references, and per-iteration debugging
+  records in `logs/`, not `specs/`.
 - All GitHub actions are performed manually by the user.

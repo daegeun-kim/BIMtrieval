@@ -85,6 +85,25 @@ def validate_answer_v2(
     part_ids = {p.part_id for p in packet.parts}
     citable_ids = fact_ids | evidence_ids | limitation_ids | part_ids
 
+    # task28 §9: agreement is checked on STABLE identities. A named part that
+    # does not exist, or an answered part left undescribed, is a divergence
+    # between the text and the authoritative results — not a phrasing question.
+    unknown_parts = [p for p in generated.answer_part_ids if p not in part_ids]
+    if unknown_parts:
+        validation.fail(
+            "the answer claims to describe result part(s) that were never "
+            f"produced: {', '.join(sorted(unknown_parts)[:3])}"
+        )
+    answerable_ids = {p.part_id for p in packet.parts if p.is_answerable}
+    if len(answerable_ids) > 1 and generated.answer_part_ids:
+        missing = answerable_ids - set(generated.answer_part_ids)
+        if missing:
+            validation.fail(
+                "the answer leaves "
+                f"{len(missing)} of {len(answerable_ids)} answered part(s) of the "
+                "request undescribed"
+            )
+
     for claim in generated.claims:
         if claim.cited_id not in citable_ids:
             validation.fail(f"claim cites unknown id {claim.cited_id!r}")

@@ -13,7 +13,7 @@ upstream state or weaken validation merely to allow more plans through.
 
 Before changing code, read these files in full:
 
-- `specs/test_query_v4.md`
+- `logs/test_query_v4.md`
 - `backend/app/evaluation/query_trace.jsonl`
 
 Use the v4 terminal records to identify the first failing stage for every benchmark
@@ -166,7 +166,7 @@ fallback must follow the same plain-language rules.
 - Enlarging the binder projection or restoring the duplicated v3 candidate universe.
 - Weakening correctness gates to increase the apparent pass rate.
 - Adding exact-query fallbacks, expected-count rules, or model-specific behavior.
-- Rewriting `test_query_v4.md` or the permanent trace as part of the implementation.
+- Rewriting `logs/test_query_v4.md` or the permanent trace as part of the implementation.
 - Adding examples to the final answerer prompt.
 
 ## Fundamental tests
