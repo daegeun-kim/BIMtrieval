@@ -556,6 +556,7 @@ def _write_report(
 
 def _v3_header(run_date: str, planner: str, answerer: str) -> list[str]:
     from app.config.settings import get_settings
+    from app.llm.prompts import BINDER_PROMPT_VERSION, GROUNDED_ANSWERER_PROMPT_VERSION
     from app.llm.pricing import PRICING_REGISTRY_VERSION, PRICING_SOURCE_URL, get_rates
 
     settings = get_settings()
@@ -592,6 +593,8 @@ def _v3_header(run_date: str, planner: str, answerer: str) -> list[str]:
         _rate_line(
             "answer", settings.get_answer_model(), settings.answer_reasoning_effort
         ),
+        f"- prompts: `{BINDER_PROMPT_VERSION}` binder, "
+        f"`{GROUNDED_ANSWERER_PROMPT_VERSION}` answerer",
         "",
         "Metrics line: `llm_calls` is 2 for a normally-answered question and 3 when the one",
         "corrective call fires; `db` is the database statement count; `cost` is the whole-request",
@@ -613,6 +616,11 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help="run only these case ids")
     parser.add_argument(
         "--v3", action="store_true", help="write specs/test_query_v3.md instead of v2"
+    )
+    parser.add_argument(
+        "--v3-output",
+        type=Path,
+        help="write a full v3 report to this path without replacing test_query_v3.md",
     )
     parser.add_argument(
         "--tpm-limit",
@@ -657,19 +665,23 @@ def main() -> int:
             flush=True,
         )
 
-    if not args.smoke and not args.only:
-        if args.v3:
+    should_write_report = bool(args.v3_output) or (not args.smoke and not args.only)
+    if should_write_report:
+        if args.v3 or args.v3_output:
+            output = args.v3_output or _OUTPUT_V3
+            if not output.is_absolute():
+                output = _REPO_ROOT / output
             _write_report(
                 outcomes,
                 time.strftime("%Y-%m-%d"),
-                output=_OUTPUT_V3,
+                output=output,
                 header=_v3_header(
                     time.strftime("%Y-%m-%d"),
                     service.settings.get_planner_model(),
                     service.settings.get_answer_model(),
                 ),
             )
-            print(f"\nwrote {_OUTPUT_V3}")
+            print(f"\nwrote {output}")
         else:
             _write_report(outcomes, time.strftime("%Y-%m-%d"))
             print(f"\nwrote {_OUTPUT}")

@@ -6,8 +6,8 @@ be traced back to the exact prompt that produced it.
 
 Task 24 leaves exactly TWO prompts, one per principal LLM call (§10.1):
 
-    binder_v001             call 1 — bind the question to candidate slate IDs
-    grounded_answerer_v001  call 2 — express already-adjudicated answer parts
+    binder_v003             call 1 — bind the question to candidate slate IDs
+    grounded_answerer_v002  call 2 — express already-adjudicated answer parts
 
 The Task 16/17 planner, answerer, policy-planner and group-answerer prompts were
 removed with the orchestration they served; §14 requires that no parallel
@@ -25,13 +25,13 @@ _PROMPT_DIR = Path(__file__).resolve().parent
 #: manifest semantic IDs, decomposes into answer parts, and disposes every
 #: required constraint-ledger item. Emits no SQL, table/column names, graph text,
 #: retrieval limits, or a global SQL/RAG/graph mode.
-BINDER_PROMPT_VERSION = "binder_v002"
+BINDER_PROMPT_VERSION = "binder_v003"
 #: Task 25 conditional corrective binder: same schema, retried only around the
 #: typed gate failures of a proven recoverable gap.
 CORRECTION_PROMPT_VERSION = "correction_v001"
 #: Final call: expresses already-adjudicated answer parts. Selects nothing, and
 #: its structured claims are validated against the answer packet.
-GROUNDED_ANSWERER_PROMPT_VERSION = "grounded_answerer_v001"
+GROUNDED_ANSWERER_PROMPT_VERSION = "grounded_answerer_v002"
 
 
 @lru_cache(maxsize=8)

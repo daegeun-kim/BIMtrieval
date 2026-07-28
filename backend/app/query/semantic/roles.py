@@ -71,7 +71,14 @@ class SchemaRole(str, Enum):
     #: `IfcRelationship` and descendants. Evidence ABOUT endpoints, not an
     #: occurrence result unless explicitly requested (§3.2).
     RELATIONSHIP = "relationship"
-    #: Groups/systems/actors/processes and other non-result metadata.
+    #: An `IfcObject` that is not a product: a process (`IfcTask`), a group,
+    #: a system, an actor, a resource, a control. These are real, GlobalId-bearing
+    #: records that ingestion stores as entities, and a question can legitimately
+    #: be ABOUT them ("which construction tasks…", "what groups exist"). They are
+    #: not occurrences — nothing about them is physical — but they are answerable.
+    NON_PRODUCT_OBJECT = "non_product_object"
+    #: Anything else that is not a result: relationship-adjacent records and
+    #: schema furniture that no question is asking to be given back.
     OTHER = "other"
     #: Not described by the loaded ontology. Never treat as an occurrence.
     UNKNOWN = "unknown"
@@ -93,12 +100,32 @@ _ROLE_MARKERS: tuple[tuple[str, SchemaRole], ...] = (
     ("IfcSpatialStructureElement", SchemaRole.SPATIAL_STRUCTURE),
     ("IfcElement", SchemaRole.OCCURRENCE),
     ("IfcProduct", SchemaRole.OCCURRENCE),
+    # Reached only by an IfcObject that is none of the above — a process, group,
+    # system, actor, resource or control. Placed last so every narrower marker
+    # still wins; `IfcObject` is the widest thing that is still a real record
+    # rather than a definition or a relationship.
+    ("IfcObject", SchemaRole.NON_PRODUCT_OBJECT),
+    ("IfcObjectDefinition", SchemaRole.NON_PRODUCT_OBJECT),
 )
 
 #: Roles that may be the primary result of an answer part. Spatial structure is
 #: included because "how many spaces" is a legitimate exact question — but §11.4
 #: still forbids substituting a storey-entity count for a logical floor count.
-_RESULT_KINDS = frozenset({SchemaRole.OCCURRENCE, SchemaRole.SPATIAL_STRUCTURE})
+#:
+#: Non-product objects are included because refusing them made whole categories
+#: of question structurally unanswerable: a model whose subject is construction
+#: planning stores that work as `IfcTask`, and "which tasks are linked to the
+#: most elements" was rejected with "IfcTask is a other and cannot be the result
+#: of a question about objects" even though the records were present and
+#: queryable. Definitions and relationships stay excluded — those describe other
+#: things, whereas a task or a group IS the thing being asked about.
+_RESULT_KINDS = frozenset(
+    {
+        SchemaRole.OCCURRENCE,
+        SchemaRole.SPATIAL_STRUCTURE,
+        SchemaRole.NON_PRODUCT_OBJECT,
+    }
+)
 
 
 @dataclass(frozen=True)

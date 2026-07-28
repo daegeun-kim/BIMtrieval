@@ -1,5 +1,11 @@
 # Query & Answer Log
 
+## Evaluation result
+
+| PASS | PARTIAL | FAIL | Total |
+| ---: | ---: | ---: | ---: |
+| 14 | 7 | 21 | 42 |
+
 A running log of questions put to the pipeline, the answer it returned, and the answer it should
 have returned. Used to track pipeline answer quality over time.
 

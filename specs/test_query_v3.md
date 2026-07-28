@@ -1,5 +1,11 @@
 # Query & Answer Log — v3 (Task 25 pipeline)
 
+## Evaluation result
+
+| PASS | PARTIAL | FAIL | Total |
+| ---: | ---: | ---: | ---: |
+| 31 | 4 | 7 | 42 |
+
 Regenerated from `test_query.md` against the full Task 25 pipeline: the
 ingestion-generated semantic manifest fed whole to the binder, the typed constraint
 ledger, deterministic ledger-coverage gating with one optional corrective call, and the
@@ -358,7 +364,7 @@ _Authoritative deterministic result; viewer highlighted 778. The model's verbati
 
 **Expected:** a qualitative description of stairs (81), ramps (6), railings (59) and circulation spaces
 
-**Verdict:** REVIEW (qualitative — got 778; verify against expected)
+**Verdict:** PARTIAL
 
 *calls=2 · tokens=133450p/1190c · cost=$0.006150 · db=7 · 37037 ms*
 
@@ -380,7 +386,7 @@ _Authoritative deterministic result; viewer highlighted 1. The model's verbatim 
 
 **Expected:** an honest 'this model contains no cost information'
 
-**Verdict:** REVIEW (answered with 1; expected an honest limitation)
+**Verdict:** FAIL
 
 *calls=2 · tokens=133470p/1437c · cost=$0.006169 · db=5 · 12720 ms*
 
@@ -424,7 +430,7 @@ _(clarification / unavailable — the pipeline declined to answer as asked; verb
 
 **Expected:** chrome metal (405), clear glass (42), glass (11)
 
-**Verdict:** REVIEW (declined; expected a value)
+**Verdict:** FAIL
 
 *calls=2 · tokens=264635p/4594c · cost=$0.035123 · db=0 · 44930 ms*
 
@@ -462,7 +468,7 @@ _Authoritative deterministic result; viewer highlighted 1981. The model's verbat
 
 **Expected:** 720 walls rated EI60
 
-**Verdict:** REVIEW (got 1981, expected 720)
+**Verdict:** FAIL
 
 *calls=3 · tokens=266686p/4728c · cost=$0.037908 · db=7 · 39261 ms*
 
@@ -506,7 +512,7 @@ _Authoritative deterministic result; viewer highlighted 0. The model's verbatim 
 
 **Expected:** contents of floor band 9 (uppermost by elevation)
 
-**Verdict:** REVIEW (qualitative — got 0; verify against expected)
+**Verdict:** FAIL
 
 *calls=2 · tokens=133851p/1702c · cost=$0.006742 · db=1 · 14802 ms*
 
@@ -528,7 +534,7 @@ _(clarification / unavailable — the pipeline declined to answer as asked; verb
 
 **Expected:** spaces connected to stairs; connectivity traversal is not executed by this pipeline
 
-**Verdict:** REVIEW (declined; expected a value)
+**Verdict:** PASS
 
 *calls=1 · tokens=132730p/3293c · cost=$0.007115 · db=0 · 28097 ms*
 
@@ -566,7 +572,7 @@ _Authoritative deterministic result; viewer highlighted 1. The model's verbatim 
 
 **Expected:** a general summary of the building
 
-**Verdict:** REVIEW (qualitative — got 1; verify against expected)
+**Verdict:** PARTIAL
 
 *calls=2 · tokens=133343p/688c · cost=$0.005280 · db=5 · 7342 ms*
 
@@ -608,7 +614,7 @@ _(clarification / unavailable — the pipeline declined to answer as asked; verb
 
 **Expected:** 6 ramps exist; the model records no accessibility classification
 
-**Verdict:** REVIEW (declined; expected a value)
+**Verdict:** PARTIAL
 
 *calls=1 · tokens=132594p/2224c · cost=$0.005752 · db=0 · 18147 ms*
 
@@ -652,7 +658,7 @@ _Authoritative deterministic result; viewer highlighted 45. The model's verbatim
 
 **Expected:** 9 floor levels (from 45 IfcBuildingStorey entities)
 
-**Verdict:** REVIEW (got 45, expected 9)
+**Verdict:** FAIL
 
 *calls=2 · tokens=133903p/920c · cost=$0.005400 · db=5 · 9313 ms*
 
@@ -780,7 +786,7 @@ _Authoritative deterministic result; viewer highlighted 551. The model's verbati
 
 **Expected:** one door with its bounded details
 
-**Verdict:** REVIEW (qualitative — got 551; verify against expected)
+**Verdict:** PASS
 
 *calls=3 · tokens=265696p/3699c · cost=$0.035876 · db=5 · 34915 ms*
 
@@ -818,7 +824,7 @@ _(clarification / unavailable — the pipeline declined to answer as asked; verb
 
 **Expected:** refusal to assert a false count
 
-**Verdict:** REVIEW (declined; expected a value)
+**Verdict:** PASS
 
 *calls=1 · tokens=132671p/1826c · cost=$0.005270 · db=0 · 15929 ms*
 
@@ -836,7 +842,7 @@ _Not captured on the cost-reduced roster: the binding needed the corrective call
 
 **Expected:** 428
 
-**Verdict:** REVIEW (uncaptured — cheap-model rate limit on the corrective call)
+**Verdict:** FAIL
 
 *calls=1 (binder ok, correction 429) · cost≈$0.004 (binder only) · not logged*
 
@@ -855,7 +861,7 @@ _Authoritative deterministic result; viewer highlighted 1060. The model's verbat
 
 **Expected:** 551 doors, 428 windows, 81 stairs; floor band 4 has the most doors (142)
 
-**Verdict:** REVIEW (got 1060, expected 551)
+**Verdict:** PARTIAL
 
 *calls=3 · tokens=268414p/5433c · cost=$0.015564 · db=9 · 44484 ms*
 
@@ -875,7 +881,7 @@ _(clarification / unavailable — the pipeline declined to answer as asked; verb
 
 **Expected:** a materials description for model 1
 
-**Verdict:** REVIEW (declined; expected a value)
+**Verdict:** FAIL
 
 *calls=1 · tokens=36752p/1081c · cost=$0.008702 · db=0 · 8507 ms*
 

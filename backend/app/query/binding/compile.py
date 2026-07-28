@@ -148,8 +148,23 @@ def compile_predicate(
     condition_nodes: list[FilterCondition | FilterGroup] = []
     grouped: dict[str, list[FilterCondition]] = {}
     for condition in part.conditions:
+        before = len(predicate.unresolved)
         compiled = _compile_condition(session, condition, slate, predicate, source_model_id)
         if compiled is None:
+            # A condition must either restrict the predicate or explain why it
+            # could not. Producing neither is what lets a narrower question be
+            # answered with a broader set, so an unexplained drop is recorded as
+            # unresolved rather than ignored — this makes the whole class of
+            # silent-drop defects unrepresentable, not just the one that was found.
+            if len(predicate.unresolved) == before:
+                predicate.unresolved.append(
+                    UnresolvedCondition(
+                        condition.condition_id,
+                        f"condition {condition.condition_id!r} could not be compiled into a "
+                        "predicate, so the result would not reflect it",
+                        condition.source_span,
+                    )
+                )
             continue
         if condition.bool_group:
             grouped.setdefault(condition.bool_group, []).append(compiled)
@@ -307,10 +322,22 @@ def _compile_condition(
     field_ref = _field_ref(candidate)
 
     if condition.operator in (BoundOperator.IS_PRESENT, BoundOperator.IS_MISSING):
-        # Presence/absence is a distinct operation with its own coverage
-        # semantics (§4.3); it is not a value comparison and is executed via the
-        # missing-value path rather than compiled into a filter here.
-        return None
+        # Presence/absence RESTRICTS the result set, so it compiles to a real
+        # predicate like any other condition. It used to return None here, which
+        # dropped the condition and let the part execute unfiltered — reporting
+        # the whole class total as though it were the filtered count ("551 doors
+        # recorded, 551 missing"). §2.4 forbids answering a broader question than
+        # the one asked, so this must never be silently discarded again.
+        operator = (
+            Operator.IS_PRESENT
+            if condition.operator is BoundOperator.IS_PRESENT
+            else Operator.IS_MISSING
+        )
+        predicate.interpretation_notes.append(
+            f"{candidate.label} is "
+            + ("recorded" if operator is Operator.IS_PRESENT else "not recorded")
+        )
+        return FilterCondition(field=field_ref, operator=operator)
 
     if candidate.data_type == "number":
         return _compile_numeric(condition, candidate, field_ref, predicate)

@@ -99,6 +99,23 @@ def _is_numeric_text(text_expr: ColumnElement) -> ColumnElement:
     return text_expr.op("~")(r"^-?\d+(\.\d+)?$")
 
 
+def _has_usable_value_expr(
+    resolved: ResolvedField, entities_table: sa.Table
+) -> ColumnElement:
+    """True when the field actually carries a value on this row.
+
+    Deliberately the exact complement of the three missing states
+    `find_missing_values` reports (spec_v003 §9): the leaf key must be present on
+    its parent object, and the value must be neither NULL nor the empty string.
+    Using one definition for both keeps "how many walls have a fire rating" and
+    "which walls are missing one" partitioning the same set — if they disagreed,
+    the two counts could not be reconciled by anyone reading the answer.
+    """
+    parent_has_key = resolved_parent_has_key_expr(resolved, entities_table)
+    leaf_text = resolved_text_expr(resolved, entities_table)
+    return sa.and_(parent_has_key, leaf_text.is_not(None), leaf_text != "")
+
+
 def _scalar_bind(value: Any) -> ColumnElement:
     return sa.bindparam(None, value)
 
@@ -125,6 +142,10 @@ def build_condition_expr(
     resolved = resolve_field(session, source_model_id, node.field)
     op = node.operator
     value = node.value
+
+    if op in (Operator.IS_PRESENT, Operator.IS_MISSING):
+        present = _has_usable_value_expr(resolved, entities_table)
+        return present if op is Operator.IS_PRESENT else sa.not_(present)
 
     if op in (
         Operator.EXACT,

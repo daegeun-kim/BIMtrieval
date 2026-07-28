@@ -81,6 +81,12 @@ class Operator(str, Enum):
     CASE_INSENSITIVE_EXACT = "case_insensitive_exact"
     CONTAINS = "contains"
     STARTS_WITH = "starts_with"
+    #: Whether the field carries a usable value at all, independent of what that
+    #: value is. "which walls have a fire rating recorded" is a restriction on the
+    #: result set exactly as much as "= EI60" is, so it belongs in the same typed
+    #: vocabulary rather than being handled as a separate report.
+    IS_PRESENT = "is_present"
+    IS_MISSING = "is_missing"
 
 
 _STRING_MODE_OPERATORS = {
@@ -90,6 +96,9 @@ _STRING_MODE_OPERATORS = {
     Operator.STARTS_WITH,
 }
 _LIST_OPERATORS = {Operator.IN, Operator.NOT_IN}
+#: Operators that constrain presence rather than compare a value. They take no
+#: operand; supplying one would imply a comparison that is not performed.
+_VALUELESS_OPERATORS = {Operator.IS_PRESENT, Operator.IS_MISSING}
 
 
 class FieldRef(_StrictModel):
@@ -115,11 +124,19 @@ class FieldRef(_StrictModel):
 class FilterCondition(_StrictModel):
     field: FieldRef
     operator: Operator
-    value: float | int | str | bool | list[float | int | str | bool] = Field(...)
+    #: Omitted only for the valueless presence operators; every comparison
+    #: operator still requires an operand.
+    value: float | int | str | bool | list[float | int | str | bool] | None = None
     unit: str | None = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def _validate_value_shape(self) -> "FilterCondition":
+        if self.operator in _VALUELESS_OPERATORS:
+            if self.value is not None:
+                raise ValueError(f"{self.operator.value} takes no value")
+            return self
+        if self.value is None:
+            raise ValueError(f"{self.operator.value} requires a value")
         if self.operator is Operator.BETWEEN:
             if not isinstance(self.value, list) or len(self.value) != 2:
                 raise ValueError("between requires a 2-element [low, high] value")
