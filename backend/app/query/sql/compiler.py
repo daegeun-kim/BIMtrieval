@@ -54,43 +54,19 @@ def resolved_parent_has_key_expr(
     return sa.func.coalesce(parent.op("?")(sa.bindparam(None, last_key)), False)
 
 
-def resolved_numeric_expr(
-    resolved: ResolvedField, entities_table: sa.Table, unit: str | None
-) -> ColumnElement:
-    """The field's value as a normalized double precision number, or NULL if not
-    numerically interpretable / not unit-convertible (spec_v002 §9.1, spec_v003 §10).
+def resolved_numeric_expr(resolved: ResolvedField, entities_table: sa.Table) -> ColumnElement:
+    """The field's RAW stored value as a double precision number, or NULL.
 
-    - QUANTITY/DIMENSION with unit == "mm": reads `.normalized_value` and
-      requires `.normalized_unit == "m"` (the only conversion `bim_rag.ifc_parser`
-      currently records), multiplies by 1000.
-    - QUANTITY/DIMENSION with unit in {"mm2", "mm3", "degrees"}: not derivable
-      from current ingestion output — raises rather than silently mis-converting.
-    - Any other field (attribute/property/type_fact, or a quantity with no unit
-      requested): a regex-guarded cast of the raw text value to double precision,
-      NULL for non-numeric text.
+    One expression for every field kind, and no conversion anywhere (task27
+    §4.3): the corpus keeps the units the IFC used, so calculating means casting
+    the number that is already there. A value that is not numeric text yields
+    NULL, which keeps `count(numeric_expr)` an exact coverage count.
+
+    Unit safety is decided BEFORE compilation, from the semantic manifest, by
+    `app.query.semantic.units.decide_unit`. Two competing unit paths — one here
+    rewriting values into millimetres, one there comparing symbols — is exactly
+    what §4.3 forbids, so this function deliberately knows nothing about units.
     """
-    if resolved.field_kind.value in ("quantity", "dimension") and unit is not None:
-        if unit != "mm":
-            raise UnsupportedFilterOperatorError(
-                f"{unit} conversion not available: ingestion only computes a linear length "
-                "factor (normalized_unit='m'), not area/volume/angle-aware conversion"
-            )
-        base = entities_table.c.canonical_json
-        set_name = resolved.set_name
-        field_name = resolved.field_name
-        norm_unit_path = ("quantity_sets", set_name, field_name, "normalized_unit")
-        norm_value_path = ("quantity_sets", set_name, field_name, "normalized_value")
-        norm_unit_expr = base.op("#>>")(path_array_param(norm_unit_path))
-        norm_value_text = base.op("#>>")(path_array_param(norm_value_path))
-        numeric_value = sa.case(
-            (
-                sa.and_(norm_unit_expr == "m", _is_numeric_text(norm_value_text)),
-                sa.cast(norm_value_text, sa.Double) * 1000.0,
-            ),
-            else_=None,
-        )
-        return numeric_value
-
     text_expr = resolved_text_expr(resolved, entities_table)
     return sa.case((_is_numeric_text(text_expr), sa.cast(text_expr, sa.Double)), else_=None)
 
@@ -99,9 +75,7 @@ def _is_numeric_text(text_expr: ColumnElement) -> ColumnElement:
     return text_expr.op("~")(r"^-?\d+(\.\d+)?$")
 
 
-def _has_usable_value_expr(
-    resolved: ResolvedField, entities_table: sa.Table
-) -> ColumnElement:
+def _has_usable_value_expr(resolved: ResolvedField, entities_table: sa.Table) -> ColumnElement:
     """True when the field actually carries a value on this row.
 
     Deliberately the exact complement of the three missing states
@@ -169,18 +143,18 @@ def build_condition_expr(
         if all(isinstance(v, str) for v in value):
             text_expr = resolved_text_expr(resolved, entities_table)
             return text_expr.in_([str(v) for v in value])
-        numeric_expr = resolved_numeric_expr(resolved, entities_table, node.unit)
+        numeric_expr = resolved_numeric_expr(resolved, entities_table)
         return numeric_expr.in_([float(v) for v in value])
 
     if op is Operator.NOT_IN:
         if all(isinstance(v, str) for v in value):
             text_expr = resolved_text_expr(resolved, entities_table)
             return sa.and_(text_expr.is_not(None), text_expr.not_in([str(v) for v in value]))
-        numeric_expr = resolved_numeric_expr(resolved, entities_table, node.unit)
+        numeric_expr = resolved_numeric_expr(resolved, entities_table)
         return sa.and_(numeric_expr.is_not(None), numeric_expr.not_in([float(v) for v in value]))
 
     if op is Operator.BETWEEN:
-        numeric_expr = resolved_numeric_expr(resolved, entities_table, node.unit)
+        numeric_expr = resolved_numeric_expr(resolved, entities_table)
         low, high = value
         return numeric_expr.between(float(low), float(high))
 
@@ -188,7 +162,7 @@ def build_condition_expr(
         text_expr = resolved_text_expr(resolved, entities_table)
         return _compare(text_expr, op, _scalar_bind(value))
 
-    numeric_expr = resolved_numeric_expr(resolved, entities_table, node.unit)
+    numeric_expr = resolved_numeric_expr(resolved, entities_table)
     return _compare(numeric_expr, op, _scalar_bind(float(value)))
 
 

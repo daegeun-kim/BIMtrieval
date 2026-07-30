@@ -158,7 +158,9 @@ def test_a_valueless_operator_rejects_a_value():
 
     from app.query.sql.schemas import FieldKind, FieldRef
 
-    field = FieldRef(field_kind=FieldKind.PROPERTY, set_name="Pset_WallCommon", field_name="FireRating")
+    field = FieldRef(
+        field_kind=FieldKind.PROPERTY, set_name="Pset_WallCommon", field_name="FireRating"
+    )
     FilterCondition(field=field, operator=Operator.IS_PRESENT)  # no value: fine
     with pytest.raises(ValidationError):
         FilterCondition(field=field, operator=Operator.IS_PRESENT, value="EI60")
@@ -169,6 +171,8 @@ def test_a_comparison_operator_still_requires_a_value():
 
     from app.query.sql.schemas import FieldKind, FieldRef
 
-    field = FieldRef(field_kind=FieldKind.PROPERTY, set_name="Pset_WallCommon", field_name="FireRating")
+    field = FieldRef(
+        field_kind=FieldKind.PROPERTY, set_name="Pset_WallCommon", field_name="FireRating"
+    )
     with pytest.raises(ValidationError):
         FilterCondition(field=field, operator=Operator.CASE_INSENSITIVE_EXACT)

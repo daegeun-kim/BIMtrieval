@@ -110,6 +110,26 @@ class FloorBand:
         return f"{len(self.storeys)} storey entities ({listed})" if names else "storey entities"
 
 
+def band_label(band_index: int, reference_index: int | None) -> str:
+    """The user-facing name of one logical floor band (task28 §1.1).
+
+    The SAME reference semantics `resolve_floor_concept` counts with, expressed
+    as a label: the reference band is "Floor 1", bands above it continue upward,
+    and bands below it get neutral lower-level names rather than an invented
+    basement designation (nothing in the IFC data says a band below the
+    building reference level is a basement).
+
+    Kept here, beside the band model itself, so the viewer's floor buttons and
+    the natural-language floor interpretation can never disagree about which
+    band is floor 1. It derives nothing from storey names.
+    """
+    origin = reference_index or 0
+    offset = band_index - origin
+    if offset >= 0:
+        return f"Floor {offset + 1}"
+    return f"Lower level {-offset}"
+
+
 @dataclass
 class StoreyModel:
     """The active model's derived floor structure."""

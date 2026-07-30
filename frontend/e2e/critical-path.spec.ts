@@ -10,6 +10,7 @@ import path from "node:path";
 const FIXTURE_FRAG = path.resolve(import.meta.dirname, "..", "tests", "fixtures", "smoke-wall.frag");
 const FP = "70bee96c9fe8db870535b3040052f59af1166616109a87d9e924a1e2e5e095c1";
 const WALL_GUID = "0SmokeWallGuid000001xx";
+const STOREY_GUID = "0SmokeStryGuid000001xx";
 
 async function stubBackend(page: Page) {
   const frag = readFileSync(FIXTURE_FRAG);
@@ -38,6 +39,31 @@ async function stubBackend(page: Page) {
         contentType: "application/octet-stream",
         body: frag,
         headers: { ETag: `"${FP}"` },
+      });
+    }
+    if (url.pathname === "/api/models/999/floors") {
+      // One logical floor band, matching the fixture's single IfcBuildingStorey
+      // at elevation 0 (task28 §2.1).
+      return route.fulfill({
+        json: {
+          source_model_id: 999,
+          available: true,
+          unavailable_reason: null,
+          reference_band_index: 0,
+          reference_basis: "elevation_zero",
+          total_storeys: 1,
+          floors: [
+            {
+              band_index: 0,
+              label: "Floor 1",
+              is_reference: true,
+              storey_global_ids: [STOREY_GUID],
+              storey_names: ["Storey"],
+              min_elevation: 0,
+              max_elevation: 0,
+            },
+          ],
+        },
       });
     }
     if (url.pathname === "/api/query") {
@@ -155,6 +181,54 @@ test("critical path: load, ask, evidence, clear chat, reset app", async ({ page 
   await page.getByRole("button", { name: "Reset", exact: true }).click();
   await expect(page.locator(".readout")).toContainText("BIM Model Explorer");
   await expect(page.getByRole("combobox")).toHaveValue("");
+});
+
+// Floor-plan mode against the REAL Fragments worker + WebGL (task28 §8.2).
+// The fixture artifact carries one IfcBuildingStorey at elevation 0, so the
+// single logical band resolves into scene space and can actually be cut.
+test("floor plan mode: enter a floor plan and return to the exact 3D view", async ({ page }) => {
+  await stubBackend(page);
+  await page.goto("/");
+
+  const select = page.getByRole("combobox");
+  await expect(select).toBeEnabled();
+  await select.selectOption("999");
+  await page.getByRole("button", { name: "Load", exact: true }).click();
+  await expect(page.locator(".readout")).toContainText("ready", { timeout: 20_000 });
+
+  // The control appears only after a model with usable logical floors is ready.
+  const controls = page.getByTestId("floor-controls");
+  await expect(controls).toBeVisible({ timeout: 10_000 });
+  const threeD = controls.getByRole("button", { name: "3D" });
+  const floor1 = controls.getByRole("button", { name: "Floor 1" });
+
+  // One logical floor button, not one per raw storey, and 3D is selected.
+  await expect(controls.getByRole("button")).toHaveCount(2);
+  await expect(threeD).toHaveAttribute("aria-pressed", "true");
+  await expect(floor1).toBeEnabled();
+  // Source storey names appear only in the accessible description.
+  await expect(floor1).toHaveAttribute("title", /Storey/);
+  await expect(floor1).toHaveText("Floor 1");
+
+  // Enter the plan: same canvas, no extra canvas, no chat turn.
+  const canvasCount = await page.locator("canvas").count();
+  await floor1.click();
+  await expect(floor1).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 });
+  await expect(threeD).toHaveAttribute("aria-pressed", "false");
+  expect(await page.locator("canvas").count()).toBe(canvasCount);
+  await expect(page.locator(".msg")).toHaveCount(0);
+  await expect(page.locator(".explanation-panel")).toHaveCount(0);
+
+  // Return to 3D.
+  await threeD.click();
+  await expect(threeD).toHaveAttribute("aria-pressed", "true");
+  await expect(floor1).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".msg")).toHaveCount(0);
+
+  // Reset App removes the control along with the model.
+  await page.getByLabel("Reset app").click();
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(page.getByTestId("floor-controls")).toHaveCount(0);
 });
 
 test("backend unavailable shows a recoverable state", async ({ page }) => {

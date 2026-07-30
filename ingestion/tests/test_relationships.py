@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bim_rag.ifc_parser import EXTRACTION_VERSION
 from bim_rag.rel_parser import (
     _endpoint_summary,
     extract_member_rows,
@@ -111,7 +112,10 @@ def test_relationship_canonical_json_meta_fields():
     assert cj["meta"]["global_id"] == "R1"
     assert cj["meta"]["step_id"] == 100
     assert cj["meta"]["ifc_class"] == "IfcRelAggregates"
-    assert cj["meta"]["extraction_version"] == "v001"
+    # Relationship canonical JSON shares the entity extraction version, so this
+    # tracks the constant rather than pinning a literal that must be edited on
+    # every contract change.
+    assert cj["meta"]["extraction_version"] == EXTRACTION_VERSION
 
 
 def test_relationship_canonical_json_endpoints_present():

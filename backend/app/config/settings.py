@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     binder_max_output_tokens: int = 16000
 
     # The rare corrective retry stays in the binder family, one reasoning step up.
-    correction_model: str = "gpt-5.4-nano"
+    correction_model: str = "gpt-5-mini"
     correction_reasoning_effort: str = "high"
     correction_max_output_tokens: int = 16000
 

@@ -117,9 +117,12 @@ def test_observed_fact_profile_preserves_provenance():
 
 
 def test_quantity_coverage_missing_count():
-    q = QuantityCoverageProfile("IfcSpace", "Qto", "NetFloorArea", 3, 10, True)
+    q = QuantityCoverageProfile("IfcSpace", "Qto", "NetFloorArea", 3, 10)
     assert q.missing_count == 7
     assert "3 populated" in q.profile_text()
+    # Coverage is a vocabulary fact; the UNIT is not. Asserting one here would
+    # reintroduce the second unit path task27 §4.3 removed.
+    assert "unit" not in q.profile_text().lower()
 
 
 def test_builder_is_read_only():

@@ -8,6 +8,7 @@ import {
   type EntityDetailsResponse,
   type HighlightGroupResponse,
   type HighlightScope,
+  type ModelFloorsResponse,
   type ModelListResponse,
   type QueryResponseEnvelope,
   type ResolveEntitiesResponse,
@@ -57,6 +58,18 @@ export class ApiClient {
 
   async listModels(signal?: AbortSignal): Promise<ModelListResponse> {
     return this.getJson<ModelListResponse>(`${this.baseUrl}/api/models`, signal);
+  }
+
+  /**
+   * The model's logical floor bands, for the viewer's floor-plan control
+   * (spec_v006 §10.10). Deterministic and LLM-free: showing a floor plan never
+   * consumes OpenAI tokens.
+   */
+  async modelFloors(sourceModelId: number, signal?: AbortSignal): Promise<ModelFloorsResponse> {
+    return this.getJson<ModelFloorsResponse>(
+      `${this.baseUrl}/api/models/${sourceModelId}/floors`,
+      signal,
+    );
   }
 
   async resolveEntities(

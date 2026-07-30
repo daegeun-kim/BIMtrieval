@@ -340,9 +340,12 @@ def test_negation_compiles_to_an_exclusion(slate_env):
 # ---------------------------------------------------------------------------
 
 
-def test_a_unit_comparison_against_a_field_with_no_normalized_unit_is_refused(slate_env):
-    """Comparing millimetres against an unnormalized stored number would
-    silently produce a wrong set, so it must refuse instead."""
+def test_a_unit_comparison_against_a_field_with_no_known_unit_is_refused(slate_env):
+    """A field with no trustworthy effective unit cannot be compared in one.
+
+    Nothing is converted (task27 §4.3), so running the comparison anyway would
+    silently produce a wrong set — the request has to fail honestly instead.
+    """
     slate = _slate("show me spaces with a gross floor area over 20 m2")
     area = next((c for c in slate.fields if c.field_name == "GrossFloorArea"), None)
     if area is None:
@@ -362,7 +365,8 @@ def test_a_unit_comparison_against_a_field_with_no_normalized_unit_is_refused(sl
         ],
     )
     assert not predicate.executable
-    assert "unit" in predicate.unresolved[0].reason.lower()
+    reason = predicate.unresolved[0].reason.lower()
+    assert "unit" in reason or "measure" in reason
 
 
 # ---------------------------------------------------------------------------

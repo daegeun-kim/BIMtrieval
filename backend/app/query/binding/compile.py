@@ -35,6 +35,7 @@ from app.query.semantic.field_concepts import (
     get_field_concept_index,
     load_field_values,
 )
+from app.query.semantic.units import decide_unit
 from app.query.sql.schemas import (
     FieldKind,
     FieldRef,
@@ -318,7 +319,6 @@ def _compile_condition(
         )
         return None
 
-    concept = _concept_for(session, source_model_id, candidate)
     field_ref = _field_ref(candidate)
 
     if condition.operator in (BoundOperator.IS_PRESENT, BoundOperator.IS_MISSING):
@@ -340,7 +340,11 @@ def _compile_condition(
         return FilterCondition(field=field_ref, operator=operator)
 
     if candidate.data_type == "number":
+        # A numeric condition resolves its magnitude and unit from the candidate
+        # alone, so the field-concept index — which exists to serve the stored
+        # VALUE vocabulary — is deliberately not consulted for one.
         return _compile_numeric(condition, candidate, field_ref, predicate)
+    concept = _concept_for(session, source_model_id, candidate)
     return _compile_text(
         session, condition, candidate, concept, field_ref, predicate, source_model_id
     )
@@ -413,19 +417,31 @@ def _compile_numeric(
         numbers.append(magnitude)
         unit = unit or parsed_unit
 
-    if unit and not candidate.unit_available:
-        # §3.3: units must be deterministically convertible. Refusing here is
-        # what stops a millimetre comparison being run against an unnormalized
-        # stored number and silently producing a wrong set.
+    # task27 §4.3: one deterministic unit decision. Values stay in the units the
+    # IFC used, so a comparison runs only when the requested unit IS the field's
+    # effective unit (spellings may differ) or when no unit was written at all —
+    # and in that case the interpretation is disclosed rather than assumed.
+    decision = decide_unit(
+        requested_unit=unit,
+        effective_unit=candidate.unit_symbol,
+        unit_state=candidate.unit_state,
+        measure_type=candidate.measure_type,
+        label=candidate.label,
+        unit_limitation=candidate.unit_limitation,
+    )
+    if not decision.ok:
         predicate.unresolved.append(
             UnresolvedCondition(
                 condition.condition_id,
-                f"{candidate.label} records no normalized unit, so a value in {unit} "
-                "cannot be compared against it",
+                decision.reason
+                or f"{candidate.label} cannot be compared against a value in {unit}",
                 condition.source_span,
             )
         )
         return None
+    if decision.note:
+        predicate.interpretation_notes.append(decision.note)
+    unit = decision.unit or unit
 
     if operator is Operator.BETWEEN and len(numbers) != 2:
         predicate.unresolved.append(

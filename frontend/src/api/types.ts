@@ -40,6 +40,23 @@ export type DetailValue = Schemas["DetailValue"];
 export type HighlightScope = Schemas["HighlightScope"];
 export type HighlightGroupResponse = Schemas["HighlightGroupResponse"];
 
+// Task 26 — the bounded presentation payload for the primary visual answer
+// part (task26 §1.1). Optional on the envelope; the panel opens only when the
+// backend supplies it alongside a non-empty highlight.
+export type AnswerExplanation = Schemas["AnswerExplanation"];
+export type ExplanationPresentation = Schemas["ExplanationPresentation"];
+export type ExplanationGroup = Schemas["ExplanationGroup"];
+export type ExplanationRow = Schemas["ExplanationRow"];
+export type ExplanationBucket = Schemas["ExplanationBucket"];
+export type ExplanationAggregate = Schemas["ExplanationAggregate"];
+
+// Task 28 — the read-only logical floor contract behind the floor-plan control
+// (task28 §2.1). Elevations on `FloorBandInfo` are stored project-unit
+// diagnostics, NOT viewer scene coordinates.
+export type ModelFloorsResponse = Schemas["ModelFloorsResponse"];
+export type FloorBandInfo = Schemas["FloorBandInfo"];
+export type FloorReferenceBasis = Schemas["FloorReferenceBasis"];
+
 // A displayable entity citation (primary or context) the chat can make clickable.
 export interface EntityCitation {
   entityId: number;

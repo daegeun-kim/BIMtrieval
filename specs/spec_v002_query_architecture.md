@@ -423,18 +423,44 @@ Exact counts and aggregates operate over the full matching set even if returned 
 
 ### 9.1 Units
 
-Use normalized internal units:
+**Owner decision (task27): preserve the effective units embedded in each IFC. Do not bulk-normalize
+the corpus into `mm`, `mm²`, `mm³`, SI, or any other canonical target.**
+
+A value's unit is established by the IFC, not by this system:
 
 ```text
-length = mm
-area   = mm²
-volume = mm³
-angle  = degrees
+supported measure families = length, area, volume
+authority                  = the IFC value/attribute type and IfcProject.UnitsInContext
+effective unit             = unit_override_key otherwise defaults[measure_type]
 ```
 
-Preserve source values and provenance where available.
+Each source model stores its own unit definitions once (`ifc_source_models.extraction_metadata.
+dimension_units`). A value stores its `measure_type` and, only when the IFC explicitly supplies one,
+a `unit_override_key`. The project default is never copied onto every value, and a null override is
+never written.
 
-User-facing formatting may convert normalized values into readable units, but calculations and comparisons must use normalized values.
+An area unit is never derived by squaring the length unit, and no linear factor is applied to an area
+or a volume. A model may legitimately declare millimetres for length and square/cubic metres for area
+and volume; treating those as one scale is the defect this section replaced.
+
+Calculations require a trustworthy measure type AND a trustworthy unit:
+
+- a field whose populated values all resolve to one effective unit is `uniform` and may be filtered,
+  compared, and aggregated, with that unit reported alongside the result;
+- a field resolving to more than one effective unit is `mixed` and is neither summed nor compared as
+  one scale;
+- a field with no declared measure type, no resolvable project default, or an undisplayable unit is
+  `unknown` and is unavailable for dimensional calculation;
+- a numeric value with no declared IFC measure type is preserved as a raw number and is NOT a
+  dimension, however dimensional its field name reads.
+
+A numeric literal written without a unit is interpreted in the field's own effective IFC unit, and
+that interpretation is disclosed. An explicitly requested unit executes only when it denotes the same
+unit (deterministic spelling normalization such as `metre`/`m` is permitted); a different requested
+unit returns an honest unavailable result rather than a conversion.
+
+Angle, mass, and other measure families are out of scope; a later task may add one without changing
+this contract.
 
 ### 9.2 Calculation boundary
 
@@ -447,7 +473,9 @@ The first version may support reliable generic operations:
 - average
 - group by
 
-Only use them on validated numeric facts with known units and meaning.
+Only use them on validated numeric facts with known units and meaning — in practice, on a field whose
+unit state is `uniform` (§9.1). The result carries the effective IFC unit the values were already
+recorded in; it is not converted into a reporting unit.
 
 Specialized BIM metrics require dedicated deterministic functions and definitions. RAG and the LLM must not perform authoritative numerical calculations from prose.
 
@@ -1001,7 +1029,7 @@ Must define:
 - active-model SQL
 - allowlisted operations
 - property/quantity querying
-- normalized units
+- IFC-native unit rules (§9.1)
 - exact aggregation
 - relational IFC graph traversal
 - response/evidence contracts

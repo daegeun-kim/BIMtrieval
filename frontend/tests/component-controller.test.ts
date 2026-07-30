@@ -18,6 +18,11 @@ const viewerStub = vi.hoisted(() => ({
   fitToGuids: vi.fn(async (): Promise<{ missing: string[] }> => ({ missing: [] })),
   applyQueryRoles: vi.fn(async (): Promise<{ missing: string[] }> => ({ missing: [] })),
   clearQueryRoles: vi.fn(async () => {}),
+  // Floor-plan mode (task28): the controller returns the viewer to 3D and
+  // retires the floor contract on model switch and Reset App.
+  setFloorContract: vi.fn(async () => []),
+  enterPlanMode: vi.fn(async () => ({ ok: true })),
+  exitPlanMode: vi.fn(async () => {}),
   clearManualSelection: vi.fn(),
   removeManualSelection: vi.fn(),
   setSelectionEnabled: vi.fn(),

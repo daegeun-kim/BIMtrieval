@@ -20,10 +20,32 @@ import json
 from typing import Any
 
 #: Bump when the document STRUCTURE changes (readers key their cache on it).
-MANIFEST_SCHEMA_VERSION = "v001"
+#: v002 (task27) adds per-field measurement facts, the class-level measurement
+#: attribute records, and the model's own unit registry. A v001 manifest was
+#: generated under the removed `normalized_unit="m"` contract, so it must be
+#: REJECTED as stale rather than read — its numeric fields carry no trustworthy
+#: unit state at all.
+MANIFEST_SCHEMA_VERSION = "v002"
 
 #: Bump when the builder changes what it EXTRACTS without changing structure.
-MANIFEST_BUILDER_VERSION = "v001"
+MANIFEST_BUILDER_VERSION = "v002"
+
+# ---------------------------------------------------------------------------
+# Unit state vocabulary (task27 §3)
+# ---------------------------------------------------------------------------
+
+#: Every populated occurrence of the field resolves to the SAME effective unit.
+#: Only this state permits numeric comparison and aggregation.
+UNIT_STATE_UNIFORM = "uniform"
+#: Populated occurrences resolve to more than one effective unit. Summing or
+#: comparing them as one scale would be wrong, so it is refused.
+UNIT_STATE_MIXED = "mixed"
+#: The measure type or the effective unit could not be resolved for every
+#: populated occurrence — an untyped value, a missing project default, or a unit
+#: definition this pipeline cannot display. Not a licence to assume one.
+UNIT_STATE_UNKNOWN = "unknown"
+
+UNIT_STATES = frozenset({UNIT_STATE_UNIFORM, UNIT_STATE_MIXED, UNIT_STATE_UNKNOWN})
 
 #: File suffix for a generated artifact.
 MANIFEST_SUFFIX = ".semantic.json"
@@ -200,8 +222,42 @@ def validate_document(document: dict[str, Any]) -> list[str]:
             problems.append(f"content.{section} is missing")
 
     problems.extend(_validate_coverage_states(content))
+    problems.extend(_validate_unit_states(content))
     problems.extend(_validate_semantic_ids(content))
     return problems
+
+
+def _validate_unit_states(content: dict[str, Any]) -> list[str]:
+    """Every `unit_state` must come from the typed vocabulary (task27 §3).
+
+    A record claiming `uniform` must also name the unit it is uniform in.
+    Without that pairing, "safe to aggregate" would be assertable with no unit
+    to report, which is exactly the state this task exists to remove.
+    """
+    problems: list[str] = []
+    for path, value in _walk(content, "content"):
+        if path.endswith(".unit_state") and value not in UNIT_STATES:
+            problems.append(f"{path} has unknown unit state {value!r}")
+    for record, path in _iter_unit_records(content, "content"):
+        if record.get("unit_state") != UNIT_STATE_UNIFORM:
+            continue
+        if not record.get("unit_symbol"):
+            problems.append(f"{path} claims a uniform unit but names no unit symbol")
+        if not record.get("numeric_comparison_safe"):
+            problems.append(f"{path} has a uniform unit but is not marked comparison-safe")
+    return problems
+
+
+def _iter_unit_records(node: Any, path: str):
+    """Yield every mapping that carries a `unit_state`, with its path."""
+    if isinstance(node, dict):
+        if "unit_state" in node:
+            yield node, path
+        for key, value in node.items():
+            yield from _iter_unit_records(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _iter_unit_records(value, f"{path}[{index}]")
 
 
 def _validate_coverage_states(content: dict[str, Any]) -> list[str]:

@@ -6,13 +6,33 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import StatusReadout from "./components/StatusReadout";
 import ViewerControls from "./components/ViewerControls";
 import ViewerOverlay from "./components/ViewerOverlay";
+import ExplanationPanel from "./explain/ExplanationPanel";
 import { controller } from "./state/controller";
-import { effectivePanelWidth, effectiveViewportObstructionPx, useStore } from "./state/store";
+import {
+  effectivePanelWidth,
+  effectiveViewportObstructionPx,
+  explanationColumnWidthPx,
+  useStore,
+} from "./state/store";
 import ViewerCanvas from "./viewer/ViewerCanvas";
 
 // Width of the collapsed chat restore tab, so the component panel still docks
 // beside it rather than under it.
 const COLLAPSED_CHAT_WIDTH = 40;
+
+/** Live viewport width, so the fixed vw-based Task 26 column can be measured in
+ *  px for the single obstruction calculation the viewer reads. */
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() =>
+    typeof window === "undefined" ? 0 : window.innerWidth,
+  );
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
 
 export default function App() {
   const pendingConfirmId = useStore((s) => s.pendingConfirmModelId);
@@ -22,18 +42,24 @@ export default function App() {
   const storedWidth = useStore((s) => s.panelWidth);
   const collapsed = useStore((s) => s.panelCollapsed);
   const componentOpen = useStore((s) => s.componentGuid !== null);
+  const explanationOpen = useStore((s) => s.explanation !== null);
+  const viewportWidth = useViewportWidth();
   const [resetOpen, setResetOpen] = useState(false);
 
   useEffect(() => {
     void controller.bootstrap();
   }, []);
 
-  // The component panel docks immediately left of the chat panel, so it needs
-  // the chat's live width. One CSS variable keeps that in CSS rather than
-  // duplicating layout math in two components.
-  const chatWidth = collapsed
-    ? COLLAPSED_CHAT_WIDTH
-    : effectivePanelWidth(storedWidth, componentOpen);
+  // The component panel docks immediately left of the chat panel — or, with the
+  // explanation card open, left of the whole fixed right-side column. One CSS
+  // variable keeps that in CSS rather than duplicating layout math, and the
+  // viewer's obstruction below is derived from the very same number, so there
+  // is never a second hard-coded set of measurements (task26 §3).
+  const chatWidth = explanationOpen
+    ? explanationColumnWidthPx(viewportWidth, componentOpen)
+    : collapsed
+      ? COLLAPSED_CHAT_WIDTH
+      : effectivePanelWidth(storedWidth, componentOpen);
 
   // The viewer's camera-framing must center within the region actually left
   // unobstructed by the floating panels (task19 §2) — reuses this same live
@@ -58,7 +84,19 @@ export default function App() {
       <ViewerControls onResetApp={onResetApp} />
       <StatusReadout />
       <ComponentPanel />
-      <ChatPanel />
+      {explanationOpen ? (
+        // Fixed stacked column: explanation above, chat below, 12 px apart
+        // (task26 §3). No splitter, no saved preference, no reordering.
+        <div
+          className={`right-stack${collapsed ? " right-stack-collapsed" : ""}`}
+          data-testid="right-stack"
+        >
+          <ExplanationPanel />
+          <ChatPanel />
+        </div>
+      ) : (
+        <ChatPanel />
+      )}
 
       {pendingModel && (
         <ConfirmDialog

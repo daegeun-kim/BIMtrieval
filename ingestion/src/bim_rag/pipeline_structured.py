@@ -24,6 +24,7 @@ from bim_rag.ifc_parser import (
     file_fingerprint,
     scan_model,
 )
+from bim_rag.measures import SUPPORTED_MEASURE_TYPES, MeasurementExtractor
 from bim_rag.rel_parser import (
     extract_member_rows,
     extract_relationship_canonical_json,
@@ -63,6 +64,26 @@ def _build_manifest_phase(engine: Any, source_model_id: int) -> dict[str, Any]:
         return {"validated": False, "error": sanitize_db_error(str(exc))[:300]}
 
 
+def _print_unit_defaults(measurements: MeasurementExtractor) -> None:
+    """Report the model's own default length/area/volume units, or their absence.
+
+    Printed before extraction so an operator sees immediately whether this file
+    supplies a trustworthy unit context — an unresolved default is reported as
+    unavailable, never silently substituted (§2.1).
+    """
+    registry = measurements.registry
+    for measure_type in SUPPORTED_MEASURE_TYPES:
+        key = registry.defaults[measure_type]
+        symbol = registry.symbol(key)
+        if symbol:
+            print(f"[ifc_to_db]   default {measure_type:<6} unit: {symbol}  (key {key})")
+        else:
+            print(
+                f"[ifc_to_db]   default {measure_type:<6} unit: UNAVAILABLE - "
+                f"{registry.unresolved_defaults.get(measure_type, 'not declared')}"
+            )
+
+
 def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     """Import one IFC file (entities + relationships) into the shared PostgreSQL schema.
 
@@ -93,6 +114,14 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
         f"Entities={scan['eligible_entity_count']}  "
         f"Relationships={scan['relationship_count']}"
     )
+
+    # The IFC's own measure/unit context, read once for the whole model (§2.1).
+    # Every per-value measure type and unit override below refers to it, so it
+    # must exist before the first entity is extracted.
+    print("[ifc_to_db] Reading IFC unit context...")
+    measurements = MeasurementExtractor(ifc_model)
+    unit_registry_json = measurements.registry.to_json()
+    _print_unit_defaults(measurements)
 
     print("[ifc_to_db] Connecting to database...")
     try:
@@ -133,6 +162,7 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
                         "class_counts": scan["class_counts"],
                         "relationship_class_counts": scan.get("relationship_class_counts", {}),
                         "extraction_version": EXTRACTION_VERSION,
+                        "dimension_units": unit_registry_json,
                     },
                 )
                 session.add(source_model)
@@ -142,6 +172,20 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
                 source_model.total_entity_count = scan["total_entity_count"]
                 source_model.eligible_entity_count = scan["eligible_entity_count"]
                 source_model.excluded_relationship_count = scan["relationship_count"]
+                # §2.4: an EXISTING row must also receive the current extraction
+                # version and unit registry. Leaving a stale version behind would
+                # let a re-ingested model advertise a contract it no longer uses,
+                # and there is no reason to delete/recreate the model to fix it.
+                existing_metadata = dict(source_model.extraction_metadata or {})
+                existing_metadata.update(
+                    {
+                        "class_counts": scan["class_counts"],
+                        "relationship_class_counts": scan.get("relationship_class_counts", {}),
+                        "extraction_version": EXTRACTION_VERSION,
+                        "dimension_units": unit_registry_json,
+                    }
+                )
+                source_model.extraction_metadata = existing_metadata
                 session.flush()
                 print(f"[ifc_to_db] Existing source model id={source_model.id}")
 
@@ -149,7 +193,7 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
 
             for ent in eligible_entities:
                 try:
-                    canonical, warns = extract_canonical_json(ent, ifc_model)
+                    canonical, warns = extract_canonical_json(ent, ifc_model, measurements)
                     if warns:
                         all_warnings.extend([f"[entity {ent.GlobalId}] {w}" for w in warns])
 
@@ -184,6 +228,12 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
     print(
         f"[ifc_to_db] Entities new={entities_new}  updated={entities_updated}  "
         f"failures={entity_failures}"
+    )
+    measurement_diagnostics = measurements.diagnostics()
+    print(
+        "[ifc_to_db] Typed measurement values by measure type: "
+        f"{measurement_diagnostics['typed_values_by_measure_type']}  "
+        f"by provenance: {measurement_diagnostics['typed_values_by_provenance']}"
     )
 
     # ------------------------------------------------------------------
@@ -341,5 +391,6 @@ def ifc_to_db(ifc_path: str | Path) -> dict[str, Any]:
         entity_failures=entity_failures,
         rel_failures=rel_failures,
         vector_stats=vector_stats,
+        measurement_stats=measurement_diagnostics,
         warnings=all_warnings,
     )

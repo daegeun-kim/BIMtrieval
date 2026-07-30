@@ -52,6 +52,17 @@ export const VIEWER_COLORS = {
   plane: "#c4cdd6",
   /** Scene background — the "sheet". */
   background: "#e9edf1",
+
+  /**
+   * Floor-plan cut contour (task28 §4.2): the darkest ink in the viewer, so
+   * true cut geometry outranks every projected edge below it. The measured-
+   * drawing convention this interface imitates fills cut material dark and
+   * leaves everything beyond it lighter — the same reasoning that makes `roof`
+   * the darkest base gray.
+   */
+  planCut: "#1c232b",
+  /** Restrained poché fill inside the cut contour. */
+  planFill: "#96a2af",
 } as const;
 
 export const VIEWER_OPACITY = {
@@ -82,6 +93,10 @@ export const VIEWER_OPACITY = {
   dim: 0.35,
   /** Light enough never to obscure underground geometry. */
   plane: 0.3,
+  /** Cut contour: fully opaque — it is the strongest line on the sheet. */
+  planCut: 1,
+  /** Cut fill: present but restrained, so highlighted cut geometry stays legible. */
+  planFill: 0.55,
 } as const;
 
 /**
@@ -167,6 +182,47 @@ export const VIEWER_CAMERA = {
    * distance blow up toward infinity.
    */
   minEffectiveWidthFraction: 0.35,
+} as const;
+
+/**
+ * Floor-plan mode (task28 §3, §4.2). A mode of the existing viewer: the plan is
+ * a live clipped rendering of the same Fragments model, never a raster or a
+ * separately generated drawing.
+ */
+export const PLAN = {
+  /**
+   * Nominal horizontal cut above the selected floor, as a presentation-only
+   * SCENE distance in metres (the installed Fragments/viewer coordinate path is
+   * metre-scale). It never rewrites a stored measurement and never touches
+   * Task 27's IFC-native unit contract.
+   */
+  cutOffsetM: 1.2,
+  /**
+   * Float32 ULPs of separation between the upper cut and the next band's lowest
+   * surface, so two clipping planes can never coincide. Scaled by the model's
+   * own magnitudes in `planeTolerance` — never a per-file tuned value.
+   */
+  toleranceUlps: 8,
+  /**
+   * Draw order of the plan-only cut layers. All sit above the base edge chunks
+   * (1) and the highlight edge overlay (2), and query-primary cut geometry is
+   * drawn LAST so a highlighted cut stays legible over the base cut contour
+   * (task28 §4.2).
+   */
+  baseFillRenderOrder: 3,
+  baseContourRenderOrder: 4,
+  primaryFillRenderOrder: 5,
+  primaryContourRenderOrder: 6,
+  /**
+   * Presentation-only downward nudge, in scene metres, of the cut overlay off
+   * the clipping plane that produced it. Section geometry is exactly coplanar
+   * with that plane, where the GPU's clip test is a floating-point coin flip and
+   * would stipple the contour away. Two millimetres is invisible at any plan
+   * zoom, is comfortably above Float32 noise at building-scale coordinates, and
+   * is a single global constant — not a per-model or per-file adjustment. The
+   * separate `toleranceUlps` above governs clipping-plane SEPARATION.
+   */
+  cutInsetM: 0.002,
 } as const;
 
 /** Isolated component preview (task14 §5; height doubled by task15 §4). */
@@ -261,6 +317,11 @@ export const DIM_MATERIAL = material(VIEWER_COLORS.dim, VIEWER_OPACITY.dim);
 export const SCENE_BACKGROUND = new THREE.Color(VIEWER_COLORS.background);
 export const PLANE_COLOR = new THREE.Color(VIEWER_COLORS.plane);
 export const PLANE_OPACITY = VIEWER_OPACITY.plane;
+
+export const PLAN_CUT_COLOR = new THREE.Color(VIEWER_COLORS.planCut);
+export const PLAN_CUT_OPACITY = VIEWER_OPACITY.planCut;
+export const PLAN_FILL_COLOR = new THREE.Color(VIEWER_COLORS.planFill);
+export const PLAN_FILL_OPACITY = VIEWER_OPACITY.planFill;
 
 /** Field of view for the configured lens at a given aspect ratio (task14 §2). */
 export function verticalFovDeg(aspect: number): number {

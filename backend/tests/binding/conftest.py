@@ -136,7 +136,6 @@ def synthetic_vocab() -> ModelVocabulary:
             field_name="GrossFloorArea",
             populated_count=0,
             total_count=30,
-            unit_available=False,
         )
     ]
     return v

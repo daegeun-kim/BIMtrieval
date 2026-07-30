@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from app.llm.schemas import GroundedAnswer
 from app.query.binding.evidence import AnswerPartResult, ResultStatus
 from app.query.binding.packet import AnswerPacket
+from app.query.semantic.units import units_equivalent
 
 __all__ = [
     "AnswerValidation",
@@ -146,7 +147,11 @@ def _check_claims(
                 f"value is {fact.value!r}"
             )
 
-        if fact.unit and claim.unit and _normalize(claim.unit) != _normalize(fact.unit):
+        # Units are compared with the deterministic unit normalizer, not the
+        # generic text one: `_normalize` strips the ² and ³ that distinguish an
+        # area from a volume, and it would reject "millimetres" against "mm" for
+        # a difference that is purely orthographic (task27 §4.3).
+        if fact.unit and claim.unit and not units_equivalent(claim.unit, fact.unit):
             validation.fail(
                 f"claim on {claim.fact_id!r} states unit {claim.unit!r} but the authoritative "
                 f"unit is {fact.unit!r}"

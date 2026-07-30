@@ -16,10 +16,20 @@ Two layers:
   field-resolution registry required by tasks/task05.md item 6.
 
 The JSON shape this module reads matches `bim_rag.ifc_parser.extract_canonical_json`
-exactly: `property_sets = {pset_name: {prop_name: {"value", "type"}}}`,
-`quantity_sets = {qset_name: {qty_name: {"value", "provenance", "unit"?,
-"normalized_value"?, "normalized_unit"?}}}` (normalized_unit is currently
-always "m", meters — see `normalize_quantity_value()`).
+exactly (extraction v002, task27):
+
+- `property_sets = {pset: {prop: {"value", "type", "measure_type"?,
+  "unit_override_key"?}}}`
+- `quantity_sets = {qset: {qty: {"value", "provenance", "measure_type"?,
+  "unit_override_key"?}}}`
+- `measurements = {AttributeName: {"value", "measure_type", "provenance"}}`
+
+Values are stored in the units the IFC used. There is no normalized value and
+no normalized unit: the v001 shape carried `normalized_unit="m"` produced by
+applying one project LENGTH factor to every quantity, which was invalid for
+areas and volumes. Unit safety is now decided from the semantic manifest by
+`app.query.semantic.units`, and this module stays purely physical — it says
+WHERE a field lives, never what its number means.
 """
 
 from __future__ import annotations
@@ -222,6 +232,23 @@ def _assert_set_field_exists(
         )
 
 
+def _assert_set_field_exists_at(
+    session: Session, source_model_id: int, top_key: str, field_name: str
+) -> None:
+    """Existence check for a flat, set-less container such as `measurements`."""
+    exists = session.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM ifc_entities WHERE source_model_id = :id "
+            "AND canonical_json->:top_key ? :field_name)"
+        ),
+        {"id": source_model_id, "top_key": top_key, "field_name": field_name},
+    ).scalar()
+    if not exists:
+        raise FieldNotFoundError(
+            f"{top_key}.{field_name} not found for source_model_id={source_model_id}"
+        )
+
+
 def _find_across_sets(
     session: Session, source_model_id: int, top_key: str, field_name: str
 ) -> list[str]:
@@ -315,15 +342,35 @@ def resolve_field(session: Session, source_model_id: int, field_ref: FieldRef) -
             field_name=field_ref.field_name,
             access_kind="jsonb",
             column_name=None,
-            json_path=("quantity_sets", field_ref.set_name, field_ref.field_name),
+            # The `value` leaf, not the entry object. Stopping one level short
+            # made the text/numeric expressions read a serialized JSON object,
+            # which is never numeric — so every quantity comparison silently
+            # matched nothing and every quantity aggregate had zero coverage.
+            json_path=("quantity_sets", field_ref.set_name, field_ref.field_name, "value"),
+            declared_value_type="float",
+            unit_capable=True,
+            provenance="ifc_extracted",
+        )
+
+    if field_ref.field_kind is FieldKind.MEASUREMENT:
+        _assert_set_field_exists_at(session, source_model_id, "measurements", field_ref.field_name)
+        return ResolvedField(
+            field_kind=FieldKind.MEASUREMENT,
+            set_name=None,
+            field_name=field_ref.field_name,
+            access_kind="jsonb",
+            column_name=None,
+            json_path=("measurements", field_ref.field_name, "value"),
             declared_value_type="float",
             unit_capable=True,
             provenance="ifc_extracted",
         )
 
     if field_ref.field_kind is FieldKind.DIMENSION:
-        # DIMENSION is a normalized *view* over quantity_sets (spec_v002 §9.1), not its own
-        # storage location — FieldRef requires set_name=None, so search across all sets.
+        # DIMENSION is a cross-set *lookup* over quantity_sets, not its own
+        # storage location — FieldRef requires set_name=None, so search across
+        # all sets. It resolves to the same raw stored value as QUANTITY: it is
+        # no longer a "normalized view", because nothing is normalized (task27).
         matches = _find_across_sets(session, source_model_id, "quantity_sets", field_ref.field_name)
         if not matches:
             raise FieldNotFoundError(
@@ -345,7 +392,7 @@ def resolve_field(session: Session, source_model_id: int, field_ref: FieldRef) -
             field_name=field_ref.field_name,
             access_kind="jsonb",
             column_name=None,
-            json_path=("quantity_sets", set_name, field_ref.field_name),
+            json_path=("quantity_sets", set_name, field_ref.field_name, "value"),
             declared_value_type="float",
             unit_capable=True,
             provenance="derived_exact",
@@ -384,7 +431,21 @@ def resolve_concept(session: Session, source_model_id: int, field_name: str) -> 
                 field_name=field_name,
                 access_kind="jsonb",
                 column_name=None,
-                json_path=("quantity_sets", set_name, field_name),
+                json_path=("quantity_sets", set_name, field_name, "value"),
+                declared_value_type="float",
+                unit_capable=True,
+                provenance="ifc_extracted",
+            )
+        )
+    if _measurement_attribute_exists(session, source_model_id, field_name):
+        matches.append(
+            ResolvedField(
+                field_kind=FieldKind.MEASUREMENT,
+                set_name=None,
+                field_name=field_name,
+                access_kind="jsonb",
+                column_name=None,
+                json_path=("measurements", field_name, "value"),
                 declared_value_type="float",
                 unit_capable=True,
                 provenance="ifc_extracted",
@@ -407,34 +468,16 @@ def resolve_concept(session: Session, source_model_id: int, field_name: str) -> 
     return matches
 
 
-def normalize_quantity_value(raw_entry: dict, target_unit: str) -> tuple[float | None, str | None]:
-    """Convert an ingested quantity_sets entry to a normalized-unit value
-    (spec_v002 §9.1, spec_v003 §10).
-
-    Only length ("mm") conversion is currently derivable: `bim_rag.ifc_parser`
-    only computes a linear project-length-unit factor (normalized_unit="m"),
-    not an area/volume-aware one. Returns (None, reason) rather than
-    fabricating a value when conversion is not actually derivable — this is a
-    real limitation of the v001 ingestion output, not something this module
-    can safely paper over.
-    """
-    if target_unit == "mm":
-        if raw_entry.get("normalized_unit") == "m" and isinstance(
-            raw_entry.get("normalized_value"), (int, float)
-        ):
-            return round(float(raw_entry["normalized_value"]) * 1000.0, 6), None
-        return (
-            None,
-            "length not normalizable: ingestion did not record a project-unit normalized_value",
-        )
-    if target_unit in ("mm2", "mm3"):
-        return None, (
-            f"{target_unit} conversion not available: ingestion only computes a linear length "
-            "factor, not an area/volume-aware one"
-        )
-    if target_unit == "degrees":
-        return None, "angle unit metadata is not captured by current ingestion output"
-    return None, f"unsupported target_unit {target_unit!r}"
+def _measurement_attribute_exists(session: Session, source_model_id: int, field_name: str) -> bool:
+    return bool(
+        session.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM ifc_entities WHERE source_model_id = :id "
+                "AND canonical_json->'measurements' ? :field_name)"
+            ),
+            {"id": source_model_id, "field_name": field_name},
+        ).scalar()
+    )
 
 
 def classify_missing_value(present: bool, raw_value: object) -> MissingValueState | None:

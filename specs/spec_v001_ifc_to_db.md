@@ -158,7 +158,8 @@ Extract and preserve all practical scalar, intrinsic, and resolved descriptive i
 - placement and elevation values that intrinsically locate the object
 - nominal dimensions
 - derived dimensions when they can be deterministically calculated from the object's own representation
-- units and normalized units
+- the IFC measure type of a supported dimensional value, and the effective unit it is recorded in
+  (task27 §20 — the model's own units are preserved; there are no normalized units)
 - classifications or codes that describe the entity
 - representation metadata useful for describing the entity without serializing full geometry
 
@@ -205,7 +206,10 @@ Design a documented schema that supports heterogeneous IFC classes without disca
 Requirements:
 
 - Preserve the original value and unit when available.
-- Also store a normalized numeric value and normalized unit where reliable conversion is possible.
+- For a supported dimensional value, store its IFC `measure_type` and — only when the source
+  occurrence explicitly overrides the project default — a `unit_override_key` into the model's own
+  unit registry. Do NOT store a normalized value or a normalized unit: the corpus keeps the units
+  the IFC uses and nothing is converted (task27 §20).
 - Preserve booleans, numbers, strings, lists, nulls, and structured values with their correct types.
 - Use stable ordering for keys and generated feature traversal.
 - Do not flatten different property sets into colliding keys.
@@ -244,7 +248,8 @@ Template requirements:
 - Render values deterministically and consistently.
 - Always include IFC class and GlobalId.
 - Include name when present.
-- Use normalized units in prose where available and retain unambiguous unit labels.
+- Render a value in the unit the IFC actually records it in, and retain unambiguous unit labels.
+  Never convert for prose (task27 §20).
 - Use stable feature ordering.
 - Deduplicate repeated equivalent facts.
 - Do not invent, infer, summarize, or classify facts using an LLM.
@@ -769,4 +774,198 @@ Canonical SQL/RAG identities: VALIDATED
 Path-only notebook pipeline: EXECUTED AND VALIDATED
 CLOCK_WATCHDOG_TIMEOUT mitigations: IMPLEMENTED AND VALIDATED
 CUDA recovery batch size: 4 (staged validation) -> 8 (production, within the permitted ceiling)
+```
+
+---
+
+## §20. Task 27 amendment — IFC-Native Dimension Units and Minimal Numeric Query Access
+
+Extraction version **v001 → v002**. Manifest schema/builder **v001 → v002**.
+
+### The owner decision
+
+Preserve the effective units embedded in each IFC. **Do not bulk-convert the corpus** into `mm`,
+`mm²`, `mm³`, SI, or any other canonical target. Store each model's unit definitions once, link
+typed values to their measure type, and store an occurrence-level unit override only when the IFC
+explicitly provides one.
+
+### What v001 got wrong
+
+`_extract_qsets` applied ONE project LENGTH factor to every numeric quantity and emitted
+`normalized_unit="m"`. That is invalid for an area and for a volume, and it is invalid in the very
+common case where a model declares millimetres for length and square/cubic metres for area and
+volume. The scaling, the label, and the `mm`-only conversion in
+`field_registry.normalize_quantity_value()` are all removed. Nothing in the pipeline converts a unit
+any more.
+
+### Supported scope
+
+Deliberately three families — **length**, **area**, **volume** — and nothing else. Mass, angle,
+density, geometry-derived measurement, and bounding-box measurement stay out (§1.3 of the task); a
+later task may add another explicitly supported family without changing this contract.
+
+### The authority is the IFC, never a field name
+
+Three source facts are recognised, all of them typed by the IFC schema:
+
+| Source | Recognised because | Stored at |
+|---|---|---|
+| direct attribute | its SCHEMA-DECLARED type resolves to a supported measure (`IfcDoor.OverallHeight` → `IfcPositiveLengthMeasure`) | `canonical_json.measurements` |
+| property value | `IfcPropertySingleValue.NominalValue` is a supported measure type | `property_sets.<set>.<prop>.measure_type` |
+| physical quantity | the `IfcPhysicalSimpleQuantity` subtype is length/area/volume | `quantity_sets.<set>.<qty>.measure_type` |
+
+An `IfcReal`, integer, or string keeps its raw value and gets **no** measure type and **no** unit,
+however dimensional its name reads. This is why a flattened exporter bag of `IFCREAL` properties
+named `NetArea`/`Width`/`Height` stays unavailable as dimensions: that is the correct
+standards-based outcome, not a gap to be filled by inference. `bim_rag/measures.py` owns this and
+reads no filename, fingerprint, source-model id, project name, exporter name, or property-name
+substring.
+
+### The unit contract
+
+`ifc_source_models.extraction_metadata.dimension_units` holds, once per model:
+
+```json
+{
+  "contract_version": "v001",
+  "defaults":    {"length": "<key>", "area": "<key>", "volume": "<key>"},
+  "definitions": {"<key>": {"unit_kind": "si|conversion_based|derived|context_dependent",
+                            "ifc_unit_type": "LENGTHUNIT", "si_name": "METRE",
+                            "prefix": "MILLI", "symbol": "mm", "resolved": true}},
+  "unresolved_defaults": {"volume": "<why this model has no default volume unit>"}
+}
+```
+
+Keys are deterministic and definitions de-duplicated. A default that cannot be resolved gets an
+explicit unavailable state — never a substituted one. The effective unit of a value is:
+
+```text
+unit_override_key   otherwise   defaults[measure_type]
+```
+
+The model default is never copied onto a value, and a null override key is never written: "no
+override" and "overridden to nothing" must stay distinguishable.
+
+### Manifest (schema/builder v002)
+
+Every supported numeric field reports its physical source, measure type, numeric data type,
+existing coverage, and a complete unit verdict:
+
+- `uniform` — every populated occurrence resolves to one displayable effective unit. Executable:
+  filter, compare, and aggregate, with that unit returned alongside the result.
+- `mixed` — more than one effective unit. Bounded variants and exact counts are listed; the field is
+  never summed or compared as one scale.
+- `unknown` — an untyped occurrence, no resolvable project default, or an undisplayable unit
+  definition. Unavailable for dimensional calculation, with the limitation stated.
+
+Coverage distinctions are unchanged: missing values stay `partial`, never a fabricated zero. The
+manifest derives all of this from canonical measurement metadata plus the stored unit registry — it
+never re-opens the IFC and never infers a measure type from a field name. A v001 manifest is
+rejected as stale rather than read.
+
+Class records also carry a `measurements` list: one field record per measured direct attribute,
+with semantic id `meas:<IfcClass>.<AttributeName>`. This is what makes a newly ingested typed field
+discoverable by the backend without its literal name appearing in backend source.
+
+### Backend consumption (see spec_v002 §9.1 and spec_v003 §10)
+
+- `resolved_numeric_expr` casts the RAW stored value for every field kind and knows nothing about
+  units. Quantity/dimension/measurement fields now resolve to the `value` leaf rather than to the
+  entry object — stopping one level short made every quantity read a serialized JSON object, which
+  is never numeric, so filters matched nothing and aggregates covered nothing, silently.
+- There is exactly ONE unit decision in the query path, `app.query.semantic.units.decide_unit`,
+  fed by manifest-derived facts. It runs before compilation, in the binder validate/compile path
+  and in the typed aggregate path alike.
+- A unitless literal is interpreted in the field's own effective unit and that is disclosed. An
+  equivalent spelling (`metre`/`meter`/`m`) executes. A different unit returns an honest
+  unavailable result — no conversion exists.
+- Aggregates return the effective IFC unit; matched and coverage counts stay exact; missing
+  dimensional data remains unavailable rather than zero.
+
+### Notebook
+
+`run_full_ingestion()` performs and verifies the measurement extraction through production source —
+no manual unit entry, no per-model configuration, no post-ingestion JSON edit. Its report adds
+bounded measurement diagnostics: resolved defaults (or an explicit UNAVAILABLE), typed value counts
+by measure type and provenance, unit-definition count, measured-field count, and uniform/mixed/
+unknown field counts, alongside the active extraction and manifest versions.
+
+### Four-model re-ingestion evidence (§7.4)
+
+Every model was re-ingested through `run_full_ingestion()` — the production notebook function — with
+its source-model ID, fingerprint, and entity IDs preserved. All four rows were UPDATED in place; no
+model was deleted and recreated, and no entity, relationship, relationship member, RAG document,
+manifest, or catalog entry was duplicated.
+
+| | 1 Schependomlaan | 2 FOJAB | 3 SampleArchitecture | 4 Wellness Center |
+|---|---|---|---|---|
+| fingerprint | `57fafa59f03b…` unchanged | `9d0706a19319…` unchanged | `0e30ca043f07…` unchanged | `f4dbc661d555…` unchanged |
+| entities before → after | 6,989 → 6,989 | 20,975 → 20,975 | 102,403 → 102,403 | 4,705 → 4,705 |
+| relationships before → after | 3,473 → 3,473 | 19,938 → 19,938 | 99,895 → 99,895 | 3,565 → 3,565 |
+| RAG documents before → after | 10,462 → 10,462 | 40,913 → 40,913 | 202,298 → 202,298 | 8,270 → 8,270 |
+| extraction / manifest version | v002 / v002 | v002 / v002 | v002 / v002 | v002 / v002 |
+| default length / area / volume | mm / m² / m³ | mm / m² / m³ | **foot / square foot / cubic foot** | mm / m² / m³ |
+| typed values by measure type | length 1 | length 2,585 · area 60 | length 94,338 · area 15,706 · volume 14,704 | length 719 |
+| typed values by provenance | attribute 1 | attribute 2,014 · property 631 | attribute 1,141 · property 123,607 | attribute 137 · property 582 |
+| measured fields (uniform/mixed/unknown) | 1 (1/0/0) | 23 (23/0/0) | 169 (169/0/0) | 23 (23/0/0) |
+| one deterministic numeric query | `max(Elevation)` = 0 mm (coverage 1/6,989) | `max(OverallHeight)` = 10,220 mm (coverage 979/20,975) | `max(Dimensions.Area)` = 313,034 square foot (coverage 15,038/102,403) | `max(Pset_MemberCommon.Span)` = 2,400 mm (coverage 351/4,705) |
+| notebook readiness | fully query-ready | fully query-ready | fully query-ready | fully query-ready |
+
+Downstream refresh behaved as §2.4 requires. Vector regeneration is content-driven, not
+unconditional: model 3's second pass skipped 65,592 entity documents whose `source_hash` already
+matched and regenerated only the remaining 36,811. Relationship documents refreshed for every model
+because relationship canonical JSON carries `meta.extraction_version`, which the v001 → v002 bump
+legitimately changed. Viewer artifacts were reused unchanged — every fingerprint was identical, so
+`prepare:model` reported "Artifact already exists" and did no work.
+
+Two results are worth stating plainly rather than smoothing over.
+
+**Model 3 is imperial.** Its `IfcConversionBasedUnit` declarations are FOOT, SQUARE FOOT, and CUBIC
+FOOT, and its values are reported in those units. Under the v001 contract the same numbers would
+have been multiplied by a linear length factor and labelled metres.
+
+**Model 1 has almost no typed dimensions, and that is the correct answer.** Its 276,491
+`IfcPropertySingleValue` entries are `IfcReal`, `IfcLabel`, and `IfcBoolean` — not one declares a
+supported IFC measure type — and its doors and windows leave `OverallHeight`/`OverallWidth` unset.
+Only the single storey `Elevation` is typed. Names like `NetArea` in that flattened container are
+NOT promoted to dimensions; the model reports the limitation instead of inventing coverage. Making
+this model look as capable as model 3 would require exactly the name inference §1.2 forbids.
+
+### Test coverage
+
+Ingestion: **356 passed, 6 skipped, 0 failed** (was 264 passed / 6 skipped). 92 new tests —
+`tests/test_measures.py` (36), `tests/test_semantic_manifest_measurement.py` (24), and measurement
+invariants added to `tests/test_semantic_manifest_live.py` (32 parametrised over the four models).
+
+Backend: **27 failures, all pre-existing** (baseline 30 — three `query_live/test_rag_search.py`
+cases recovered as a side effect of re-embedding). Zero new failures. New backend tests:
+`tests/query_sql/test_units.py` (rewritten, 30), `tests/binding/test_measurement_binding.py` (21),
+`tests/query_live/test_measurement_live.py` (21, read-only, all passing against the four
+re-ingested models).
+
+`ruff format` / `ruff check` clean in both projects. No frontend source, test, dependency, build
+output, or OpenAPI client snapshot was changed.
+
+### One fix outside the literal scope, recorded deliberately
+
+`binding/validate.py` rejected EVERY ordered comparison. A field candidate advertises its
+capabilities in the typed SQL vocabulary (`gt`, `lte`), while a binding speaks the `BoundOperator`
+vocabulary (`greater_than`, `less_or_equal`), and the support check compared the two directly — so
+`greater_than` never appeared in `candidate.operators` and every numeric filter failed validation
+before any unit was considered. §4.3 requires numeric filtering to work, which it could not while
+this stood, so the check now translates between the two vocabularies. The slate payload is
+unchanged.
+
+### Status
+
+```
+IFC unit registry per source model:          STORED AND VALIDATED
+Typed length/area/volume extraction:         IMPLEMENTED AND VALIDATED
+v001 linear-normalization:                   REMOVED (no conversion path remains)
+Semantic manifest measurement facts:         GENERATED AND VALIDATED (schema/builder v002)
+Backend numeric filter + aggregate:          READS RAW VALUES, RETURNS THE IFC UNIT
+Different / mixed / unknown units:           REFUSED HONESTLY, NEVER CONVERTED
+Untyped numerics (IfcReal etc.):             PRESERVED RAW, NOT PROMOTED TO DIMENSIONS
+Four production models:                      RE-INGESTED IN PLACE, ALL QUERY-READY
+Frontend:                                    UNCHANGED
 ```

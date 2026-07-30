@@ -140,6 +140,61 @@ describe("effective visible-viewport centering (task19 §2)", () => {
   });
 });
 
+describe("the same centering applies to the floor-plan camera (task28 §4.3)", () => {
+  /** Swap in a real orthographic camera, as plan mode does via OBC.Views. */
+  function makeOrtho(canvasW = 1400, canvasH = 900) {
+    const { adapter, controls, canvas } = makeAdapter(canvasW, canvasH);
+    const camera = new THREE.OrthographicCamera(-50, 50, 32, -32, 0.1, 1000);
+    const world = (adapter as unknown as { world: { camera: Record<string, unknown> } }).world;
+    world.camera.three = camera;
+    return { adapter, camera, controls, canvas };
+  }
+
+  it("centers within the unobstructed region under an orthographic projection", async () => {
+    const { adapter, camera } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    await adapter.fitAll();
+    expect(camera.view).not.toBeNull();
+    expect(camera.view!.enabled).toBe(true);
+    expect(camera.view!.fullWidth).toBeCloseTo(1000, 5);
+    expect(camera.view!.width).toBe(1400);
+    expect(camera.view!.offsetX).toBe(0);
+    // The vertical mapping is untouched, so the image is never stretched.
+    expect(camera.view!.fullHeight).toBe(900);
+    expect(camera.view!.height).toBe(900);
+  });
+
+  it("widens the orthographic frustum so fitted content is framed, never clipped", async () => {
+    const { adapter, camera } = makeOrtho(1400, 900);
+    camera.updateProjectionMatrix();
+    const before = camera.projectionMatrix.elements[0]!; // 2/(right-left)
+    adapter.setViewportObstruction(400);
+    camera.updateProjectionMatrix();
+    const after = camera.projectionMatrix.elements[0]!;
+    // A wider frustum means a smaller horizontal scale: content shrinks into the
+    // visible region rather than being cropped by it.
+    expect(Math.abs(after)).toBeLessThan(Math.abs(before));
+    expect(Math.abs(before / after)).toBeCloseTo(1400 / 1000, 5);
+  });
+
+  it("clears the offset when nothing obstructs the viewport", async () => {
+    const { adapter, camera } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    expect(camera.view!.enabled).toBe(true);
+    adapter.setViewportObstruction(0);
+    expect(camera.view === null || camera.view.enabled === false).toBe(true);
+  });
+
+  it("resize() re-applies the orthographic offset from the fresh canvas size", () => {
+    const { adapter, camera, canvas } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    Object.defineProperty(canvas, "clientWidth", { value: 1800, configurable: true });
+    adapter.resize();
+    expect(camera.view!.fullWidth).toBeCloseTo(1400, 5);
+    expect(camera.view!.width).toBe(1800);
+  });
+});
+
 describe("effectiveViewportObstructionPx (task19 §2)", () => {
   it("is just the margin plus chat width with no component panel", () => {
     expect(effectiveViewportObstructionPx(380, false)).toBe(VIEWER_EDGE_MARGIN_PX + 380);

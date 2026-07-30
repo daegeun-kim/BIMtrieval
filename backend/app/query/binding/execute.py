@@ -44,6 +44,7 @@ from app.query.binding.evidence import (
 from app.query.binding.graph_exec import execute_graph
 from app.query.binding.schemas import CandidateSlate
 from app.query.binding.validate import PartValidation
+from app.query.semantic.units import decide_unit
 from app.query.sql.aggregates import compute_aggregate, compute_group_by
 from app.query.sql.compiler import build_condition_expr, path_array_param
 from app.query.sql.field_registry import resolve_field
@@ -336,16 +337,24 @@ def _fetch_examples(session: Session, where: sa.ColumnElement, limit: int) -> li
     ]
 
 
-def _output_field_ref(part: AnswerPart, context: ExecutionContext) -> FieldRef | None:
+def _output_field(part: AnswerPart, context: ExecutionContext):
+    """The first slate field candidate the part asks to report on, if any."""
     for candidate_id in part.output_field_candidate_ids:
         candidate = context.slate.field_candidate(candidate_id)
         if candidate is not None:
-            return FieldRef(
-                field_kind=FieldKind(candidate.field_kind),
-                set_name=candidate.set_name,
-                field_name=candidate.field_name,
-            )
+            return candidate
     return None
+
+
+def _output_field_ref(part: AnswerPart, context: ExecutionContext) -> FieldRef | None:
+    candidate = _output_field(part, context)
+    if candidate is None:
+        return None
+    return FieldRef(
+        field_kind=FieldKind(candidate.field_kind),
+        set_name=candidate.set_name,
+        field_name=candidate.field_name,
+    )
 
 
 def _execute_distribution(
@@ -375,7 +384,6 @@ def _execute_distribution(
         resolved,
         "count",
         None,
-        None,
         context.settings.default_list_limit,
     )
     result.statement_count += 1
@@ -392,17 +400,39 @@ def _execute_aggregate(
     where: sa.ColumnElement,
     extremum: bool = False,
 ) -> None:
+    candidate = _output_field(part, context)
     field_ref = _output_field_ref(part, context)
-    if field_ref is None:
+    if candidate is None or field_ref is None:
         result.status = ResultStatus.UNAVAILABLE
         result.limitation = (
             "this question needs a specific measured value to aggregate, and none was "
             "identified in this model"
         )
         return
+
+    # task27 §4.3: aggregate only what is on ONE scale, and report the unit the
+    # values are recorded in. A mixed- or unknown-unit field produces an honest
+    # unavailable — summing it would state a total in no unit at all.
+    decision = decide_unit(
+        requested_unit=None,
+        effective_unit=candidate.unit_symbol,
+        unit_state=candidate.unit_state,
+        measure_type=candidate.measure_type,
+        label=candidate.label,
+        unit_limitation=candidate.unit_limitation,
+    )
+    if not decision.ok:
+        result.status = ResultStatus.UNAVAILABLE
+        result.limitation = decision.reason or (
+            f"{candidate.label} cannot be aggregated in this model"
+        )
+        return
+    if decision.note:
+        result.interpretation = "; ".join(filter(None, (result.interpretation, decision.note)))
+
     resolved = resolve_field(context.session, predicate.source_model_id, field_ref)
     function = "max" if extremum else "sum"
-    aggregate = compute_aggregate(context.session, _ET, where, function, resolved, None)
+    aggregate = compute_aggregate(context.session, _ET, where, function, resolved, decision.unit)
     result.statement_count += 1
 
     if aggregate.coverage_count == 0:
@@ -418,7 +448,7 @@ def _execute_aggregate(
     result.aggregate = AggregateValue(
         function=aggregate.function,
         value=aggregate.value,
-        unit=None,
+        unit=aggregate.unit,
         coverage_count=aggregate.coverage_count,
         matched_count=aggregate.matched_count,
     )

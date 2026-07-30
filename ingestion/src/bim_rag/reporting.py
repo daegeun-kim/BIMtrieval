@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from bim_rag.ifc_parser import EXTRACTION_VERSION
+
 
 def build_stage1_report(
     scan: dict[str, Any],
@@ -116,8 +118,10 @@ def build_unified_report(
     vector_stats: dict[str, Any],
     warnings: list[str],
     manifest_stats: dict[str, Any] | None = None,
+    measurement_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     manifest_stats = manifest_stats or {}
+    measurement_stats = measurement_stats or {}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source_model_id": source_model_id,
@@ -175,7 +179,24 @@ def build_unified_report(
         "manifest_relationship_class_count": manifest_stats.get("relationship_class_count"),
         "manifest_missing_capability_count": manifest_stats.get("missing_capability_count"),
         "manifest_unsupported_structure_count": manifest_stats.get("unsupported_structure_count"),
+        "manifest_uniform_unit_field_count": manifest_stats.get("uniform_unit_field_count"),
+        "manifest_mixed_unit_field_count": manifest_stats.get("mixed_unit_field_count"),
+        "manifest_unknown_unit_field_count": manifest_stats.get("unknown_unit_field_count"),
+        "manifest_measurement_field_count": manifest_stats.get("measurement_field_count"),
         "manifest_error": manifest_stats.get("error"),
+        # Dimensional measurement extraction (task27 §2, §5). Bounded counts and
+        # the model's OWN default units — never a substituted or assumed one.
+        "extraction_version": EXTRACTION_VERSION,
+        "unit_contract_version": measurement_stats.get("unit_contract_version"),
+        "dimension_default_units": measurement_stats.get("defaults"),
+        "dimension_unresolved_defaults": measurement_stats.get("unresolved_defaults"),
+        "typed_measurement_values_by_measure_type": measurement_stats.get(
+            "typed_values_by_measure_type"
+        ),
+        "typed_measurement_values_by_provenance": measurement_stats.get(
+            "typed_values_by_provenance"
+        ),
+        "unit_definition_count": measurement_stats.get("unit_definition_count"),
         # §2.1: a model is only "fully query-ready" when its structured data,
         # its semantic manifest, AND its vectors all succeeded.
         "fully_query_ready": bool(

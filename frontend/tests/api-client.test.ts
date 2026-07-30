@@ -72,4 +72,23 @@ describe("ApiClient", () => {
   it("builds the viewer asset URL from the model id only", () => {
     expect(client.viewerAssetUrl(7)).toBe("http://backend.test/api/models/7/viewer-asset");
   });
+
+  // ---- Task 28: the read-only floor contract ------------------------------
+
+  it("GETs the model-scoped floors endpoint", async () => {
+    const spy = vi.fn(async () => new Response(JSON.stringify({ floors: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", spy);
+    await client.modelFloors(7);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/models/7/floors");
+    expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("normalizes a floors failure to a bounded error", async () => {
+    stubFetch(500, {});
+    const err = await client.modelFloors(7).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.kind).toBe("server");
+    expect(err.message).not.toContain("C:\\");
+  });
 });

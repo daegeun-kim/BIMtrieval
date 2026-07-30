@@ -702,7 +702,10 @@ def _field_candidate(concept: FieldConcept, candidate_id: str, tier: MatchTier) 
         populated_count=concept.populated_count,
         total_count=concept.total_count,
         sample_values=concept.sample_values,
-        unit_available=concept.unit_available,
+        measure_type=concept.measure_type,
+        unit_state=concept.unit_state,
+        unit_symbol=concept.unit_symbol,
+        unit_limitation=concept.unit_limitation,
         match_tier=tier,
     )
 

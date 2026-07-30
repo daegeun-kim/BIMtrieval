@@ -25,6 +25,7 @@ from app.query.binding.closure import SubjectClosure, resolve_closure
 from app.query.binding.lexical import normalize_text
 from app.query.binding.schemas import CandidateSlate, FieldCandidate, SpatialCandidate
 from app.query.binding.spans import ModifierSpan, material_spans
+from app.query.semantic.units import decide_unit
 
 __all__ = [
     "ValidationIssue",
@@ -50,6 +51,28 @@ _NUMERIC_OPERATORS = frozenset(
 )
 #: Operators that only make sense on text.
 _TEXT_OPERATORS = frozenset({BoundOperator.CONTAINS, BoundOperator.STARTS_WITH})
+
+#: A candidate advertises its capabilities in the typed SQL vocabulary
+#: (`gt`, `lte`, ...), while a binding speaks the `BoundOperator` vocabulary
+#: (`greater_than`, `less_or_equal`, ...). The support check below must compare
+#: like with like: without this translation every ordered comparison looks
+#: unsupported, which makes numeric filtering unreachable no matter how well the
+#: field's units resolve (task27 §4.3).
+_SQL_OPERATOR_NAMES: dict[BoundOperator, tuple[str, ...]] = {
+    BoundOperator.GREATER_THAN: ("gt",),
+    BoundOperator.GREATER_OR_EQUAL: ("gte",),
+    BoundOperator.LESS_THAN: ("lt",),
+    BoundOperator.LESS_OR_EQUAL: ("lte",),
+    BoundOperator.BETWEEN: ("between",),
+    BoundOperator.CONTAINS: ("contains",),
+    BoundOperator.STARTS_WITH: ("starts_with",),
+}
+
+
+def _operator_is_supported(operator: BoundOperator, candidate: FieldCandidate) -> bool:
+    names = (operator.value, *_SQL_OPERATOR_NAMES.get(operator, ()))
+    return any(name in candidate.operators for name in names)
+
 
 #: Operations whose answer is an exact figure. Such a figure may never be based
 #: on a bounded semantic candidate count (§3.3 final check).
@@ -379,7 +402,7 @@ def _check_field_condition(
             )
         )
         return
-    if condition.operator.value not in candidate.operators and condition.operator not in (
+    if not _operator_is_supported(condition.operator, candidate) and condition.operator not in (
         _VALUELESS_OPERATORS
         | {BoundOperator.EQUALS, BoundOperator.NOT_EQUALS, BoundOperator.ONE_OF}
     ):
@@ -417,13 +440,24 @@ def _check_field_condition(
         )
         return
 
-    # 6. Units must be deterministically convertible.
-    if condition.unit and not candidate.unit_available:
+    # 6. The comparison must be meaningful in the unit the model actually uses.
+    #    Nothing is converted (task27 §4.3), so a request in a different unit —
+    #    or against a field whose values are not all on one scale — is refused
+    #    here rather than executed and silently mis-scaled.
+    decision = decide_unit(
+        requested_unit=condition.unit,
+        effective_unit=candidate.unit_symbol,
+        unit_state=candidate.unit_state,
+        measure_type=candidate.measure_type,
+        label=candidate.label,
+        unit_limitation=candidate.unit_limitation,
+    )
+    if not decision.ok:
         v.issues.append(
             ValidationIssue(
-                "unit_not_convertible",
-                f"{candidate.label} does not record a normalized unit, so a value in "
-                f"{condition.unit} cannot be compared against it",
+                "unit_not_available",
+                decision.reason
+                or f"{candidate.label} cannot be compared against a value in {condition.unit}",
                 part.part_id,
             )
         )

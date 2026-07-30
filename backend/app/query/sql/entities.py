@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.db.models import IfcEntity
+from app.query.semantic.units import decide_unit, field_units
 from app.query.sql.aggregates import (
     AggregateResult,
     GroupBucket,
@@ -21,7 +22,7 @@ from app.query.sql.compiler import (
     resolved_parent_has_key_expr,
     resolved_text_expr,
 )
-from app.query.sql.errors import UnknownEntityOrRelationshipError
+from app.query.sql.errors import UnitNotAvailableError, UnknownEntityOrRelationshipError
 from app.query.sql.field_registry import resolve_field
 from app.query.sql.operations import MissingValueState
 from app.query.sql.schemas import (
@@ -353,7 +354,33 @@ def aggregate_entities(session: Session, plan: AggregateEntitiesPlan) -> Aggrega
             where, build_condition_expr(session, plan.source_model_id, plan.filters, _ET)
         )
     resolved = resolve_field(session, plan.source_model_id, plan.field) if plan.field else None
-    return compute_aggregate(session, _ET, where, plan.function, resolved, plan.unit)
+
+    # Unit safety, decided once from the semantic manifest (task27 §4.3): a
+    # mixed- or unknown-unit field is not aggregated at all, and a DIFFERENT
+    # requested unit is refused rather than silently converted. The effective
+    # unit then travels back on the result so the figure is never unitless.
+    unit: str | None = None
+    if resolved is not None and plan.function != "count":
+        units = field_units(session, plan.source_model_id, resolved)
+        decision = decide_unit(
+            requested_unit=plan.unit,
+            effective_unit=units.unit_symbol,
+            unit_state=units.unit_state,
+            measure_type=units.measure_type,
+            label=_field_label(resolved),
+            unit_limitation=units.limitation,
+        )
+        if not decision.ok:
+            raise UnitNotAvailableError(decision.reason or "this measurement cannot be aggregated")
+        unit = decision.unit
+
+    return compute_aggregate(session, _ET, where, plan.function, resolved, unit)
+
+
+def _field_label(resolved) -> str:
+    if resolved.set_name:
+        return f"{resolved.set_name}.{resolved.field_name}"
+    return resolved.field_name
 
 
 def group_entities(session: Session, plan: GroupEntitiesPlan) -> list[GroupBucket]:
@@ -368,8 +395,21 @@ def group_entities(session: Session, plan: GroupEntitiesPlan) -> list[GroupBucke
         if plan.aggregate_field
         else None
     )
+    if agg_resolved is not None and plan.function != "count":
+        units = field_units(session, plan.source_model_id, agg_resolved)
+        decision = decide_unit(
+            requested_unit=plan.unit,
+            effective_unit=units.unit_symbol,
+            unit_state=units.unit_state,
+            measure_type=units.measure_type,
+            label=_field_label(agg_resolved),
+            unit_limitation=units.limitation,
+        )
+        if not decision.ok:
+            raise UnitNotAvailableError(decision.reason or "this measurement cannot be aggregated")
+
     return compute_group_by(
-        session, _ET, where, group_resolved, plan.function, agg_resolved, plan.unit, plan.limit
+        session, _ET, where, group_resolved, plan.function, agg_resolved, plan.limit
     )
 
 

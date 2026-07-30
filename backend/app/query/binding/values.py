@@ -62,9 +62,9 @@ _NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 #: as numeric would give a categorical field comparison operators it cannot
 #: honour. User input is searched; stored values are matched in full.
 _STRICT_NUMBER_RE = re.compile(r"^\s*-?\d+(?:[.,]\d+)?\s*$")
-#: Unit spellings recognized on a user value. The conversion itself is delegated
-#: to the existing unit system (`field_registry.normalize_quantity_value`); this
-#: only identifies which unit the user wrote.
+#: Unit spellings recognized on a user value. This only identifies WHICH unit
+#: the user wrote; whether that unit may be used against a given field is the
+#: single decision in `app.query.semantic.units.decide_unit`. Nothing converts.
 _UNIT_ALIASES: dict[str, str] = {
     "mm": "mm",
     "millimetre": "mm",
@@ -145,9 +145,10 @@ def is_numeric_value(value: str | None) -> bool:
 def parse_number(value: str | None) -> tuple[float, str | None] | None:
     """`(magnitude, unit)` parsed from a user value, or None.
 
-    The unit is the normalized alias only — conversion stays with the existing
-    unit system so there is exactly one place that knows what is convertible
-    (§4.2, and `field_registry.normalize_quantity_value` for the real limits).
+    The unit is the recognized alias only. Whether it may be used against a
+    particular field is decided once, by `app.query.semantic.units.decide_unit`,
+    against that field's effective IFC unit — nothing here converts anything
+    (§4.2; task27 §4.3).
     """
     if not value:
         return None

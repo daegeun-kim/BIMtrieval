@@ -145,12 +145,31 @@ class FieldCandidate:
     populated_count: int = 0
     total_count: int = 0
     sample_values: tuple[str, ...] = ()
-    unit_available: bool = False
     match_tier: MatchTier = MatchTier.SEMANTIC
+    # -- measurement facts, carried from the semantic manifest (task27 §4.2) --
+    #: `length` / `area` / `volume`, or None for a field that is not dimensional.
+    measure_type: str | None = None
+    #: `uniform` / `mixed` / `unknown`, or None when not dimensional.
+    unit_state: str | None = None
+    #: The unit this field's values are ALREADY recorded in. Never a conversion
+    #: target — nothing in this pipeline converts.
+    unit_symbol: str | None = None
+    #: Why comparison/aggregation is refused, when it is.
+    unit_limitation: str | None = None
 
     @property
     def is_exact_match(self) -> bool:
         return self.match_tier in _EXACT_TIERS
+
+    @property
+    def unit_available(self) -> bool:
+        """True when the field resolves to ONE known effective IFC unit.
+
+        The single precondition for comparing or aggregating this field's
+        numbers: mixed or unknown units mean the values are not on one scale,
+        and no conversion exists to put them on one (§4.3).
+        """
+        return self.unit_state == "uniform" and bool(self.unit_symbol)
 
     @property
     def label(self) -> str:
@@ -180,7 +199,14 @@ class FieldCandidate:
                 "populated": self.populated_count or None,
                 "of": self.total_count or None,
                 "example_values": list(self.sample_values),
-                "unit_available": self.unit_available,
+                # The model's OWN unit, so the binder can see what a bare number
+                # against this field will mean. Absent when the field is not
+                # dimensional or its unit is not uniform — in which case the
+                # limitation is what the binder is shown instead.
+                "measure": self.measure_type,
+                "unit": self.unit_symbol if self.unit_available else None,
+                "unit_state": self.unit_state,
+                "unit_limitation": None if self.unit_available else self.unit_limitation,
             }
         )
 

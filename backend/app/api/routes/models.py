@@ -6,6 +6,7 @@ history, or expose a filesystem path:
 
     GET  /api/models                                       -> bounded selector list
     GET  /api/models/{id}/viewer-asset                     -> stream prepared artifact
+    GET  /api/models/{id}/floors                           -> logical floor bands
     POST /api/models/{id}/entities/resolve                 -> GlobalId -> compact identity
     GET  /api/models/{id}/entities/{gid}/details           -> truthful bounded details
     POST /api/models/{id}/entities/highlight-group         -> instance/type/family matches
@@ -23,14 +24,18 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.schemas.models import (
+    MAX_FLOOR_STOREY_NAMES,
     DetailAvailability,
     DetailValue,
     EntityDetailsResponse,
     FamilyDetails,
+    FloorBandInfo,
+    FloorReferenceBasis,
     HighlightGroupRequest,
     HighlightGroupResponse,
     HighlightScope,
     InstanceDetails,
+    ModelFloorsResponse,
     ModelListItem,
     ModelListResponse,
     ResolvedEntity,
@@ -41,6 +46,7 @@ from app.api.schemas.models import (
 from app.config.settings import get_settings
 from app.db.session import session_scope
 from app.query.selection import normalize_global_ids
+from app.query.semantic import spatial as spatial_ops
 from app.query.sql import catalog as catalog_ops
 from app.query.sql import entities as entity_ops
 from app.shared.types import ViewerAssetStatus
@@ -56,6 +62,10 @@ from app.viewer.assets import (
 # describe the model's data, never internals.
 _NO_TYPE_REASON = "This model has no explicit IFC type data for this object."
 _NO_FAMILY_REASON = "This model has no explicit family property for this object."
+_NO_FLOORS_REASON = (
+    "This model has no IfcBuildingStorey elevations, so floor levels cannot be "
+    "established from its spatial data."
+)
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -157,6 +167,69 @@ def viewer_asset(
         media_type="application/octet-stream",
         filename=f"{identity.source_fingerprint}{VIEWER_ASSET_SUFFIX}",
         headers={"ETag": etag, "Cache-Control": _CACHE_CONTROL},
+    )
+
+
+@router.get("/{source_model_id}/floors", response_model=ModelFloorsResponse)
+def model_floors(
+    source_model_id: int,
+    session: Session = Depends(get_db),
+) -> ModelFloorsResponse:
+    """The model's logical floor bands, for the viewer's floor-plan control
+    (task28 §2.1).
+
+    Deterministic, read-only, and model-scoped: it reuses the SAME
+    `build_storey_model()` clustering the natural-language floor interpretation
+    resolves against, so the buttons and the query language can never disagree
+    about what "the second floor" is. There is deliberately no second floor
+    detector.
+
+    It never opens the IFC, reads the prepared viewer artifact, calls an LLM,
+    creates an embedding, or writes the database — it reads the canonical JSON
+    ingestion already stored.
+
+    Elevations are reported for diagnostics in the model's own project length
+    unit. They are NOT viewer scene coordinates; mapping a band into the loaded
+    artifact's scene space is the frontend's job (task28 §3).
+    """
+    if catalog_ops.get_model_asset_identity(session, source_model_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"status": "unknown_model", "message": "model not found"},
+        )
+
+    storey_model = spatial_ops.build_storey_model(session, source_model_id)
+    if not storey_model.bands:
+        return ModelFloorsResponse(
+            source_model_id=source_model_id,
+            available=False,
+            unavailable_reason=_NO_FLOORS_REASON,
+            reference_basis=FloorReferenceBasis.NONE,
+            total_storeys=storey_model.total_storeys,
+        )
+
+    reference_index = storey_model.reference_index
+    floors = [
+        FloorBandInfo(
+            band_index=band.index,
+            label=spatial_ops.band_label(band.index, reference_index),
+            is_reference=band.index == reference_index,
+            storey_global_ids=band.global_ids,
+            storey_names=[s.name for s in band.storeys if s.name][:MAX_FLOOR_STOREY_NAMES],
+            min_elevation=band.min_elevation,
+            max_elevation=band.max_elevation,
+        )
+        # `build_bands` already emits bands in ascending elevation order, indexed
+        # in that order; the response preserves it rather than re-sorting.
+        for band in storey_model.bands
+    ]
+    return ModelFloorsResponse(
+        source_model_id=source_model_id,
+        available=True,
+        reference_band_index=reference_index,
+        reference_basis=FloorReferenceBasis(storey_model.reference_basis),
+        total_storeys=storey_model.total_storeys,
+        floors=floors,
     )
 
 

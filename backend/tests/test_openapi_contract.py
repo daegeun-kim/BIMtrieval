@@ -86,6 +86,137 @@ def test_viewer_truncation_contract_is_documented(client):
     assert "viewer_matches_truncated" in props
 
 
+# ---------------------------------------------------------------------------
+# Task 26 — the explanation-panel presentation contract
+# ---------------------------------------------------------------------------
+
+
+def test_answer_explanation_contract_is_documented(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    for name in (
+        "AnswerExplanation",
+        "ExplanationPresentation",
+        "ExplanationGroup",
+        "ExplanationRow",
+        "ExplanationBucket",
+        "ExplanationAggregate",
+    ):
+        assert name in schemas, name
+
+    props = schemas["AnswerExplanation"]["properties"]
+    for field in (
+        "part_id",
+        "request_label",
+        "operation",
+        "result_status",
+        "presentation",
+        "answer_basis",
+        "interpretation",
+        "retrieval_modes",
+        "exact_total",
+        "class_breakdown",
+        "distribution",
+        "aggregate",
+        "relationship_endpoint_total",
+        "limitation",
+        "known_parts",
+        "unknown_parts",
+        "shown_identity_count",
+        "true_result_count",
+        "identities_truncated",
+        "groups",
+        "rows",
+    ):
+        assert field in props, field
+
+    # Additive on the existing envelope, so a client that ignores it still works.
+    assert "answer_explanation" in schemas["QueryResponseEnvelope"]["properties"]
+    assert "answer_explanation" not in schemas["QueryResponseEnvelope"].get("required", [])
+
+
+def test_explanation_presentation_enum_is_documented(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["ExplanationPresentation"]["enum"]) == {
+        "metric",
+        "table",
+        "distribution",
+        "aggregate",
+        "relationship",
+        "partial",
+    }
+
+
+def test_only_selectable_groups_carry_identities(client):
+    """A distribution bucket has no authoritative identity subset, so the
+    contract gives it no way to claim one (task26 §1.1)."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert "global_ids" in schemas["ExplanationGroup"]["properties"]
+    assert "global_ids" not in schemas["ExplanationBucket"]["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Task 28 — the read-only logical floor contract for the floor-plan control
+# ---------------------------------------------------------------------------
+
+
+def test_model_floors_path_is_documented_and_read_only(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    floors = "/api/models/{source_model_id}/floors"
+    assert "get" in paths[floors]
+    # Read-only: no mutating verb is part of the contract.
+    assert not {"post", "put", "patch", "delete"} & set(paths[floors])
+    # Source-model scoped: the id is a required path parameter.
+    params = paths[floors]["get"]["parameters"]
+    assert any(p["name"] == "source_model_id" and p["in"] == "path" for p in params)
+
+
+def test_model_floors_schemas_present(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    for name in ("ModelFloorsResponse", "FloorBandInfo", "FloorReferenceBasis"):
+        assert name in schemas, name
+
+    props = schemas["ModelFloorsResponse"]["properties"]
+    for field in (
+        "source_model_id",
+        "available",
+        "unavailable_reason",
+        "reference_band_index",
+        "reference_basis",
+        "total_storeys",
+        "floors",
+    ):
+        assert field in props, field
+
+    band = schemas["FloorBandInfo"]["properties"]
+    for field in (
+        "band_index",
+        "label",
+        "is_reference",
+        "storey_global_ids",
+        "storey_names",
+        "min_elevation",
+        "max_elevation",
+    ):
+        assert field in band, field
+
+
+def test_floor_reference_basis_enum_is_documented(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["FloorReferenceBasis"]["enum"]) == {
+        "elevation_zero",
+        "lowest_band",
+        "none",
+    }
+
+
+def test_floor_contract_is_additive(client):
+    """Existing clients that never call the endpoint keep working, so nothing
+    was added to a shared response envelope (task28 §2.1)."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert "floors" not in schemas["QueryResponseEnvelope"]["properties"]
+    assert "floors" not in schemas["ModelListItem"]["properties"]
+
+
 def test_no_schema_exposes_canonical_json_or_trace_internals_as_a_field(client):
     """Tracing is local terminal observability, not a client response feature,
     and raw canonical JSON is never part of the API contract (task13 §6).

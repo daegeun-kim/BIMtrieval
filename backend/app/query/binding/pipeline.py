@@ -84,6 +84,9 @@ class PipelineOutcome:
     packet: AnswerPacket | None = None
     hydration: ViewerHydration = field(default_factory=ViewerHydration)
     next_scope: PreviousScope | None = None
+    #: The ONE part that drove the viewer (§9). Recorded — not recomputed — so a
+    #: presentation layer can describe exactly the highlighted set.
+    primary_visual_part_id: str | None = None
 
     gate_state: GateState = GateState.INVALID
     needs_clarification: bool = False
@@ -246,6 +249,7 @@ def run_pipeline(
     # -- 8. compact answer packet -------------------------------------------
     started = time.perf_counter()
     primary_visual = _primary_visual_part_id(plan, results)
+    outcome.primary_visual_part_id = primary_visual
     packet = build_answer_packet(
         request.question,
         results,

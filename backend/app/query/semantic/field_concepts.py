@@ -28,8 +28,9 @@ schema catalog), so no per-question full canonical-JSON scan occurs (§10.3).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -56,7 +57,9 @@ __all__ = [
     "FIELD_CONCEPT_BUILDER_VERSION",
 ]
 
-FIELD_CONCEPT_BUILDER_VERSION = "v001"
+#: v002 (task27): concepts now carry manifest-derived measure/unit facts and the
+#: measurement-attribute fields. Bumping invalidates any cached v001 index.
+FIELD_CONCEPT_BUILDER_VERSION = "v002"
 
 #: Operators the typed SQL path supports per inferred data type. Values are the
 #: string forms of `app.query.sql.schemas.Operator`.
@@ -89,11 +92,24 @@ class FieldConcept:
     populated_count: int = 0
     total_count: int = 0
     sample_values: tuple[str, ...] = ()
-    unit_available: bool = False
+    # -- measurement facts, read from the semantic manifest (task27 §4.2) -----
+    #: `length` / `area` / `volume` when the IFC declares one, else None.
+    measure_type: str | None = None
+    #: `uniform` / `mixed` / `unknown`, or None when not dimensional.
+    unit_state: str | None = None
+    #: The effective IFC unit the values are already recorded in.
+    unit_symbol: str | None = None
+    #: Why this field cannot be compared or aggregated, when it cannot.
+    unit_limitation: str | None = None
 
     @property
     def key(self) -> tuple[str, str | None, str]:
         return (self.field_kind, self.set_name, self.field_name)
+
+    @property
+    def unit_available(self) -> bool:
+        """True when the field resolves to ONE known effective IFC unit."""
+        return self.unit_state == "uniform" and bool(self.unit_symbol)
 
     @property
     def label(self) -> str:
@@ -295,7 +311,6 @@ def _build_quantity_concepts(vocab: ModelVocabulary) -> list[FieldConcept]:
                 applicable_classes=tuple(sorted({p.ifc_class for p in profiles})),
                 populated_count=sum(p.populated_count for p in profiles),
                 total_count=sum(p.total_count for p in profiles),
-                unit_available=any(p.unit_available for p in profiles),
             )
         )
     return concepts
@@ -374,15 +389,112 @@ def _build_attribute_concepts(vocab: ModelVocabulary) -> list[FieldConcept]:
     return concepts
 
 
+def _manifest_measurements(
+    session: Session, source_model_id: int, settings: Settings
+) -> tuple[dict[tuple[str, str | None, str], Any], list[FieldConcept]]:
+    """Measurement facts by field key, plus the measurement-attribute concepts.
+
+    The semantic manifest is the authority on measure type and unit state
+    (task27 §4.2), and it is also where a NEWLY ingested typed field becomes
+    discoverable — the measurement attributes below are read from it, so no
+    field name is ever written into backend source.
+
+    A model with no valid manifest — or no session at all, when the index is
+    built offline from an injected vocabulary — degrades to no measurement
+    facts, which reads as "not dimensional": raw numbers still compare, and any
+    explicitly requested unit is refused rather than assumed to match.
+    """
+    from app.query.semantic.manifest.loader import (
+        ManifestUnavailableError,
+        get_semantic_manifest,
+    )
+    from app.query.semantic.manifest.schema import KIND_MEASUREMENT
+
+    if session is None:
+        return {}, []
+    try:
+        manifest = get_semantic_manifest(session, source_model_id, settings)
+    except ManifestUnavailableError:
+        return {}, []
+
+    facts: dict[tuple[str, str | None, str], Any] = {}
+    measurement_classes: dict[str, set[str]] = {}
+    measurement_facts: dict[str, Any] = {}
+    measurement_counts: dict[str, tuple[int, int]] = {}
+
+    for concept in manifest.fields():
+        if concept.kind == KIND_MEASUREMENT:
+            if not concept.field_name:
+                continue
+            measurement_classes.setdefault(concept.field_name, set()).update(
+                c for c in (concept.ifc_class,) if c
+            )
+            populated, total = measurement_counts.get(concept.field_name, (0, 0))
+            measurement_counts[concept.field_name] = (
+                populated + concept.populated_count,
+                total + concept.total_count,
+            )
+            # One attribute may appear on several classes. Its measure type is a
+            # schema fact and cannot differ; its unit state can, so the FIRST
+            # non-uniform state wins — the safe direction.
+            existing = measurement_facts.get(concept.field_name)
+            if existing is None or (existing.unit_available and not concept.unit_available):
+                measurement_facts[concept.field_name] = concept
+            continue
+        if concept.field_name:
+            facts[(concept.kind, concept.set_name, concept.field_name)] = concept
+
+    concepts = [
+        FieldConcept(
+            field_kind="measurement",
+            set_name=None,
+            field_name=field_name,
+            data_type="number",
+            operators=_NUMERIC_OPERATORS,
+            applicable_classes=tuple(sorted(measurement_classes.get(field_name, set()))),
+            populated_count=measurement_counts[field_name][0],
+            total_count=measurement_counts[field_name][1],
+            measure_type=concept.measure_type,
+            unit_state=concept.unit_state,
+            unit_symbol=concept.unit_symbol,
+            unit_limitation=concept.unit_limitation,
+        )
+        for field_name, concept in sorted(measurement_facts.items())
+    ]
+    return facts, concepts
+
+
+def _with_measurement_facts(
+    concept: FieldConcept, facts: dict[tuple[str, str | None, str], Any]
+) -> FieldConcept:
+    fact = facts.get(concept.key)
+    if fact is None or fact.measure_type is None:
+        return concept
+    return replace(
+        concept,
+        data_type="number",
+        operators=_NUMERIC_OPERATORS,
+        measure_type=fact.measure_type,
+        unit_state=fact.unit_state,
+        unit_symbol=fact.unit_symbol,
+        unit_limitation=fact.unit_limitation,
+    )
+
+
 def build_field_concept_index(
     session: Session, source_model_id: int, settings: Settings | None = None
 ) -> FieldConceptIndex:
     settings = settings or get_settings()
     vocab = get_model_vocabulary(session, source_model_id, settings)
+    measurement_facts, measurement_concepts = _manifest_measurements(
+        session, source_model_id, settings
+    )
     concepts: list[FieldConcept] = []
     concepts.extend(_build_property_concepts(vocab))
     concepts.extend(_build_quantity_concepts(vocab))
     concepts.extend(_build_attribute_concepts(vocab))
+    concepts = [_with_measurement_facts(c, measurement_facts) for c in concepts]
+    concepts.extend(measurement_concepts)
     concepts.sort(key=lambda c: (c.field_kind, c.set_name or "", c.field_name))
     return FieldConceptIndex(
         source_model_id=source_model_id,
@@ -439,9 +551,9 @@ def load_field_values(
     query per candidate (§10.3).
 
     Returns [] for a field whose values are not reachable as text (quantities
-    are matched numerically, not by value identity).
+    and measurement attributes are matched numerically, not by value identity).
     """
-    if concept.field_kind == "quantity":
+    if concept.field_kind in ("quantity", "measurement"):
         return []
     path = _json_path_for(concept)
     if path is None:

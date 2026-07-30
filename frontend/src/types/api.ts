@@ -55,6 +55,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/query/render-timing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Query Render Timing
+         * @description Print browser-observed completion time after 3D highlighting finishes.
+         */
+        post: operations["query_render_timing_api_query_render_timing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models": {
         parameters: {
             query?: never;
@@ -92,6 +112,41 @@ export interface paths {
          *     Never returns a server path in body, headers, or errors.
          */
         get: operations["viewer_asset_api_models__source_model_id__viewer_asset_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/{source_model_id}/floors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Model Floors
+         * @description The model's logical floor bands, for the viewer's floor-plan control
+         *     (task28 §2.1).
+         *
+         *     Deterministic, read-only, and model-scoped: it reuses the SAME
+         *     `build_storey_model()` clustering the natural-language floor interpretation
+         *     resolves against, so the buttons and the query language can never disagree
+         *     about what "the second floor" is. There is deliberately no second floor
+         *     detector.
+         *
+         *     It never opens the IFC, reads the prepared viewer artifact, calls an LLM,
+         *     creates an embedding, or writes the database — it reads the canonical JSON
+         *     ingestion already stored.
+         *
+         *     Elevations are reported for diagnostics in the model's own project length
+         *     unit. They are NOT viewer scene coordinates; mapping a band into the loaded
+         *     artifact's scene space is the frontend's job (task28 §3).
+         */
+        get: operations["model_floors_api_models__source_model_id__floors_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -185,6 +240,66 @@ export interface components {
          */
         AnswerBasis: "exact_sql" | "semantic_retrieval" | "graph_traversal" | "hybrid_evidence" | "general_knowledge" | "insufficient_evidence";
         /**
+         * AnswerExplanation
+         * @description Bounded, presentation-only view of the primary visual answer part.
+         *
+         *     This describes the SAME part that produced the viewer highlight — not
+         *     `result_summary`'s first answer part — so the panel and the 3D view can
+         *     never describe different sets.
+         */
+        AnswerExplanation: {
+            /** Part Id */
+            part_id: string;
+            /** Request Label */
+            request_label: string;
+            /** Operation */
+            operation: string;
+            /** Result Status */
+            result_status: string;
+            presentation: components["schemas"]["ExplanationPresentation"];
+            answer_basis: components["schemas"]["AnswerBasis"];
+            /** Interpretation */
+            interpretation?: string | null;
+            /** Retrieval Modes */
+            retrieval_modes?: string[];
+            /** Exact Total */
+            exact_total?: number | null;
+            /** Class Breakdown */
+            class_breakdown?: {
+                [key: string]: number;
+            };
+            /** Distribution */
+            distribution?: components["schemas"]["ExplanationBucket"][];
+            aggregate?: components["schemas"]["ExplanationAggregate"] | null;
+            /** Relationship Endpoint Total */
+            relationship_endpoint_total?: number | null;
+            /** Limitation */
+            limitation?: string | null;
+            /** Known Parts */
+            known_parts?: string[];
+            /** Unknown Parts */
+            unknown_parts?: string[];
+            /**
+             * Shown Identity Count
+             * @default 0
+             */
+            shown_identity_count?: number;
+            /**
+             * True Result Count
+             * @default 0
+             */
+            true_result_count?: number;
+            /**
+             * Identities Truncated
+             * @default false
+             */
+            identities_truncated?: boolean;
+            /** Groups */
+            groups?: components["schemas"]["ExplanationGroup"][];
+            /** Rows */
+            rows?: components["schemas"]["ExplanationRow"][];
+        };
+        /**
          * ContextEntityResult
          * @description A relationship-context entity (spec_v002 Section 10: distinguish from primary).
          */
@@ -264,6 +379,101 @@ export interface components {
             notes?: string[];
         };
         /**
+         * ExplanationAggregate
+         * @description The existing aggregate value and its coverage.
+         */
+        ExplanationAggregate: {
+            /** Function */
+            function: string;
+            /** Value */
+            value?: number | null;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Matched Count
+             * @default 0
+             */
+            matched_count?: number;
+            /**
+             * Coverage Count
+             * @default 0
+             */
+            coverage_count?: number;
+            /**
+             * Complete
+             * @default true
+             */
+            complete?: boolean;
+        };
+        /**
+         * ExplanationBucket
+         * @description One existing distribution bucket.
+         *
+         *     Deliberately carries NO identities: the pipeline computed these buckets as
+         *     grouped counts, so no authoritative identity subset exists for them. They
+         *     are displayed, never selectable (task26 §1.1).
+         */
+        ExplanationBucket: {
+            /** Key */
+            key: string;
+            /** Count */
+            count: number;
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * ExplanationGroup
+         * @description A selectable subgroup of the highlighted set, backed by real identities.
+         *
+         *     `global_ids` is an authoritative subset of the objects the viewer already
+         *     received — never a reconstruction. When the identity list was capped,
+         *     `exact_count` still reports the true size of the group and `truncated` says
+         *     so, so a selected group can never imply the shown objects are exhaustive.
+         */
+        ExplanationGroup: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Exact Count */
+            exact_count?: number | null;
+            /**
+             * Shown Count
+             * @default 0
+             */
+            shown_count?: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
+            /** Global Ids */
+            global_ids?: string[];
+        };
+        /**
+         * ExplanationPresentation
+         * @description Which visualization the already-computed result supports (task26 §4.1).
+         *
+         *     Derived deterministically from the authoritative operation and status — the
+         *     frontend does not guess, and the choice cannot drift between the two.
+         * @enum {string}
+         */
+        ExplanationPresentation: "metric" | "table" | "distribution" | "aggregate" | "relationship" | "partial";
+        /**
+         * ExplanationRow
+         * @description One already-retrieved example/endpoint object, for a bounded table.
+         */
+        ExplanationRow: {
+            /** Global Id */
+            global_id: string;
+            /** Ifc Class */
+            ifc_class: string;
+            /** Name */
+            name?: string | null;
+            /** Storey Name */
+            storey_name?: string | null;
+        };
+        /**
          * FamilyDetails
          * @description Present ONLY when an allowlisted family-like property exists in a stored
          *     property set. The source set/property are returned for transparency.
@@ -276,6 +486,39 @@ export interface components {
             /** Property Name */
             property_name: string;
         };
+        /**
+         * FloorBandInfo
+         * @description One logical floor: every `IfcBuildingStorey` at the same elevation level.
+         *
+         *     NOT one raw storey — a real model gives each structural sub-level its own
+         *     storey entity, and the existing elevation-gap clustering already groups
+         *     those into one physical floor (task28 §2).
+         */
+        FloorBandInfo: {
+            /** Band Index */
+            band_index: number;
+            /** Label */
+            label: string;
+            /**
+             * Is Reference
+             * @default false
+             */
+            is_reference?: boolean;
+            /** Storey Global Ids */
+            storey_global_ids?: string[];
+            /** Storey Names */
+            storey_names?: string[];
+            /** Min Elevation */
+            min_elevation: number;
+            /** Max Elevation */
+            max_elevation: number;
+        };
+        /**
+         * FloorReferenceBasis
+         * @description Why one band is treated as "Floor 1" — reported, never guessed.
+         * @enum {string}
+         */
+        FloorReferenceBasis: "elevation_zero" | "lowest_band" | "none";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -383,6 +626,29 @@ export interface components {
             tags?: string[];
         };
         /**
+         * ModelFloorsResponse
+         * @description Read-only logical floor structure of one source model (task28 §2.1).
+         */
+        ModelFloorsResponse: {
+            /** Source Model Id */
+            source_model_id: number;
+            /** Available */
+            available: boolean;
+            /** Unavailable Reason */
+            unavailable_reason?: string | null;
+            /** Reference Band Index */
+            reference_band_index?: number | null;
+            /** @default none */
+            reference_basis?: components["schemas"]["FloorReferenceBasis"];
+            /**
+             * Total Storeys
+             * @default 0
+             */
+            total_storeys?: number;
+            /** Floors */
+            floors?: components["schemas"]["FloorBandInfo"][];
+        };
+        /**
          * ModelListItem
          * @description One entry in the deterministic model selector (spec_v006 §10.1).
          */
@@ -423,6 +689,20 @@ export interface components {
             summary?: string | null;
         };
         /**
+         * QueryRenderTimingRequest
+         * @description Bounded client telemetry emitted after answer and 3D rendering.
+         */
+        QueryRenderTimingRequest: {
+            /** Request Id */
+            request_id: string;
+            /** Response Received Ms */
+            response_received_ms: number;
+            /** Viewer Render Ms */
+            viewer_render_ms: number;
+            /** Total To Viewer Ms */
+            total_to_viewer_ms: number;
+        };
+        /**
          * QueryResponseEnvelope
          * @description spec_v002 Section 16.2 — the stable /api/query response shape.
          */
@@ -450,6 +730,7 @@ export interface components {
             viewer_actions?: components["schemas"]["ViewerActions"];
             evidence_summary: components["schemas"]["EvidenceSummary"];
             result_summary?: components["schemas"]["ResultSummary"] | null;
+            answer_explanation?: components["schemas"]["AnswerExplanation"] | null;
             /** Warnings */
             warnings?: string[];
         };
@@ -756,6 +1037,37 @@ export interface operations {
             };
         };
     };
+    query_render_timing_api_query_render_timing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueryRenderTimingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_models_api_models_get: {
         parameters: {
             query?: never;
@@ -794,6 +1106,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    model_floors_api_models__source_model_id__floors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_model_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFloorsResponse"];
                 };
             };
             /** @description Validation Error */

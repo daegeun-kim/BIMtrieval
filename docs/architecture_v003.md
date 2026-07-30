@@ -92,11 +92,17 @@ The only ingested model (Schependomlaan, `source_model_id=1`, IFC2X3,
   element fans out to thousands of context entities (a real property of
   this model's graph, not a traversal bug — see
   `test_graph_traversal.py::test_depth_bound_is_respected`).
-- `bim_rag.ifc_parser._extract_qsets` only computes a **linear** project-length
-  unit factor (`normalized_unit="m"`); it is not area/volume/angle-aware.
-  `field_registry.normalize_quantity_value()` therefore only supports `"mm"`
-  conversion — `"mm2"`/`"mm3"`/`"degrees"` correctly report *not available*
-  rather than silently squaring/cubing a linear factor.
+- **Superseded by task27.** `bim_rag.ifc_parser._extract_qsets` used to apply one
+  **linear** project-length factor to every quantity and label the result
+  `normalized_unit="m"` — invalid for areas and volumes — and
+  `field_registry.normalize_quantity_value()` converted only to `"mm"`. Both are
+  gone. Values are now stored and calculated in the units the IFC itself uses:
+  each model's unit definitions live in
+  `ifc_source_models.extraction_metadata.dimension_units`, a value carries its
+  `measure_type` plus an explicit `unit_override_key` when the IFC supplies one,
+  and the semantic manifest reports each field's effective unit and unit state
+  (`uniform`/`mixed`/`unknown`). A request in a different unit is refused rather
+  than converted — see spec_v002 §9.1 and spec_v003 §10.
 
 The query engine itself is built generically and spec-complete (all 17
 operations, all operators, the full spec-named relationship semantic

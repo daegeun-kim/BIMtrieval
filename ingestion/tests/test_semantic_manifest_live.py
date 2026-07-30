@@ -253,6 +253,100 @@ def test_an_unreliable_container_is_declared_as_a_missing_capability(manifest):
 
 
 # ---------------------------------------------------------------------------
+# Measurement facts (task27 §3, §7.2)
+#
+# Invariants over whatever is imported, not expectations about any one file. A
+# model with NO trustworthy typed dimensions must satisfy every one of these by
+# reporting nothing rather than by reporting something plausible.
+# ---------------------------------------------------------------------------
+
+
+def _measured_fields(manifest: dict) -> list[dict]:
+    """Every field record in the manifest that carries measurement facts."""
+    content = manifest["content"]
+    records: list[dict] = []
+    for klass in content["object_level"].get("classes", []):
+        records.extend(klass.get("measurements", []))
+    for key in ("property_containers", "quantity_containers"):
+        for container in content["type_property_level"].get(key, []):
+            records.extend(
+                field for field in container.get("fields", []) if "measure_type" in field
+            )
+    return records
+
+
+def test_every_model_carries_its_own_unit_registry(manifest):
+    units = manifest["content"]["global_level"]["dimension_units"]
+    assert set(units["defaults"]) == {"length", "area", "volume"}
+    # Every default that IS resolved must point at a real stored definition —
+    # a dangling key would mean a field could claim a unit nothing defines.
+    for key in units["defaults"].values():
+        if key is not None:
+            assert key in units["definitions"]
+
+
+def test_every_measured_field_states_a_complete_unit_verdict(manifest):
+    for record in _measured_fields(manifest):
+        assert record["measure_type"] in ("length", "area", "volume", None)
+        assert record["unit_state"] in ("uniform", "mixed", "unknown")
+        assert isinstance(record["numeric_comparison_safe"], bool)
+        assert record["measure_source"] in ("attribute", "property", "quantity")
+
+
+def test_a_uniform_field_names_its_unit_and_an_unsafe_one_explains_itself(manifest):
+    for record in _measured_fields(manifest):
+        if record["unit_state"] == "uniform":
+            assert record["numeric_comparison_safe"] is True
+            assert record["unit_symbol"]
+        else:
+            # The two states that refuse calculation must both say why, or the
+            # answer path has nothing honest to tell the user.
+            assert record["numeric_comparison_safe"] is False
+            assert record.get("unit_limitation")
+
+
+def test_a_measured_field_is_always_numeric(manifest):
+    for record in _measured_fields(manifest):
+        assert record["data_type"] == "number"
+
+
+def test_measured_field_coverage_stays_exact(manifest):
+    """Absent values leave a field PARTIAL — they never become a zero."""
+    for record in _measured_fields(manifest):
+        assert record["populated_count"] <= record["total_count"]
+        if 0 < record["populated_count"] < record["total_count"]:
+            assert record["coverage"] == "partial"
+
+
+def test_no_field_is_promoted_to_a_dimension_by_its_name(manifest):
+    """Every measured field must trace to a declared IFC measure type.
+
+    The check is structural: a record carrying `measure_type` must also carry
+    the typed-value count that produced it. A name-based promotion would have
+    the former and not the latter.
+    """
+    for record in _measured_fields(manifest):
+        assert record.get("typed_value_count", 0) > 0
+
+
+def test_a_model_without_typed_dimensions_says_so(manifest):
+    missing = manifest["content"]["global_level"]["missing_capabilities"]
+    dimensional = [m for m in missing if m["capability"] == "dimensional_queries"]
+    if not _measured_fields(manifest):
+        assert dimensional, "a model with no typed dimensions must declare the limitation"
+
+
+def test_the_removed_normalization_appears_nowhere(manifest):
+    """No `normalized_unit`/`normalized_value` may survive anywhere (§2.3)."""
+    import json as _json
+
+    serialized = _json.dumps(manifest)
+    assert "normalized_unit" not in serialized
+    assert "normalized_value" not in serialized
+    assert "project_unit" not in serialized
+
+
+# ---------------------------------------------------------------------------
 # Backfill evidence (§9.1, §10)
 # ---------------------------------------------------------------------------
 

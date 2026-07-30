@@ -16,9 +16,14 @@ from typing import Any
 
 import ifcopenshell
 import ifcopenshell.util.element as ifc_util
-import ifcopenshell.util.unit as ifc_unit_util
 
-EXTRACTION_VERSION = "v001"
+from bim_rag.measures import MeasurementExtractor
+
+#: v002 (task27): supported length/area/volume values now carry their IFC
+#: measure type and, when the source supplies one, an explicit unit override.
+#: The invalid v001 normalisation (one project LENGTH factor applied to every
+#: quantity, labelled `normalized_unit="m"` even for areas and volumes) is gone.
+EXTRACTION_VERSION = "v002"
 _MAX_DEPTH = 3  # max traversal depth for type/material resolution
 
 
@@ -76,16 +81,6 @@ def _safe_scalar(v: Any) -> Any:
     if hasattr(v, "wrappedValue"):
         return _safe_scalar(v.wrappedValue)
     return str(v)
-
-
-def _ifc_value_and_unit(v: Any) -> dict[str, Any]:
-    """Return {value, unit, normalized_value, normalized_unit} or {value} for plain scalars."""
-    if v is None:
-        return {"value": None}
-    if hasattr(v, "wrappedValue"):
-        inner = v.wrappedValue
-        return {"value": _safe_scalar(inner)}
-    return {"value": _safe_scalar(v)}
 
 
 # ---------------------------------------------------------------------------
@@ -167,32 +162,70 @@ def _resolve_classifications(entity: ifcopenshell.entity_instance) -> list[dict[
 # ---------------------------------------------------------------------------
 
 
-def _extract_psets(entity: ifcopenshell.entity_instance) -> dict[str, Any]:
-    """Extract property sets as {pset_name: {prop_name: {value, type}}}."""
+def _annotate_measure(
+    entry: dict[str, Any],
+    resolved: tuple[str, str | None] | None,
+    measurements: MeasurementExtractor | None,
+    provenance: str,
+) -> None:
+    """Attach measure type and an EXPLICIT unit override, or nothing at all.
+
+    The model default is deliberately not copied onto every value (§2.2): the
+    effective unit is `unit_override_key` otherwise the registry default for the
+    measure type. Writing a null override key would make "no override" and
+    "override to nothing" indistinguishable, so it is omitted entirely.
+    """
+    if resolved is None:
+        return
+    measure_type, override_key = resolved
+    entry["measure_type"] = measure_type
+    if override_key:
+        entry["unit_override_key"] = override_key
+    if measurements is not None:
+        measurements.note_value(measure_type, provenance)
+
+
+def _extract_psets(
+    entity: ifcopenshell.entity_instance,
+    measurements: MeasurementExtractor | None = None,
+) -> dict[str, Any]:
+    """Extract property sets as {pset_name: {prop_name: {value, type, measure_type?}}}."""
     psets: dict[str, Any] = {}
     try:
+        measure_index = measurements.property_measures(entity) if measurements else {}
         raw = ifc_util.get_psets(entity, psets_only=True)
         for pset_name, props in (raw or {}).items():
             psets[pset_name] = {}
             for prop_name, prop_val in props.items():
                 if prop_name == "id":
                     continue
-                psets[pset_name][prop_name] = {
+                entry: dict[str, Any] = {
                     "value": _safe_scalar(prop_val),
                     "type": type(prop_val).__name__,
                 }
+                _annotate_measure(
+                    entry, measure_index.get((pset_name, prop_name)), measurements, "property"
+                )
+                psets[pset_name][prop_name] = entry
     except Exception as exc:
         psets["_extraction_error"] = str(exc)
     return psets
 
 
 def _extract_qsets(
-    entity: ifcopenshell.entity_instance, ifc_model: ifcopenshell.file
+    entity: ifcopenshell.entity_instance,
+    measurements: MeasurementExtractor | None = None,
 ) -> dict[str, Any]:
-    """Extract quantity sets as {qset_name: {qty_name: {value, unit, ...}}}."""
+    """Extract quantity sets as {qset_name: {qty_name: {value, provenance, measure_type?}}}.
+
+    v002 stores the RAW source value only. The v001 behaviour — multiplying
+    every numeric quantity by one project LENGTH factor and labelling the result
+    `normalized_unit="m"` — was invalid for areas and volumes and is removed
+    (§2.3). No linear factor is applied to anything here.
+    """
     qsets: dict[str, Any] = {}
     try:
-        unit_scale = _get_project_length_unit(ifc_model)
+        measure_index = measurements.quantity_measures(entity) if measurements else {}
         raw = ifc_util.get_psets(entity, qtos_only=True)
         for qset_name, qtys in (raw or {}).items():
             qsets[qset_name] = {}
@@ -200,45 +233,13 @@ def _extract_qsets(
                 if qty_name == "id":
                     continue
                 entry: dict[str, Any] = {"value": _safe_scalar(qty_val), "provenance": "quantity"}
-                if isinstance(qty_val, (int, float)) and unit_scale:
-                    entry["unit"] = "project_unit"
-                    try:
-                        entry["normalized_value"] = round(float(qty_val) * unit_scale["factor"], 6)
-                        entry["normalized_unit"] = unit_scale["unit"]
-                    except Exception:
-                        pass
+                _annotate_measure(
+                    entry, measure_index.get((qset_name, qty_name)), measurements, "quantity"
+                )
                 qsets[qset_name][qty_name] = entry
     except Exception as exc:
         qsets["_extraction_error"] = str(exc)
     return qsets
-
-
-def _get_project_length_unit(ifc_model: ifcopenshell.file) -> dict[str, Any] | None:
-    """Return {factor, unit} to convert project length to metres."""
-    try:
-        unit = ifc_unit_util.get_project_unit(ifc_model, "LENGTHUNIT")
-        if unit is None:
-            return None
-        prefix = getattr(unit, "Prefix", None) or ""
-        si_name = getattr(getattr(unit, "Name", None), "value", None) or getattr(unit, "Name", None)
-        factor_map = {
-            ("MILLI", "METRE"): (0.001, "m"),
-            ("", "METRE"): (1.0, "m"),
-            ("CENTI", "METRE"): (0.01, "m"),
-            ("MILLI", "METER"): (0.001, "m"),
-            ("", "METER"): (1.0, "m"),
-        }
-        key = (str(prefix).upper(), str(si_name).upper() if si_name else "")
-        if key in factor_map:
-            f, u = factor_map[key]
-            return {"factor": f, "unit": u}
-        if si_name and "FOOT" in str(si_name).upper():
-            return {"factor": 0.3048, "unit": "m"}
-        if si_name and "INCH" in str(si_name).upper():
-            return {"factor": 0.0254, "unit": "m"}
-    except Exception:
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +298,15 @@ def _extract_placement(entity: ifcopenshell.entity_instance) -> dict[str, Any]:
 def extract_canonical_json(
     entity: ifcopenshell.entity_instance,
     ifc_model: ifcopenshell.file,
+    measurements: MeasurementExtractor | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Return (canonical_json, warnings) for one eligible entity."""
+    """Return (canonical_json, warnings) for one eligible entity.
+
+    `measurements` is the model-scoped measure/unit resolver (task27 §2). It is
+    optional so that a caller with no IFC unit context still produces valid
+    canonical JSON — such a document simply carries no measure metadata, which
+    is the honest state rather than an assumed one.
+    """
     warnings: list[str] = []
 
     meta = {
@@ -345,15 +353,25 @@ def extract_canonical_json(
 
     psets: dict[str, Any] = {}
     try:
-        psets = _extract_psets(entity)
+        psets = _extract_psets(entity, measurements)
     except Exception as e:
         warnings.append(f"pset extraction failed: {e}")
 
     qsets: dict[str, Any] = {}
     try:
-        qsets = _extract_qsets(entity, ifc_model)
+        qsets = _extract_qsets(entity, measurements)
     except Exception as e:
         warnings.append(f"qset extraction failed: {e}")
+
+    # The bounded measurement-attribute container (§2.2): direct IFC attributes
+    # whose DECLARED schema type is a supported measure. Nothing else is copied
+    # in, so this can never become a dumping ground for arbitrary attributes.
+    measurement_attributes: dict[str, Any] = {}
+    if measurements is not None:
+        try:
+            measurement_attributes = measurements.measurements_for(entity)
+        except Exception as e:
+            warnings.append(f"measurement attribute extraction failed: {e}")
 
     placement = {}
     try:
@@ -376,6 +394,7 @@ def extract_canonical_json(
         "classifications": classifications,
         "property_sets": psets,
         "quantity_sets": qsets,
+        "measurements": measurement_attributes,
         "placement": placement,
         "representation": rep_meta,
         "warnings": warnings,

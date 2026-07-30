@@ -485,8 +485,7 @@ def _emit_quantity_coverage(
 ) -> None:
     rows = session.execute(
         text(
-            "SELECT e.ifc_class, qs.key AS qset, q.key AS qty, count(*) AS n, "
-            "bool_or(q.value ? 'normalized_value') AS has_unit "
+            "SELECT e.ifc_class, qs.key AS qset, q.key AS qty, count(*) AS n "
             "FROM ifc_entities e, jsonb_each(e.canonical_json->'quantity_sets') qs, "
             "jsonb_each(qs.value) q "
             "WHERE e.source_model_id = :id "
@@ -494,7 +493,7 @@ def _emit_quantity_coverage(
         ),
         {"id": sid},
     ).fetchall()
-    for ifc_class, qset, qty, populated, has_unit in rows:
+    for ifc_class, qset, qty, populated in rows:
         vocab.quantities.append(
             QuantityCoverageProfile(
                 ifc_class=ifc_class,
@@ -502,7 +501,6 @@ def _emit_quantity_coverage(
                 field_name=qty,
                 populated_count=int(populated),
                 total_count=class_counts.get(ifc_class, int(populated)),
-                unit_available=bool(has_unit),
             )
         )
 

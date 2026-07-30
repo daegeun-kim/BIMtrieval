@@ -6,6 +6,7 @@
 import { create } from "zustand";
 
 import type {
+  AnswerExplanation,
   EntityCitation,
   EntityDetailsResponse,
   HighlightScope,
@@ -27,6 +28,28 @@ export type LoadPhase =
   | "error";
 
 export type MessageKind = "text" | "clarification" | "error" | "notice";
+
+/**
+ * Viewer projection mode (task28 §6). Current-session only and deliberately
+ * NOT persisted to local storage: reopening the app starts in normal 3D.
+ */
+export type FloorMode = "3d" | "plan";
+
+/**
+ * One floor button. Serializable presentation state only — the saved
+ * perspective pose and the live clipping/section objects belong inside the
+ * imperative viewer layer, never here (task28 §6).
+ */
+export interface FloorOption {
+  bandIndex: number;
+  label: string;
+  /** False when the floor cannot be mapped safely into scene coordinates. */
+  enabled: boolean;
+  /** Concise reason for a disabled floor. */
+  reason: string | null;
+  /** Source IFC storey names — tooltip / accessible description only. */
+  storeyNames: string[];
+}
 
 export interface EvidenceView {
   route: string;
@@ -97,6 +120,25 @@ export function effectiveViewportObstructionPx(chatWidthPx: number, componentOpe
   const base = VIEWER_EDGE_MARGIN_PX + Math.max(0, chatWidthPx);
   if (!componentOpen) return base;
   return base + PANEL_GAP_PX + COMPONENT_PANEL_WIDTH;
+}
+
+/**
+ * Fixed Task 26 stacked-column widths (task26 §3): 40% of the viewport, or 32%
+ * when the 320 px component-detail panel is docked beside it. Deliberately not
+ * a saved preference and not resizable — the layout is fixed for this task.
+ */
+export const EXPLAIN_COLUMN_VW = 0.4;
+export const EXPLAIN_COLUMN_PAIRED_VW = 0.32;
+
+/**
+ * Width in px of the explanation+chat column for the current viewport. Feeds
+ * BOTH the `--chat-w` CSS variable (so the component panel still docks against
+ * the column's left edge) and `effectiveViewportObstructionPx`, so there is no
+ * second set of hard-coded obstruction measurements (task26 §3).
+ */
+export function explanationColumnWidthPx(viewportWidthPx: number, componentOpen: boolean): number {
+  const fraction = componentOpen ? EXPLAIN_COLUMN_PAIRED_VW : EXPLAIN_COLUMN_VW;
+  return Math.round(Math.max(0, viewportWidthPx) * fraction);
 }
 
 function newSessionId(): string {
@@ -175,6 +217,31 @@ export interface AppState {
   componentScope: HighlightScope | null;
   componentGroupNotice: string | null;
 
+  // Query explanation card (task26 §6). Current-session only and serializable:
+  // the bounded presentation payload, the ORIGINAL viewer roles so "All results"
+  // can restore them without another query, and the active subgroup. Never
+  // persisted to local storage.
+  explanation: AnswerExplanation | null;
+  /** The full result's primary GlobalIds, as the answer delivered them. */
+  explanationPrimaryGuids: string[];
+  /** The full result's relationship-context GlobalIds. */
+  explanationContextGuids: string[];
+  /** `null` means the full result is highlighted. */
+  explanationGroupKey: string | null;
+
+  // Floor-plan mode (task28 §6). Current-session only, never persisted.
+  floorMode: FloorMode;
+  /** The model the floor contract belongs to, so a stale response is ignorable. */
+  floorModelId: number | null;
+  /** The active logical band while in plan mode. */
+  floorBandIndex: number | null;
+  floorsLoading: boolean;
+  /** False when the model's spatial data establishes no logical floor at all. */
+  floorsAvailable: boolean;
+  floorOptions: FloorOption[];
+  /** A concise, non-blocking plan limitation to surface. */
+  floorNotice: string | null;
+
   // actions (pure state; side effects live in the controller)
   regenerateSessionId: () => string;
   setModels: (models: ModelListItem[]) => void;
@@ -205,7 +272,36 @@ export interface AppState {
   setComponentError: (msg: string | null) => void;
   setComponentScope: (scope: HighlightScope | null, notice?: string | null) => void;
   closeComponentPanel: () => void;
+
+  openExplanation: (
+    explanation: AnswerExplanation,
+    primaryGuids: string[],
+    contextGuids: string[],
+  ) => void;
+  setExplanationGroup: (key: string | null) => void;
+  closeExplanation: () => void;
+
+  setFloorsLoading: (modelId: number) => void;
+  setFloorOptions: (
+    modelId: number,
+    options: FloorOption[],
+    available: boolean,
+  ) => void;
+  setFloorMode: (mode: FloorMode, bandIndex: number | null) => void;
+  setFloorOptionDisabled: (bandIndex: number, reason: string) => void;
+  setFloorNotice: (notice: string | null) => void;
+  clearFloors: () => void;
 }
+
+const FLOOR_DEFAULTS = {
+  floorMode: "3d" as FloorMode,
+  floorModelId: null,
+  floorBandIndex: null,
+  floorsLoading: false,
+  floorsAvailable: false,
+  floorOptions: [] as FloorOption[],
+  floorNotice: null,
+};
 
 export const useStore = create<AppState>((set, get) => ({
   sessionId: initialSessionId(),
@@ -237,6 +333,13 @@ export const useStore = create<AppState>((set, get) => ({
   componentError: null,
   componentScope: null,
   componentGroupNotice: null,
+
+  explanation: null,
+  explanationPrimaryGuids: [],
+  explanationContextGuids: [],
+  explanationGroupKey: null,
+
+  ...FLOOR_DEFAULTS,
 
   regenerateSessionId: () => {
     const id = newSessionId();
@@ -301,6 +404,53 @@ export const useStore = create<AppState>((set, get) => ({
       componentScope: null,
       componentGroupNotice: null,
     }),
+
+  // A newer qualifying result REPLACES the card outright, subgroup included —
+  // a subgroup of the previous answer must never survive into the next one.
+  openExplanation: (explanation, explanationPrimaryGuids, explanationContextGuids) =>
+    set({
+      explanation,
+      explanationPrimaryGuids: [...explanationPrimaryGuids],
+      explanationContextGuids: [...explanationContextGuids],
+      explanationGroupKey: null,
+    }),
+  setExplanationGroup: (explanationGroupKey) => set({ explanationGroupKey }),
+  closeExplanation: () =>
+    set({
+      explanation: null,
+      explanationPrimaryGuids: [],
+      explanationContextGuids: [],
+      explanationGroupKey: null,
+    }),
+
+  // A new model's floor contract replaces the previous one outright, so a floor
+  // button from the outgoing model can never survive into the new one.
+  setFloorsLoading: (floorModelId) =>
+    set({
+      ...FLOOR_DEFAULTS,
+      floorModelId,
+      floorsLoading: true,
+    }),
+  setFloorOptions: (floorModelId, floorOptions, floorsAvailable) =>
+    set({
+      floorModelId,
+      floorOptions,
+      floorsAvailable,
+      floorsLoading: false,
+      floorMode: "3d",
+      floorBandIndex: null,
+      floorNotice: null,
+    }),
+  setFloorMode: (floorMode, floorBandIndex) =>
+    set({ floorMode, floorBandIndex: floorMode === "plan" ? floorBandIndex : null }),
+  setFloorOptionDisabled: (bandIndex, reason) =>
+    set({
+      floorOptions: get().floorOptions.map((o) =>
+        o.bandIndex === bandIndex ? { ...o, enabled: false, reason } : o,
+      ),
+    }),
+  setFloorNotice: (floorNotice) => set({ floorNotice }),
+  clearFloors: () => set({ ...FLOOR_DEFAULTS }),
 }));
 
 export function makeMessageId(): string {

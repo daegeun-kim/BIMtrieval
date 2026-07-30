@@ -177,3 +177,64 @@ class HighlightGroupResponse(BaseModel):
     global_ids: list[str] = Field(default_factory=list)
     truncated: bool = False
     class_counts: dict[str, int] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Logical floor bands for the viewer's floor-plan control (task28 §2.1)
+# ---------------------------------------------------------------------------
+
+#: Source storey names are descriptive only (tooltip / accessible text), so the
+#: list is bounded rather than unbounded per band.
+MAX_FLOOR_STOREY_NAMES = 8
+
+
+class FloorReferenceBasis(str, Enum):
+    """Why one band is treated as "Floor 1" — reported, never guessed."""
+
+    ELEVATION_ZERO = "elevation_zero"
+    LOWEST_BAND = "lowest_band"
+    NONE = "none"
+
+
+class FloorBandInfo(BaseModel):
+    """One logical floor: every `IfcBuildingStorey` at the same elevation level.
+
+    NOT one raw storey — a real model gives each structural sub-level its own
+    storey entity, and the existing elevation-gap clustering already groups
+    those into one physical floor (task28 §2).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 0-based, ascending by elevation. The stable identity of a floor button.
+    band_index: int
+    #: Derived from the reference band, never from a storey name (task28 §1.1).
+    label: str
+    is_reference: bool = False
+    storey_global_ids: list[str] = Field(default_factory=list)
+    #: Bounded, descriptive only — for a tooltip / accessible description. Never
+    #: used to discover, group, order, or label floors.
+    storey_names: list[str] = Field(default_factory=list)
+    #: Stored band elevations, in the model's own project length unit, for
+    #: diagnostics. These are NOT viewer scene coordinates and must not be used
+    #: as Three.js Y values (task28 §3).
+    min_elevation: float
+    max_elevation: float
+
+
+class ModelFloorsResponse(BaseModel):
+    """Read-only logical floor structure of one source model (task28 §2.1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_model_id: int
+    #: False when the model's spatial data cannot establish any logical floor.
+    #: The frontend then omits the floor control entirely.
+    available: bool
+    unavailable_reason: str | None = None
+    reference_band_index: int | None = None
+    reference_basis: FloorReferenceBasis = FloorReferenceBasis.NONE
+    #: Raw `IfcBuildingStorey` count carrying a usable elevation, so the
+    #: storey-versus-logical-floor difference stays observable.
+    total_storeys: int = 0
+    floors: list[FloorBandInfo] = Field(default_factory=list)

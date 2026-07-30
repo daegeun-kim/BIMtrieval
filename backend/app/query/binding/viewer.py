@@ -34,9 +34,22 @@ from app.db.models import IfcEntity
 from app.query.binding.evidence import AnswerPartResult
 from app.query.sql.compiler import build_condition_expr
 
-__all__ = ["ViewerHydration", "hydrate_viewer_identities"]
+__all__ = ["HydratedIdentity", "ViewerHydration", "hydrate_viewer_identities"]
 
 _ET = IfcEntity.__table__
+
+
+@dataclass(frozen=True)
+class HydratedIdentity:
+    """One highlighted object, with the class it was already selected with.
+
+    The identity query below has always read `ifc_class` beside `global_id`;
+    keeping the pair means a per-class subset of the SAME highlighted set can be
+    reproduced later without issuing another query or inventing membership.
+    """
+
+    global_id: str
+    ifc_class: str
 
 
 @dataclass
@@ -45,6 +58,11 @@ class ViewerHydration:
 
     primary_global_ids: list[str] = field(default_factory=list)
     context_global_ids: list[str] = field(default_factory=list)
+    #: The same objects as `primary_global_ids`, in the same order, carrying the
+    #: class each was retrieved with. Parallel rather than derived so existing
+    #: callers that build a hydration from GlobalIds alone keep working — they
+    #: simply supply no class information, and no per-class subset is offered.
+    primary_identities: list[HydratedIdentity] = field(default_factory=list)
     #: The TRUE number of matching objects, never reduced by any identity cap.
     viewer_matches_total: int = 0
     viewer_matches_truncated: bool = False
@@ -93,6 +111,7 @@ def hydrate_viewer_identities(
     ).all()
     hydration.statement_count += 1
     hydration.primary_global_ids = [r.global_id for r in rows]
+    hydration.primary_identities = [HydratedIdentity(r.global_id, r.ifc_class) for r in rows]
     hydration.viewer_matches_truncated = total > len(rows)
 
     # Counted with its own GROUP BY over the FULL set, so the breakdown stays
@@ -170,6 +189,7 @@ def _hydrate_from_endpoints(
     limit = settings.max_viewer_match_ids
     endpoints = target.graph_endpoints[:limit]
     hydration.primary_global_ids = [e.global_id for e in endpoints]
+    hydration.primary_identities = [HydratedIdentity(e.global_id, e.ifc_class) for e in endpoints]
     hydration.viewer_matches_total = len(target.graph_endpoints)
     hydration.viewer_matches_truncated = len(target.graph_endpoints) > len(endpoints)
     counts: dict[str, int] = {}

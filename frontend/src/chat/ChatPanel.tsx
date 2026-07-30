@@ -24,6 +24,11 @@ export default function ChatPanel() {
   const storedWidth = useStore((s) => s.panelWidth);
   const collapsed = useStore((s) => s.panelCollapsed);
   const componentOpen = useStore((s) => s.componentGuid !== null);
+  // Inside the Task 26 stacked column the chat is laid out by the column, not
+  // by its own width preference: no inline width and no drag handle, since that
+  // layout is deliberately fixed (task26 §3). The stored preference is
+  // untouched and applies again the moment the explanation card closes.
+  const stacked = useStore((s) => s.explanation !== null);
   const setPanelWidth = useStore((s) => s.setPanelWidth);
   const toggleCollapsed = useStore((s) => s.togglePanelCollapsed);
   const hasMessages = useStore((s) => s.messages.length > 0);
@@ -63,8 +68,14 @@ export default function ChatPanel() {
   }
 
   return (
-    <section className="panel" style={{ width }} aria-label="Conversation">
-      <div className="panel-resizer" onPointerDown={startResize} role="separator" aria-orientation="vertical" />
+    <section
+      className={`panel${stacked ? " panel-stacked" : ""}`}
+      style={stacked ? undefined : { width }}
+      aria-label="Conversation"
+    >
+      {!stacked && (
+        <div className="panel-resizer" onPointerDown={startResize} role="separator" aria-orientation="vertical" />
+      )}
       <div className="tick tick-tl" />
       <div className="tick tick-tr" />
       <header className="panel-head">

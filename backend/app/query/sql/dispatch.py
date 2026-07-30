@@ -219,7 +219,10 @@ def _execute_sql_operation(session: Session, operation: SqlOperation, plan: Any)
                 "value": agg.value,
                 "matched_count": agg.matched_count,
                 "coverage_count": agg.coverage_count,
-                "unit": plan.unit,
+                # The unit the values are actually recorded in, not the one the
+                # plan asked for — the two only differ in spelling here, because
+                # a genuinely different request is refused before execution.
+                "unit": agg.unit,
             },
             exact_total=agg.matched_count,
             warnings=list(agg.warnings),

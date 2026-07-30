@@ -21,7 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-MANIFEST_SCHEMA_VERSION = "v001"
+#: v002 (task27) carries per-field measurement facts, class-level measurement
+#: attributes, and the model's own unit registry. A v001 artifact predates the
+#: measure/unit contract entirely, so the loader rejects it as stale rather than
+#: reading numeric fields whose unit state it cannot know.
+MANIFEST_SCHEMA_VERSION = "v002"
 
 COVERAGE_POPULATED = "populated"
 COVERAGE_PARTIAL = "partial"
@@ -43,13 +47,23 @@ KIND_CLASS = "class"
 KIND_ATTRIBUTE = "attribute"
 KIND_PROPERTY = "property"
 KIND_QUANTITY = "quantity"
+#: A direct IFC attribute whose declared schema type is a supported length,
+#: area, or volume measure (task27 §2.2). Distinct from `attribute`: those are
+#: the fixed identity fields, which are text and carry no unit.
+KIND_MEASUREMENT = "measurement"
 KIND_MATERIAL = "material"
 KIND_CLASSIFICATION = "classification"
 KIND_RELATIONSHIP = "relationship"
 KIND_ENDPOINT_ROLE = "endpoint_role"
 KIND_STOREY = "storey"
 
-FIELD_KINDS = frozenset({KIND_ATTRIBUTE, KIND_PROPERTY, KIND_QUANTITY})
+FIELD_KINDS = frozenset({KIND_ATTRIBUTE, KIND_PROPERTY, KIND_QUANTITY, KIND_MEASUREMENT})
+
+# Unit states, mirroring the ingestion contract (task27 §3). Only `uniform`
+# permits numeric comparison and aggregation.
+UNIT_STATE_UNIFORM = "uniform"
+UNIT_STATE_MIXED = "mixed"
+UNIT_STATE_UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -79,9 +93,36 @@ class ManifestConcept:
     #: Bounded explanation when this concept cannot be queried.
     limitation: str | None = None
 
+    # -- measurement facts (task27 §3, §4.2) -------------------------------
+    #: `length` / `area` / `volume` when the IFC declares one, else None. A
+    #: number without a declared IFC measure type is NOT dimensional, however
+    #: dimensional its name reads.
+    measure_type: str | None = None
+    #: `uniform` / `mixed` / `unknown`, or None for a non-dimensional field.
+    unit_state: str | None = None
+    #: The model's OWN effective unit for this field, present only when uniform.
+    #: Values are never converted into it — it is the unit they are already in.
+    unit_symbol: str | None = None
+    #: Why comparison/aggregation is refused, when it is.
+    unit_limitation: str | None = None
+
     @property
     def is_field(self) -> bool:
         return self.kind in FIELD_KINDS
+
+    @property
+    def is_dimensional(self) -> bool:
+        return self.measure_type is not None
+
+    @property
+    def unit_available(self) -> bool:
+        """True when this field has ONE known, displayable effective unit.
+
+        This is the whole precondition for numeric comparison and aggregation:
+        a mixed-unit or unknown-unit field has numbers that are not on one
+        scale, and no conversion is performed anywhere in this pipeline (§4.3).
+        """
+        return self.unit_state == UNIT_STATE_UNIFORM and bool(self.unit_symbol)
 
     @property
     def is_queryable(self) -> bool:
@@ -118,6 +159,8 @@ class SemanticManifest:
     concepts: dict[str, ManifestConcept] = field(default_factory=dict)
     missing_capabilities: tuple[dict[str, Any], ...] = ()
     entity_total: int = 0
+    #: The model's own unit definitions, stored once by ingestion (task27 §2.1).
+    dimension_units: dict[str, Any] = field(default_factory=dict)
     #: The raw document, fed verbatim to the binder (§2.4 — no truncation).
     document: dict[str, Any] = field(default_factory=dict)
 
@@ -125,6 +168,32 @@ class SemanticManifest:
 
     def concept(self, semantic_id: str) -> ManifestConcept | None:
         return self.concepts.get(semantic_id)
+
+    def default_unit_symbol(self, measure_type: str) -> str | None:
+        """The model's default unit for a family, or None when unresolved."""
+        key = (self.dimension_units.get("defaults") or {}).get(measure_type)
+        definition = (self.dimension_units.get("definitions") or {}).get(key) if key else None
+        if not definition or not definition.get("resolved", True):
+            return None
+        return definition.get("symbol")
+
+    def field_by_reference(
+        self, field_kind: str, set_name: str | None, field_name: str
+    ) -> ManifestConcept | None:
+        """Find a field concept by its PHYSICAL reference rather than its id.
+
+        The typed SQL path speaks (kind, set, field); the manifest speaks
+        semantic ids. This is the one place the two are reconciled, so a field's
+        unit facts can be looked up from either side without a second index.
+        """
+        for concept in self.fields():
+            if (
+                concept.kind == field_kind
+                and concept.set_name == set_name
+                and concept.field_name == field_name
+            ):
+                return concept
+        return None
 
     def of_kind(self, *kinds: str) -> list[ManifestConcept]:
         wanted = frozenset(kinds)
@@ -134,7 +203,11 @@ class SemanticManifest:
         return self.of_kind(KIND_CLASS)
 
     def fields(self) -> list[ManifestConcept]:
-        return self.of_kind(KIND_ATTRIBUTE, KIND_PROPERTY, KIND_QUANTITY)
+        # Driven by FIELD_KINDS rather than a second literal list, so a kind
+        # added there cannot silently go missing from every field lookup —
+        # which is exactly how measurement attributes first failed to reach the
+        # candidate slate.
+        return self.of_kind(*FIELD_KINDS)
 
     def present_classes(self) -> frozenset[str]:
         return frozenset(c.ifc_class for c in self.classes() if c.ifc_class)
@@ -178,6 +251,7 @@ def parse_manifest(document: dict[str, Any]) -> SemanticManifest:
         builder_version=identity["builder_version"],
         missing_capabilities=tuple(content["global_level"].get("missing_capabilities", ())),
         entity_total=int(content["global_level"].get("entity_total", 0)),
+        dimension_units=dict(content["global_level"].get("dimension_units") or {}),
         document=document,
     )
 
@@ -207,6 +281,16 @@ def _object_concepts(section: dict[str, Any]):
         )
         for attribute in klass.get("attributes", ()):
             yield _field_concept(attribute, KIND_ATTRIBUTE, ifc_class=ifc_class)
+        # Direct IFC attributes with a declared supported measure type. They
+        # apply to exactly the class that declares them, so `applies_to` is set
+        # as well as `ifc_class` — a `fields_for_class` lookup must find them.
+        for measurement in klass.get("measurements", ()):
+            yield _field_concept(
+                measurement,
+                KIND_MEASUREMENT,
+                ifc_class=ifc_class,
+                applies_to=(ifc_class,),
+            )
 
 
 def _type_property_concepts(section: dict[str, Any]):
@@ -363,6 +447,10 @@ def _field_concept(
         searchable=bool(record.get("searchable")),
         applies_to=applies_to,
         text=f"{_split_identifier(set_name or '')} {_split_identifier(field_name)}".strip(),
+        measure_type=record.get("measure_type"),
+        unit_state=record.get("unit_state"),
+        unit_symbol=record.get("unit_symbol"),
+        unit_limitation=record.get("unit_limitation"),
     )
 
 

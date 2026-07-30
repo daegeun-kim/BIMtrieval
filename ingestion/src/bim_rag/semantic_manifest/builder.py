@@ -42,6 +42,12 @@ from bim_rag.semantic_manifest.coverage import (
     classify_container_structure,
     classify_field_coverage,
 )
+from bim_rag.semantic_manifest.measurement import (
+    MeasureFacts,
+    UnitRegistryView,
+    build_measure_facts,
+    empty_measure_facts,
+)
 from bim_rag.semantic_manifest.schema import (
     COVERAGE_ABSENT,
     COVERAGE_EXTRACTION_FAILURE,
@@ -95,6 +101,9 @@ def build_semantic_manifest(
 ) -> dict[str, Any]:
     """Build the complete manifest document for one already-imported model."""
     identity = _source_model_identity(session, source_model_id)
+    # The model's OWN unit definitions, stored once by ingestion. Every unit
+    # decision below resolves against this and nothing else (task27 §3).
+    registry = UnitRegistryView(identity["dimension_units"])
 
     class_counts = _entity_class_counts(session, source_model_id)
     structure = _classify_property_containers(
@@ -109,6 +118,7 @@ def build_semantic_manifest(
             session,
             source_model_id,
             class_counts,
+            registry,
             max_enumerated_values=max_enumerated_values,
         ),
         SECTION_TYPE_PROPERTY: _build_type_property_level(
@@ -116,10 +126,13 @@ def build_semantic_manifest(
             source_model_id,
             class_counts,
             structure,
+            registry,
             max_enumerated_values=max_enumerated_values,
         ),
         SECTION_RELATIONSHIP: _build_relationship_level(session, source_model_id),
-        SECTION_GLOBAL: _build_global_level(session, source_model_id, class_counts, structure),
+        SECTION_GLOBAL: _build_global_level(
+            session, source_model_id, class_counts, structure, registry
+        ),
     }
 
     return build_document(
@@ -153,6 +166,7 @@ def _source_model_identity(session: Session, sid: int) -> dict[str, Any]:
         "file_fingerprint": row[1],
         "ifc_schema": row[2],
         "extraction_version": metadata.get("extraction_version", "unknown"),
+        "dimension_units": metadata.get("dimension_units"),
     }
 
 
@@ -223,6 +237,7 @@ def _build_object_level(
     session: Session,
     sid: int,
     class_counts: dict[str, int],
+    registry: UnitRegistryView,
     *,
     max_enumerated_values: int = DEFAULT_MAX_ENUMERATED_VALUES,
 ) -> dict[str, Any]:
@@ -231,8 +246,15 @@ def _build_object_level(
     Free-text identity fields (`name`, `description`) are frequently
     high-cardinality; `_field_record` keeps their concept and marks them
     `searchable` rather than enumerating thousands of per-occurrence strings.
+
+    A class also carries its MEASUREMENT attributes (task27 §2.2, §3): direct
+    IFC attributes whose declared schema type is a supported length, area, or
+    volume measure. They are a separate list from `attributes` because they are
+    a different physical source with different safety rules — a measurement
+    attribute is only comparable when its effective unit is uniform.
     """
     attribute_values = _attribute_values_by_class(session, sid)
+    measurement_rows = _measurement_attribute_rows(session, sid)
 
     classes = []
     for ifc_class in sorted(class_counts):
@@ -274,10 +296,72 @@ def _build_object_level(
                 "ifc_class": ifc_class,
                 "count": total,
                 "attributes": attributes,
+                "measurements": _measurement_records(
+                    ifc_class, total, measurement_rows.get(ifc_class, {}), registry
+                ),
             }
         )
 
     return {"classes": classes}
+
+
+def _measurement_attribute_rows(
+    session: Session, sid: int
+) -> dict[str, dict[str, list[tuple[str | None, str | None, int]]]]:
+    """Observed measurement attributes, grouped by class then attribute name.
+
+    Reads the canonical measurement container ingestion wrote — never the IFC,
+    and never a field name. An attribute that carries no supported measure type
+    was never written here in the first place.
+    """
+    rows = session.execute(
+        text(
+            "SELECT e.ifc_class, m.key, m.value->>'measure_type', "
+            "m.value->>'unit_override_key', count(*) "
+            "FROM ifc_entities e, jsonb_each(e.canonical_json->'measurements') m "
+            "WHERE e.source_model_id = :id "
+            "AND jsonb_typeof(e.canonical_json->'measurements') = 'object' "
+            "GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 5 DESC, 3, 4"
+        ),
+        {"id": sid},
+    ).fetchall()
+    out: dict[str, dict[str, list[tuple[str | None, str | None, int]]]] = {}
+    for ifc_class, attribute, measure_type, override_key, count in rows:
+        out.setdefault(ifc_class, {}).setdefault(attribute, []).append(
+            (measure_type, override_key, int(count))
+        )
+    return out
+
+
+def _measurement_records(
+    ifc_class: str,
+    total: int,
+    observed: dict[str, list[tuple[str | None, str | None, int]]],
+    registry: UnitRegistryView,
+) -> list[dict[str, Any]]:
+    """One field record per measured direct attribute on this class."""
+    records: list[dict[str, Any]] = []
+    for attribute in sorted(observed):
+        rows = observed[attribute]
+        populated = sum(count for _, _, count in rows)
+        facts = build_measure_facts(
+            rows,
+            registry,
+            measure_source="attribute",
+            label=f"{ifc_class}.{attribute}",
+        )
+        records.append(
+            _field_record(
+                semantic_id=f"meas:{ifc_class}.{attribute}",
+                field=attribute,
+                data_type="number",
+                populated=populated,
+                total=total,
+                values=[],
+                measure=facts,
+            )
+        )
+    return records
 
 
 def _attribute_values_by_class(
@@ -318,9 +402,18 @@ def _field_record(
     total: int,
     values: list[tuple[str, int]],
     set_name: str | None = None,
+    measure: MeasureFacts | None = None,
     max_enumerated_values: int = DEFAULT_MAX_ENUMERATED_VALUES,
 ) -> dict[str, Any]:
-    """One queryable field concept, with its value vocabulary or search capability."""
+    """One queryable field concept, with its value vocabulary or search capability.
+
+    When `measure` says the field is dimensional, the IFC measure type — not the
+    observed value text — decides the data type. A length whose values happen to
+    include one unparsable string is still a length.
+    """
+    measure = measure or empty_measure_facts()
+    if measure.is_measured:
+        data_type = "number"
     record: dict[str, Any] = {
         "id": semantic_id,
         "field": field,
@@ -333,6 +426,7 @@ def _field_record(
     }
     if set_name is not None:
         record["set"] = set_name
+    record.update(measure.to_record())
 
     if len(values) > max_enumerated_values:
         # High cardinality: keep the CONCEPT and the capability, not the data.
@@ -427,6 +521,7 @@ def _build_type_property_level(
     sid: int,
     class_counts: dict[str, int],
     structure: dict[str, Any],
+    registry: UnitRegistryView,
     *,
     max_enumerated_values: int,
 ) -> dict[str, Any]:
@@ -438,6 +533,7 @@ def _build_type_property_level(
         "property",
         class_counts,
         structure,
+        registry,
         max_enumerated_values=max_enumerated_values,
     )
     quantity_containers = _build_containers(
@@ -447,6 +543,7 @@ def _build_type_property_level(
         "quantity",
         class_counts,
         structure,
+        registry,
         max_enumerated_values=max_enumerated_values,
     )
 
@@ -465,6 +562,7 @@ def _build_containers(
     kind: str,
     class_counts: dict[str, int],
     structure: dict[str, Any],
+    registry: UnitRegistryView,
     *,
     max_enumerated_values: int,
 ) -> list[dict[str, Any]]:
@@ -488,8 +586,10 @@ def _build_containers(
             session,
             sid,
             top_key,
+            kind,
             reliable_names,
             container_occurrences,
+            registry,
             max_enumerated_values=max_enumerated_values,
         )
         if reliable_names
@@ -559,8 +659,10 @@ def _container_fields(
     session: Session,
     sid: int,
     top_key: str,
+    kind: str,
     names: list[str],
     container_occurrences: dict[str, int],
+    registry: UnitRegistryView,
     *,
     max_enumerated_values: int,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -605,11 +707,19 @@ def _container_fields(
             continue
         values.setdefault(key, []).append((value, int(count)))
 
+    measure_rows = _container_measure_rows(session, sid, top_key, names)
+
     out: dict[str, list[dict[str, Any]]] = {}
     for (container, field), populated_count in sorted(populated.items()):
         key = (container, field)
         field_values = values.get(key, [])
         data_type = _infer_data_type(types.get(key, set()), [v for v, _ in field_values])
+        rows = measure_rows.get(key, [])
+        facts = (
+            build_measure_facts(rows, registry, measure_source=kind, label=f"{container}.{field}")
+            if rows
+            else empty_measure_facts()
+        )
         out.setdefault(container, []).append(
             _field_record(
                 semantic_id=f"prop:{container}.{field}",
@@ -619,10 +729,46 @@ def _container_fields(
                 populated=populated_count,
                 total=container_occurrences.get(container, populated_count),
                 values=field_values,
+                measure=facts,
                 max_enumerated_values=max_enumerated_values,
             )
         )
     return out
+
+
+def _container_measure_rows(
+    session: Session, sid: int, top_key: str, names: list[str]
+) -> dict[tuple[str, str], list[tuple[str | None, str | None, int]]]:
+    """Observed `(measure_type, unit_override_key, count)` per container field.
+
+    Rows with a NULL `measure_type` are deliberately included: a field where
+    only some occurrences carry a measure type is not a measured field, and the
+    untyped remainder is exactly what makes it unsafe to aggregate (§3).
+    """
+    rows = session.execute(
+        text(
+            "SELECT ps.key, pr.key, pr.value->>'measure_type', "
+            "pr.value->>'unit_override_key', count(*) "
+            "FROM ifc_entities e, "
+            f"jsonb_each(e.canonical_json->'{top_key}') ps, "  # noqa: S608 - fixed literal
+            "jsonb_each(ps.value) pr "
+            "WHERE e.source_model_id = :id AND jsonb_typeof(ps.value) = 'object' "
+            "AND ps.key = ANY(:names) "
+            "GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 5 DESC, 3, 4"
+        ),
+        {"id": sid, "names": names},
+    ).fetchall()
+
+    out: dict[tuple[str, str], list[tuple[str | None, str | None, int]]] = {}
+    for container, field, measure_type, override_key, count in rows:
+        out.setdefault((container, field), []).append((measure_type, override_key, int(count)))
+    # A field with no measure type anywhere is an ordinary value field; dropping
+    # it here keeps `empty_measure_facts()` the single "not dimensional" answer.
+    return {
+        key: observed
+        for key, observed in out.items()
+        if any(measure_type for measure_type, _, _ in observed)
+    }
 
 
 def _build_materials(
@@ -770,6 +916,7 @@ def _build_global_level(
     sid: int,
     class_counts: dict[str, int],
     structure: dict[str, Any],
+    registry: UnitRegistryView,
 ) -> dict[str, Any]:
     storeys = session.execute(
         text(
@@ -791,10 +938,15 @@ def _build_global_level(
     ).scalar()
 
     total_entities = sum(class_counts.values())
-    missing = _missing_capabilities(structure, class_counts)
+    measured_fields = _measured_field_totals(session, sid)
+    missing = _missing_capabilities(structure, class_counts, registry, measured_fields)
 
     return {
         "entity_total": total_entities,
+        # The model's own unit definitions, carried once (task27 §2.1, §3). Every
+        # field's `unit_key` refers into `definitions` here rather than repeating
+        # a whole definition per field.
+        "dimension_units": registry.to_content(),
         "class_inventory": [
             {"ifc_class": name, "count": count} for name, count in sorted(class_counts.items())
         ],
@@ -830,8 +982,52 @@ def _as_float(value: str | None) -> float | None:
         return None
 
 
+def _measured_field_totals(session: Session, sid: int) -> int:
+    """How many distinct (container/class, field) pairs carry a measure type.
+
+    A cheap model-wide check used only to decide whether dimensional queries are
+    available at all. It counts CONCEPTS, not values.
+    """
+    total = 0
+    for top_key, key_expr in (
+        ("property_sets", "ps.key"),
+        ("quantity_sets", "ps.key"),
+    ):
+        total += int(
+            session.execute(
+                text(
+                    f"SELECT count(*) FROM (SELECT DISTINCT {key_expr}, pr.key "  # noqa: S608
+                    "FROM ifc_entities e, "
+                    f"jsonb_each(e.canonical_json->'{top_key}') ps, "
+                    "jsonb_each(ps.value) pr "
+                    "WHERE e.source_model_id = :id AND jsonb_typeof(ps.value) = 'object' "
+                    "AND pr.value->>'measure_type' IS NOT NULL) t"
+                ),
+                {"id": sid},
+            ).scalar()
+            or 0
+        )
+    total += int(
+        session.execute(
+            text(
+                "SELECT count(*) FROM (SELECT DISTINCT e.ifc_class, m.key "
+                "FROM ifc_entities e, jsonb_each(e.canonical_json->'measurements') m "
+                "WHERE e.source_model_id = :id "
+                "AND jsonb_typeof(e.canonical_json->'measurements') = 'object' "
+                "AND m.value->>'measure_type' IS NOT NULL) t"
+            ),
+            {"id": sid},
+        ).scalar()
+        or 0
+    )
+    return total
+
+
 def _missing_capabilities(
-    structure: dict[str, Any], class_counts: dict[str, int]
+    structure: dict[str, Any],
+    class_counts: dict[str, int],
+    registry: UnitRegistryView,
+    measured_field_count: int,
 ) -> list[dict[str, Any]]:
     """What this model genuinely cannot answer, and why (§2.2, §2.3.4).
 
@@ -897,9 +1093,38 @@ def _missing_capabilities(
                 "scope": None,
                 "coverage": COVERAGE_ABSENT,
                 "reason": (
-                    "no quantity set was extracted for this model, so measured "
-                    "quantities such as areas and volumes are not available"
+                    "this model carries no IFC quantity set, so quantity-set fields such as "
+                    "Qto_WallBaseQuantities are not available for it"
                 ),
+            }
+        )
+
+    # Dimensional capability is a SEPARATE question from quantity sets: a model
+    # with no quantity set at all can still carry typed length/area/volume
+    # properties and attributes, and one full of quantity sets can still lack a
+    # resolvable project unit. Reporting them together would misstate both.
+    if measured_field_count == 0:
+        missing.append(
+            {
+                "capability": "dimensional_queries",
+                "scope": None,
+                "coverage": COVERAGE_ABSENT,
+                "reason": (
+                    "no value in this model declares a supported IFC length, area, or volume "
+                    "measure type, so dimensional filtering and aggregation are not available "
+                    "for it; numeric values without a declared IFC measure type are kept as "
+                    "raw values and are not treated as dimensions"
+                ),
+            }
+        )
+
+    for measure_type, reason in sorted(registry.unresolved_defaults.items()):
+        missing.append(
+            {
+                "capability": "dimensional_queries",
+                "scope": measure_type,
+                "coverage": COVERAGE_ABSENT,
+                "reason": reason,
             }
         )
 

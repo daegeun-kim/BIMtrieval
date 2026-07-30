@@ -80,7 +80,7 @@ Provide dynamically generated context including:
 - safe fields and data types
 - entity and relationship classes present in the selected model
 - property-set, quantity-set, property, and quantity names discovered in canonical JSON
-- normalized-unit rules
+- IFC-native unit rules (measure type, effective unit, unit state)
 - model catalog metadata fields
 - supported relationship direction/role definitions
 - valid operators per field type
@@ -221,14 +221,19 @@ Do not collapse these states into one generic null when the source record preser
 
 ## 10. Units and Aggregation
 
-Normalize:
+**No normalization. Values are read, filtered, and aggregated in the units the IFC used** (owner
+decision, task27; see spec_v002 §9.1 for the full contract).
 
 ```text
-length = mm
-area = mm²
-volume = mm³
-angle = degrees
+supported measure families = length, area, volume
+effective unit             = unit_override_key otherwise defaults[measure_type]
+unit states                = uniform | mixed | unknown
 ```
+
+The semantic manifest is the authority on a field's measure type and unit state; the SQL layer is
+purely physical. `resolved_numeric_expr` casts the raw stored value and knows nothing about units —
+there is exactly one unit decision in the query path (`app.query.semantic.units.decide_unit`), and it
+runs before compilation.
 
 Preserve original values, units, and provenance.
 
@@ -238,7 +243,11 @@ Support exact:
 count, sum, min, max, average, group_by
 ```
 
-Only aggregate numeric values whose semantic field and normalized unit are known. Report missing coverage and do not imply completeness when some matching objects lack the required quantity.
+Only aggregate a field whose unit state is `uniform`; the effective IFC unit is returned with the
+result. A `mixed`- or `unknown`-unit field is refused rather than summed as one scale, and a
+requested unit that is not the field's own unit is refused rather than converted. Report missing
+coverage and do not imply completeness when some matching objects lack the required value — missing
+dimensional data is unavailable, never zero.
 
 SQL performs filtering, joins, grouping, and aggregation. Pandas may transform bounded results for presentation but must not replace database operations or calculate from a limited sample when the full set is required.
 
@@ -341,7 +350,7 @@ Test:
 - ambiguous field resolution and clarification
 - instance/type conflicts
 - missing-value distinctions
-- unit conversions
+- unit-state safety (uniform executes; mixed/unknown/different-unit refuse — no conversion)
 - full-set aggregate correctness
 - default/max limits and pagination
 - every stored relationship class for direct inspection
@@ -386,12 +395,16 @@ only derivable fields) and `db.bootstrap_readonly_role` (created
 `query.sql`/`query.graph` operation and every live test runs through that
 read-only role, not the ingestion superuser connection.
 
-The only ingested model (Schependomlaan) has zero populated
+The only ingested model at that time (Schependomlaan) had zero populated
 `quantity_sets`/`materials` and a single messy `property_sets` bucket — the
 engine is built spec-complete and generic, but live validation against this
 model correctly reports missing quantity/material data as *absent* rather
-than fabricating it (see `docs/architecture_v003.md` for details and the
-`mm`-only unit-conversion caveat inherited from the v001 ingestion output).
+than fabricating it (see `docs/architecture_v003.md`). The `mm`-only
+unit-conversion caveat recorded here was removed by task27: nothing is
+converted any more, and unit safety is decided from the semantic manifest
+(§10). That model's flattened `IFCREAL` properties carry no IFC measure type,
+so they remain unavailable as dimensions — the correct standards-based
+outcome, not a gap to be filled by name inference.
 
 300/300 tests pass (158 pre-existing ingestion + 40 Task 04 + 102 new:
 `backend/tests/query_sql`, `query_graph`, `query_live`). `ruff format`/`ruff
@@ -537,7 +550,9 @@ The largest gap is used rather than the median because it is a floor-to-floor se
 regimes: in a sub-levelled model the median gap is a sub-level gap, but in a clean one-storey-per-
 floor model the median gap is a floor gap — a median-based rule merges every floor of a clean model
 into one band. The rule is dimensionless, so it behaves identically for millimetre, metre, and
-imperial models without needing a project length unit (which v001 ingestion does not persist).
+imperial models without needing a project length unit at all. (Since task27 the project length unit
+IS persisted, in `extraction_metadata.dimension_units` — but this rule deliberately stays
+dimensionless, so band derivation cannot break on a model whose unit context is unresolved.)
 
 Verified stable for every fraction in 0.2..0.35 on the live 45-storey model (9 bands, matching its
 real floor count) and on clean, sub-levelled, multi-wing, metric, basement, and double-height

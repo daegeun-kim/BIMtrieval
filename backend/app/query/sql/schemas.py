@@ -59,6 +59,11 @@ class FieldKind(str, Enum):
     QUANTITY = "quantity"
     PROPERTY = "property"
     TYPE_FACT = "type_fact"
+    #: A direct IFC attribute whose DECLARED schema type is a supported length,
+    #: area, or volume measure (task27 §2.2) — `IfcDoor.OverallHeight`, not one
+    #: of the fixed identity attributes. Stored under `canonical_json.
+    #: measurements`, so it needs no set name.
+    MEASUREMENT = "measurement"
 
 
 class Operator(str, Enum):
@@ -114,7 +119,13 @@ class FieldRef(_StrictModel):
         if self.field_kind in (FieldKind.QUANTITY, FieldKind.PROPERTY) and not self.set_name:
             raise ValueError(f"{self.field_kind.value} fields require set_name")
         if (
-            self.field_kind in (FieldKind.ATTRIBUTE, FieldKind.DIMENSION, FieldKind.TYPE_FACT)
+            self.field_kind
+            in (
+                FieldKind.ATTRIBUTE,
+                FieldKind.DIMENSION,
+                FieldKind.TYPE_FACT,
+                FieldKind.MEASUREMENT,
+            )
             and self.set_name
         ):
             raise ValueError(f"{self.field_kind.value} fields must not set set_name")
@@ -262,7 +273,10 @@ class AggregateEntitiesPlan(_StrictModel):
     filters: FilterGroup | None = None
     field: FieldRef | None = None  # None only valid for function="count"
     function: Literal["count", "sum", "min", "max", "average"]
-    unit: str | None = Field(default=None, max_length=16)  # target normalized unit, e.g. "mm"
+    #: The unit the CALLER asked for. Values are never converted into it: the
+    #: aggregate runs only when this is the same unit the field is already
+    #: recorded in (spellings may differ), and is refused otherwise (task27 §4.3).
+    unit: str | None = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def _field_required_unless_count(self) -> "AggregateEntitiesPlan":

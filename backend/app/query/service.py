@@ -55,6 +55,7 @@ from app.query.binding.pipeline import (
     run_pipeline,
     status_summary,
 )
+from app.query.binding.presentation import build_answer_explanation, select_visual_result
 from app.query.catalog_answer import answer_catalog_question, is_catalog_question
 from app.query.rag.embedding_service import get_embedding_service
 from app.query.rag.hydration import hydrate_selected_entities
@@ -366,6 +367,16 @@ class QueryService:
                 viewer_matches_total=hydration.viewer_matches_total or None,
                 truncated=hydration.viewer_matches_truncated,
                 class_counts=hydration.class_counts,
+            ),
+            # Presentation only, built after the answer is complete from the
+            # part that produced the highlight (task26 §1.1). Note this is the
+            # primary VISUAL part, which is not necessarily `primary` above —
+            # `result_summary`'s long-standing use of the first part is left
+            # exactly as it was.
+            answer_explanation=build_answer_explanation(
+                select_visual_result(outcome.results, outcome.primary_visual_part_id),
+                hydration,
+                basis,
             ),
             warnings=outcome.warnings[:20],
         )

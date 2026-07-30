@@ -97,7 +97,11 @@ The viewer artifact is data, not shared application code.
 - full object property panel
 - storey/class visibility controls
 - hide/isolate tools
-- measurement and section planes
+- measurement and section planes — **narrowly amended by the Task 28 amendment**: the fixed automatic
+  horizontal cut and lower boundary belonging to a selected logical floor, plus the compact floor
+  button stack, are now in scope. Arbitrary user-authored clipping planes, a general storey
+  browser, hide/isolate, measurements, reflected ceiling plans, elevations, and other drawing
+  modes remain excluded.
 - annotations or saved viewpoints
 - model or metadata editing
 - geometry editing
@@ -489,6 +493,38 @@ highlighted nothing. The exact total, the 2,000 viewer cap, and the 50-item LLM 
 three independent limits: `primary_entities` remains bounded evidence for grounding/citations and is
 **not** the highlight set. `sample_detail` is populated only on explicit sample-detail intent.
 
+### 10.10 Logical floor contract (Task 28 — delivered)
+
+```text
+GET /api/models/{source_model_id}/floors -> ModelFloorsResponse
+```
+
+One narrow, typed, allowlisted (`extra="forbid"`), read-only, source-model-scoped endpoint behind
+the viewer's floor-plan control. It reuses
+`app/query/semantic/spatial.py::build_storey_model()` — the same elevation-gap `FloorBand`
+clustering the natural-language floor interpretation resolves against — so the buttons and
+"the second floor" can never disagree. **There is no second floor detector.**
+
+Response: `source_model_id`, `available`, `unavailable_reason`, `reference_band_index`,
+`reference_basis` (`elevation_zero` | `lowest_band` | `none`), `total_storeys` (raw storeys, so the
+storey-versus-floor difference stays observable), and `floors` — one `FloorBandInfo` per **logical
+band**, never per raw `IfcBuildingStorey`: `band_index` (0-based, ascending by elevation), `label`,
+`is_reference`, `storey_global_ids`, bounded `storey_names`, `min_elevation`, `max_elevation`.
+
+Labels come from `spatial.band_label(band_index, reference_index)`, a pure helper beside the band
+model: the reference band is **Floor 1**, bands above continue upward, and bands below get neutral
+**Lower level N** names rather than an invented basement designation. Storey names are carried for
+tooltip/accessible use only and never discover, group, order, or label a floor.
+
+`min_elevation`/`max_elevation` are stored project-unit diagnostics for exactly one purpose —
+diagnostics. **They are not viewer scene coordinates** and must never be used as Three.js Y values
+(see §11.7). The frontend's `FloorContractBand` type deliberately omits them so the adapter cannot.
+
+Deterministic and LLM-free: no IFC parse, viewer-asset read, OpenAI call, embedding, or database
+write. A model with no usable storey elevations returns an honest `available: false` with a bounded
+reason, and the frontend then omits the control entirely. Additive — nothing was added to a shared
+envelope, so existing clients are unaffected.
+
 ## 11. Viewer behavior
 
 ### 11.1 Camera and basic controls
@@ -503,6 +539,9 @@ Provide only the controls needed for the LLM/viewer experiment:
 - citation-driven center and fit.
 
 Do not add hide/isolate, measurements, sections, storey browser, class tree, or editing controls.
+(Task 28 narrowly amends "sections" only for the fixed floor-plan cut described in the Task 28
+amendment; the floor
+button stack is the only new main-viewer control, and it is not a storey browser.)
 
 Fitting an object/result must center and enlarge it only moderately. Keep surrounding geometry
 visible and enforce a maximum approach/zoom so one small element never fills the entire viewport.
@@ -544,6 +583,29 @@ Entity references displayed with an answer are clickable. Clicking one:
 - centers it;
 - zooms only slightly/moderately;
 - does not submit a query or call the LLM.
+
+### 11.5 Floor-plan mode (Task 28 — delivered)
+
+A mode of the **existing** viewer — same components, same world, same canvas, same Fragments model.
+Only the camera in use and two clipping planes change. It is not a second canvas, a generated
+image, a saved drawing, an explanation-panel visualization, or a replacement for the 3D model. Full
+contract in the Task 28 amendment.
+
+### 11.6 Scene coordinates versus stored elevations (Task 28 — load-bearing)
+
+Two distinct coordinate facts, previously only implicit, are now stated because Task 28 depends on
+keeping them apart:
+
+- a stored `IfcBuildingStorey.Elevation` is expressed in the model's own project length unit and is
+  **never** a Three.js Y value;
+- `model.box` is already world-space (Fragments applies `object.matrixWorld` in its getter), while
+  `Elevation + (await model.getCoordinates())[1]` — the pair the installed
+  `Views.createFromIfcStoreys` adds — is in the model object's **local** space, and
+  `model.getSection(plane)` both consumes and produces geometry in that same local space.
+
+Mapping a logical band into the scene therefore means: read the artifact-native `Elevation`, add the
+model's own coordinate height, then push the result through the model object's own world matrix.
+No model-specific offset, no `model.box.min.y` as a floor elevation, no geometry centroid.
 
 ## 12. Chat behavior
 
@@ -1500,3 +1562,311 @@ becomes active a few seconds after the model appears.
   returns an empty box for a geometry-less item and those are skipped.
 - Live in-browser visual/performance verification on both models has NOT yet been performed; the
   evidence above is unit tests plus artifact-level measurement.
+
+---
+
+## Task 26 amendment — Synchronized Query Explanation Panel (delivered)
+
+One new frontend panel that explains the latest highlighted query result with an appropriate
+structured visualization. The natural-language query backend remains the main product; this card
+is a visual explanation of the backend's already-computed authoritative result, not a second
+analysis system, report builder, or replacement for the chat.
+
+### 1. Hard backend boundary (held)
+
+The existing query and LLM pipeline is behaviorally unchanged. Nothing was altered in manifest
+generation/loading, recommendations, the constraint ledger, binder/correction/answer prompts or
+schemas, model assignments, reasoning settings, LLM call count, binding, validation, closure,
+mode derivation, execution semantics, exact/zero/partial/unavailable/ambiguous classification,
+answer-packet content, final grounding validation, the deterministic fallback, the predicate used
+to produce the reported answer and viewer identities, or the prose answer itself.
+
+No additional LLM call is made for the panel, and the prose answer is never parsed to build the
+visualization.
+
+### 1.1 Additive presentation contract
+
+`QueryResponseEnvelope` gained ONE optional field, `answer_explanation: AnswerExplanation | None`,
+carrying a bounded, allowlisted (`extra="forbid"`) view of the **primary visual** answer part —
+the part that produced the highlight, which is not necessarily `results[0]`. The long-standing
+`result_summary` behavior (first answer part) is deliberately untouched.
+
+Schemas: `AnswerExplanation`, `ExplanationPresentation` (enum), `ExplanationGroup`,
+`ExplanationRow`, `ExplanationBucket`, `ExplanationAggregate`. All are OpenAPI-generated into
+`frontend/src/types/api.ts`. Exposed fields: part id, request label, operation, result status,
+presentation kind, answer basis, interpretation, retrieval modes, exact total, class breakdown,
+distribution buckets, aggregate value/unit/matched/coverage/completeness, relationship endpoint
+total, limitation, known/unknown parts, shown identity count, true result count, truncation state,
+bounded groups (with GlobalIds) and rows. Never SQL, prompts, predicates, canonical JSON,
+manifests, credentials, or database diagnostics.
+
+**The no-extra-computation guarantee is structural, not promised.**
+`app/query/binding/presentation.py` takes no `Session` and imports nothing from the query,
+execution, or LLM layers, so it cannot issue a statement or recompute a breakdown. It reads
+finished objects and copies bounded fields out of them. A test asserts the module's import list.
+
+**Identity hydration for displayed groups adds no query.** `hydrate_viewer_identities` has always
+`SELECT`ed `ifc_class` beside `global_id`; `ViewerHydration.primary_identities` now keeps the pair
+(`HydratedIdentity`). Selectable groups are a literal partition of the identities the viewer
+already received. Where no authoritative identity subset exists — notably distribution buckets,
+which are grouped counts — the value is displayed but **not** offered as a selectable group;
+`ExplanationBucket` has no `global_ids` field at all.
+
+Counts stay truthful under the viewer identity cap: `true_result_count` and a group's
+`exact_count` keep their real values, and `identities_truncated` / `truncated` disclose the gap.
+
+### 2. Panel lifecycle and synchronization
+
+The card represents the current query-result highlight, not chat history.
+
+- Opens only when the latest completed query returns a non-empty primary highlight **and** an
+  explanation payload for that same result. Both are applied in one step in
+  `applyViewerActions`, so they cannot diverge.
+- A newer qualifying result replaces the card outright, active subgroup included.
+- A newer completed query with no highlight retires the previous explanation **and** the previous
+  query highlight together.
+- Cleared on Clear Chat, Reset App, model switch/unload, and the card's own close control (which
+  also clears its query-result highlight).
+- Stale/canceled/superseded responses cannot reopen or overwrite it — the existing `queryToken`
+  guard returns before any explanation state is touched.
+- Opening the component panel by clicking an object does not replace the explanation or its
+  highlight. A deterministic **Same type**/**Same family** action does replace the highlight, so
+  it retires the explanation at the same moment.
+
+**Interpretation note (§2 "explicit viewer selection-clear action").** Clicking empty space clears
+only the *manual* selection; it has never cleared query roles, so the query highlight and the card
+both persist through it. The explicit clear is therefore the card's own close control, per the same
+section's requirement that closing it clears its highlight.
+
+### 3. Fixed desktop layout
+
+With no card open, the existing full-height resizable chat layout is unchanged.
+
+With the card open, `.right-stack` is a fixed right-side column: 20 px outer margins, 12 px gap,
+explanation above (60%) and chat below (40%), both rendered as separate floating cards with the
+same surface, border, radius, shadow, typography, spacing, and measured-drawing ticks as the chat
+panel. No splitter, no resizer, no saved preference, no reordering. Inside the stack the chat drops
+its inline width and drag handle (`.panel-stacked`); the user's stored width preference is
+preserved and applies again when the card closes.
+
+Column width is 40vw, or 32vw while the 320 px component panel is docked immediately left of it
+with the existing 12 px gap. `explanationColumnWidthPx(viewportWidth, componentOpen)` computes it
+in px in `App.tsx`; that single value feeds both the `--chat-w` CSS variable (which the column and
+the component panel's dock position read) and `effectiveViewportObstructionPx`, so camera fitting
+and visible-region centering account for the whole panel stack from one source — there is no second
+set of hard-coded obstruction measurements.
+
+Collapsing the chat inside the stack reuses the existing collapsed state: the chat becomes the
+existing restore tab and the explanation card takes the freed height
+(`.right-stack-collapsed`). No new layout mode, no overlap, accessibly restorable.
+
+### 4. Explanation content
+
+Two regions, always — visualization at the left, a persistent plain-language information region at
+the right. A chart or table never appears alone.
+
+The information region states what question part the card represents, what the backend interpreted,
+what is currently highlighted, shown-versus-true counts where truncation exists, operation/result
+status and answer basis, and any limitation, coverage note or known/unknown split. Selecting a
+group changes it to distinguish the subgroup from the full answer (`Showing: IfcDoor` /
+`5 of 9 query-result objects` / `Full result: 9 · external doors on floor 3`). It is descriptive
+only — every line restates a backend field, and it introduces no interpretation or factual claim.
+
+Presentation is chosen deterministically in the backend from the authoritative operation and
+status, so the frontend never guesses: count/existence → headline metric plus the class breakdown
+when meaningful (hidden for a single class); list/sample_detail → metric plus a bounded scrollable
+table; group_distribution → horizontal bars from the existing buckets; aggregate/extremum → value,
+unit and matched/coverage; relationship → endpoint count plus a bounded endpoint table;
+`partial` status → known-versus-unknown split, outranking the operation. Only the primary visual
+part is shown; answer parts are never unioned. Ordinary React/CSS/SVG — no charting dependency.
+
+### 5. Viewer interaction
+
+Displayed groups are backed by authoritative GlobalIds. Clicking a bar applies that subgroup as the
+viewer's primary highlight and marks it `aria-pressed`; **All results** appears whenever a subgroup
+is active and restores the original primary *and* relationship-context roles exactly from stored
+frontend state. Neither path issues a query, an LLM call, a backend request, or a chat turn. A
+group with no identities is rendered disabled rather than pretending to select a set nobody
+hydrated. Truncation is disclosed rather than implied away. Clicking an individual object still
+uses the existing deterministic object-detail flow and the existing, unmodified component panel.
+
+### 6. State and clearing
+
+Store state is serializable and current-session only: the bounded payload, the original
+primary/context GlobalIds (so **All results** needs no new query), the active subgroup, and
+lifecycle state. Nothing is persisted to local storage, no saved reports, no backend write tables.
+Manual object selection and the selected-object query chips are unchanged.
+
+### 7. Validation
+
+- Backend: `tests/binding/test_presentation.py` (26) and `tests/binding/test_explanation_envelope.py`
+  (7) — the builder cannot query, no breakdown is invented, the visual part (not the first part) is
+  described, clarification/zero responses expose nothing, groups are a subset of the highlighted
+  identities, groups without class information yield no selectable group, buckets carry no
+  identities, truncated sets keep true totals, and serializing the payload leaves answer text,
+  evidence, result summary and viewer identities unchanged. Plus three OpenAPI contract tests.
+- Frontend: `tests/explanation-controller.test.ts` (15), `tests/explanation-panel.test.tsx` (20),
+  `tests/explanation-layout.test.tsx` (7) — lifecycle, replacement, retirement, stale rejection,
+  per-operation presentation, the always-present information region, group selection, All results,
+  the fixed 60/40 stack, 40vw to 32vw, obstruction wiring, collapse behavior, and keyboard close.
+- Suites: frontend build, typecheck, lint clean; **249 frontend tests pass** (was 207). Backend
+  offline suite **688 pass, 10 failures — all pre-existing** (validate x3, llm_retry x5,
+  usage-output, settings), unchanged from the pre-Task-26 baseline.
+- Playwright: 1 passed, 1 failed. The failure (`.ev-toggle` not found in the critical-path
+  evidence assertion) was verified to reproduce identically on the pre-Task-26 tree and is
+  **pre-existing and unrelated**.
+- The costly live LLM benchmark was deliberately not rerun for this presentation task.
+
+---
+
+## Task 28 amendment — Floor Plan Mode in the Main Viewer (delivered)
+
+A floor-plan viewing mode inside the **existing** main viewer. For every loaded model whose IFC
+spatial data establishes at least one identifiable logical floor, a compact vertical control appears
+under **Reset app**: `3D`, then one button per logical floor. Choosing a floor turns the same viewer
+into a top-down orthographic plan of that floor, cut ~1.2 m above it and bounded below so lower
+floors do not appear through openings. Choosing **3D** removes the cut and restores the exact
+perspective view that was active before plan mode.
+
+Not introduced: a second canvas, a second Three.js world, a generated image, a saved drawing, an
+explanation-panel visualization, an IFC rewrite, any LLM behavior change, or a general-purpose
+sectioning system.
+
+### 1. Hard boundary (held)
+
+Unchanged: natural-language query interpretation, prompts, schemas, model assignments, reasoning
+effort, LLM call count, semantic manifest generation, floor-band clustering, query execution, answer
+facts, viewer identity derivation, the Query Explanation panel's decision/visualization rules,
+component-detail behavior, Same type / Same family, chat history, selected-object chips, the
+one-loaded-model rule, existing colors and semantic roles, manual selection limits and picking
+semantics, right-side panel obstruction, and offline operation.
+
+The floor buttons are the only new main-viewer control. No tree, storey browser, visibility
+checklist, arbitrary clipping-plane editor, saved-view manager, hide/isolate, measurement,
+reflected ceiling plan, elevation, export, editing, or annotation was added.
+
+### 2. One authoritative floor definition
+
+`GET /api/models/{id}/floors` (§10.10) is the single source. It reuses
+`spatial.build_storey_model()`, so a model's 45 raw storeys still resolve to its 9 real floors, and
+multi-wing storeys at the same elevation stay one button. `spatial.band_label()` is a new pure
+helper shared by the endpoint and the existing floor interpretation.
+
+### 3. Scene-space plan range
+
+`frontend/src/viewer/floorPlan.ts` owns the arithmetic as pure functions (no scene access), so the
+numbers are exactly testable. Given bands already mapped into scene space (§11.6):
+
+```text
+base  = highest resolved scene elevation in the selected band
+cut   = min(base + 1.2 m, next_band_lowest_scene_elevation - tolerance)
+lower = (band_below.highest + selected.lowest) / 2, else model.box.min.y for the lowest band
+```
+
+The uppermost floor uses the nominal 1.2 m cut without inventing a next level. An **unresolved**
+band above cannot constrain the cut. The tolerance is `planeTolerance()`: a few Float32 ULPs scaled
+by the magnitudes actually being compared, so a metre model and a far-from-origin model each get a
+proportional separation — never a per-file tuned value. A band whose constituent storeys do not all
+resolve to a finite scene elevation, or whose range is non-finite or does not extend above the band,
+keeps its button **visible but disabled with a concise reason**. No guessed plane is ever placed.
+The lower boundary is presentation-only: it changes no containment, membership, coordinate, or query
+scope.
+
+### 4. Implementation
+
+- **Projection / navigation** — `OBC.Views` + `View` for the two-plane clipped view and reversible
+  camera ownership; the View's own `OrthoPerspectiveCamera` in `Orthographic` + `Plan` mode. The
+  View's `farPlane` sits `range` below the cut, which is exactly the required lower boundary, so no
+  second clipping mechanism was built. Every drag pans and the wheel zooms; nothing orbits.
+  `model.useCamera()` repoints Fragments' own LOD/culling at whichever camera is rendering. No
+  installed package was patched, no private field read, no second world created, and the
+  `ViewerAdapter` boundary is intact — React still only requests typed viewer actions.
+- **Camera save/restore** — the adapter saves the pose itself (`views.restoreCameraOnClose = false`)
+  and captures it **only on the first departure from 3D**, so floor-to-floor switching cannot
+  overwrite it. Returning to 3D re-asserts the 50 mm lens, desktop control mapping, and panel-aware
+  centering before restoring the exact position and target.
+- **Cut graphics** — `model.getSection(localPlane)` in the existing worker, for the **active floor
+  only**, never precomputed per floor at load. The world plane is transformed into model-local space
+  before the call and the results mounted under `model.object`, because `getSection` both consumes
+  and produces geometry in that space. Output is copied out of the worker's fixed 600k-float scratch
+  buffer so only the used vertices are retained. With a query highlight active a second layer is
+  requested for exactly the primary local ids and drawn over the base cut in the existing blueprint
+  blue — so the established roles survive into the plan and highlighted cut geometry stays legible
+  over the base contour. Layers are nudged `PLAN.cutInsetM` (2 mm) off the plane that produced them,
+  because exactly-coplanar geometry makes the GPU clip test a coin flip.
+- **Visual hierarchy** — `VIEWER_COLORS.planCut` is the darkest ink in the viewer (asserted against
+  every base gray and against the darkened edge colors), fully opaque, with a restrained
+  translucent `planFill`. All cut layers render above the base edge chunks (1) and the highlight
+  overlay (2). The decorative base grid is hidden in plan mode and restored on return. Nothing is
+  fabricated: no door swings, symbols, room tags, dimensions, annotations, north arrows, or scale
+  bars — source geometry remains the only graphic authority. This is a clean model-derived plan
+  slice, not a claim of Revit documentation equivalence.
+- **Perspective-only policies** — `applyViewOffset` was generalized to orthographic:
+  `OrthographicCamera.updateProjectionMatrix` widens the horizontal frustum by exactly
+  `width / fullWidth`, so a box `fitToBox` sized against the full canvas lands filling precisely the
+  unobstructed region, centered, never clipped and never stretched. The projected-size policy is
+  **suspended** rather than misapplied — entering plan mode restores everything it had hidden (so
+  the plan is not missing geometry) and leaving re-evaluates against the restored perspective
+  camera. Edge LOD remains unwired (§28 / Task 22).
+- **Lifecycle** — a monotonic `planToken` guarantees an older floor's asynchronous section can never
+  replace a newer selection. Switching floors, leaving plan mode, unloading, and disposing all
+  dispose the previous view, camera, cut fills, contours, and materials; repeated switching leaves
+  exactly one live view and one live overlay.
+- **State** — `3d`/`plan`, active source-model id, active band, and contract availability live in
+  the store and are serializable and current-session only. The saved pose and the live
+  clipping/section objects stay inside the imperative viewer layer. Nothing is persisted to local
+  storage.
+
+### 5. Independence from query presentation
+
+Entering or leaving plan mode creates no chat turn, issues no query, calls no LLM, and neither opens
+nor closes the Query Explanation panel. Query-primary, relationship-context, and manual-selection
+roles are untouched. A later query never chooses or changes a floor. A highlight arriving while a
+plan is active rebuilds the cut layers for the new roles and never silently returns to perspective.
+
+### 6. Failure behavior
+
+A floor-contract failure or a failed plan construction never unloads the model or breaks the 3D
+viewer. No usable floor data omits the control; one unmappable floor disables only that button; a
+response for a superseded model or load is ignored; a section-generation failure keeps the truthful
+clipped orthographic view and reports a concise non-blocking limitation; **3D** stays available
+after any plan-rendering failure.
+
+### 7. Validation
+
+- **Backend** — `tests/test_model_floors.py` (23): scoping and the bounded 404, the allowlisted
+  field set, GET-only, an inert session proving no statement is issued, one record per logical band
+  for sub-levelled and multi-wing models, elevation ordering against deliberately reverse-sorted
+  names, single-floor availability, reference-relative and neutral lower-level labels, a
+  `lowest_band` fallback, agreement with `resolve_floor_concept("the second floor")`, the honest
+  empty state, and descriptive-only bounded storey names. Plus 4 OpenAPI contract tests (documented
+  GET-only path, schemas, enum, additivity).
+- **Frontend** — `tests/floor-plan-geometry.test.ts` (24), `tests/viewer-plan-mode.test.ts` (37),
+  `tests/floor-controls.test.tsx` (18), `tests/floor-controller.test.ts` (19), plus additions to
+  `viewer-viewport-offset` (+4 orthographic), `viewer-theme` (+5 plan hierarchy), `store` (+6),
+  `api-client` (+2).
+- **Suites** — build, typecheck, and lint clean; **364 frontend tests pass** (was 249). Backend
+  offline suite **975 pass, 27 failures — all pre-existing** (validate x3, llm_retry x5, live
+  binding pipeline x16, rag_search, usage-output, settings), matching the Task 27 baseline exactly.
+- **Playwright** — 2 passed, 1 failed. The new `floor plan mode` case runs against the real
+  Fragments worker and WebGL on the tracked fixture artifact (one `IfcBuildingStorey` at elevation
+  0): the control appears only when the model is ready, renders one logical floor rather than one
+  raw storey, keeps storey names in the accessible description only, enters and leaves the plan with
+  no extra canvas, no chat turn, and no explanation panel, and disappears with Reset App. The
+  failure is the long-standing `.ev-toggle` critical-path assertion, re-verified to reproduce
+  identically on a stashed tree — **pre-existing and unrelated**.
+- The costly live LLM benchmark was deliberately not rerun for this deterministic viewer feature.
+
+### 8. Deviations from the task text, and why
+
+- Task 28 §4.2 describes relationship-context as "ochre" and manual selection as "teal". The
+  implemented theme has always used a deliberately uncolored gray context and the same blueprint
+  blue for manual selection (§23, `viewerTheme.ts`), and §5 of the same task forbids changing
+  existing colors and semantic roles. The existing roles were kept and the plan hierarchy was built
+  around them; the ordering the task actually asks for — cut contours stronger than projected edges,
+  highlighted cut geometry legible over the base contour — is satisfied and asserted.
+- Real-model verification against the ingested models (task28 §8.3) has **not** been performed in a
+  live browser session. The evidence above is the automated suites plus the Playwright run on the
+  fixture artifact. Raw-storey-versus-logical-floor counts, per-floor inspection, cut-versus-
+  projected legibility, bleed-through, highlight colors in plan, and repeated-switch resource growth
+  are all asserted by test, but not yet confirmed visually on models 1-4.

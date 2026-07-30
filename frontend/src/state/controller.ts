@@ -21,6 +21,7 @@ import {
   useStore,
   type ChatMessage,
   type EvidenceView,
+  type FloorOption,
 } from "./store";
 
 const RESOLVE_DEBOUNCE_MS = 150;
@@ -37,6 +38,7 @@ export class AppController {
   private resolveAbort: AbortController | null = null;
   private detailAbort: AbortController | null = null;
   private groupAbort: AbortController | null = null;
+  private floorAbort: AbortController | null = null;
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Monotonic tokens so late/stale async results are ignored after the model or
@@ -47,6 +49,7 @@ export class AppController {
   private resolveToken = 0;
   private detailToken = 0;
   private groupToken = 0;
+  private floorToken = 0;
 
   private get s() {
     return useStore.getState();
@@ -95,6 +98,12 @@ export class AppController {
     this.s.setLoadError(null);
     this.s.setLoadPhase("metadata");
     this.s.clearSelection();
+    // A model switch returns the viewer to normal 3D and retires the outgoing
+    // model's floor buttons (task28 §1.2). `viewer.unloadModel()` disposes the
+    // plan resources during the load below.
+    this.retireFloors();
+    // The explanation describes the outgoing model's result (task26 §6).
+    this.s.closeExplanation();
     // Component details belong to the outgoing model — close the panel and
     // retire its tokens so no cross-model detail can land (task14 §5).
     this.closeComponent();
@@ -121,6 +130,9 @@ export class AppController {
       await this.viewer.loadModel(bytes, String(model.source_model_id));
       if (token !== this.loadToken) return;
       this.s.setLoadPhase("ready");
+      // Floor buttons appear only after the model is ready, and a failure here
+      // must never unload the model or break the normal 3D viewer (task28 §6).
+      await this.loadFloors(model.source_model_id);
     } catch (err) {
       if (this.isCanceled(err) || token !== this.loadToken) return;
       this.s.setLoadPhase("error");
@@ -149,6 +161,101 @@ export class AppController {
   retryLoad(): void {
     const model = this.s.activeModel;
     if (model) void this.confirmAndLoadModel(model);
+  }
+
+  // ---- floor-plan mode (task28) -----------------------------------------
+
+  /**
+   * Load the model's logical floor bands and map them into the loaded
+   * artifact's scene space (task28 §2.1, §3).
+   *
+   * Deterministic: one read-only GET plus artifact reads. It issues no
+   * natural-language query, creates no chat turn, and calls no LLM. Every
+   * failure path leaves the normal 3D viewer intact and simply omits the
+   * control — this method never throws.
+   */
+  async loadFloors(sourceModelId: number): Promise<void> {
+    const token = ++this.floorToken;
+    this.floorAbort?.abort();
+    this.floorAbort = new AbortController();
+    this.s.setFloorsLoading(sourceModelId);
+    try {
+      const res = await api.modelFloors(sourceModelId, this.floorAbort.signal);
+      // A response for a model that is no longer active is discarded (task28 §6).
+      if (!this.floorsStillCurrent(token, sourceModelId)) return;
+
+      const contract = res.floors ?? [];
+      if (!res.available || contract.length === 0) {
+        this.s.setFloorOptions(sourceModelId, [], false);
+        return;
+      }
+
+      const states = await this.viewer.setFloorContract(
+        contract.map((f) => ({
+          band_index: f.band_index,
+          label: f.label,
+          storey_global_ids: f.storey_global_ids ?? [],
+        })),
+      );
+      if (!this.floorsStillCurrent(token, sourceModelId)) return;
+
+      const namesByBand = new Map(contract.map((f) => [f.band_index, f.storey_names ?? []]));
+      const options: FloorOption[] = states.map((s) => ({
+        bandIndex: s.bandIndex,
+        label: s.label,
+        enabled: s.enabled,
+        reason: s.reason,
+        storeyNames: namesByBand.get(s.bandIndex) ?? [],
+      }));
+      this.s.setFloorOptions(sourceModelId, options, true);
+    } catch {
+      if (!this.floorsStillCurrent(token, sourceModelId)) return;
+      // No usable floor data -> omit the control. The 3D viewer is untouched.
+      this.s.setFloorOptions(sourceModelId, [], false);
+    }
+  }
+
+  private floorsStillCurrent(token: number, modelId: number): boolean {
+    return token === this.floorToken && this.s.activeModelId === modelId;
+  }
+
+  /**
+   * Switch the viewer between normal 3D and one floor's plan (task28 §1.2).
+   *
+   * `bandIndex === null` means the **3D** button. Purely a viewer-state change:
+   * no chat turn, no query, no LLM call, and the query explanation panel is
+   * neither opened nor closed. Query-primary, relationship-context, and manual
+   * selection roles are left exactly as they are (task28 §1.3).
+   */
+  async selectFloor(bandIndex: number | null): Promise<void> {
+    if (bandIndex === null) {
+      this.s.setFloorNotice(null);
+      await this.viewer.exitPlanMode();
+      this.s.setFloorMode("3d", null);
+      return;
+    }
+    const option = this.s.floorOptions.find((o) => o.bandIndex === bandIndex);
+    if (!option || !option.enabled) return;
+
+    const result = await this.viewer.enterPlanMode(bandIndex);
+    if (!result.ok) {
+      // Only the affected floor is disabled; every other floor and the 3D
+      // button stay available (task28 §6). The previous floor's notice goes with
+      // it — a limitation must never outlive the plan it described.
+      this.s.setFloorNotice(null);
+      this.s.setFloorOptionDisabled(bandIndex, result.reason ?? "This floor plan is unavailable.");
+      return;
+    }
+    this.s.setFloorMode("plan", bandIndex);
+    this.s.setFloorNotice(result.reason ?? null);
+  }
+
+  /** Return to 3D and drop the current model's floor buttons. */
+  private retireFloors(): void {
+    this.floorToken++;
+    this.floorAbort?.abort();
+    this.s.clearFloors();
+    void this.viewer.exitPlanMode();
   }
 
   // ---- manual selection + resolution ------------------------------------
@@ -245,6 +352,10 @@ export class AppController {
       }
       const ids = res.global_ids ?? [];
       const total = res.total ?? ids.length;
+      // This replaces the query highlight with a different group, so the query
+      // explanation is retired at the same moment — the card must never
+      // describe one set while the viewer emphasizes another (task26 §2).
+      this.s.closeExplanation();
       // Primary role + dimmed remainder, centered with the guarded moderate fit.
       await this.viewer.applyQueryRoles(ids, []);
       this.s.setComponentScope(scope, this.groupNotice(ids.length, total, res.truncated ?? false));
@@ -382,24 +493,42 @@ export class AppController {
   }
 
   private async applyViewerActions(env: QueryResponseEnvelope): Promise<void> {
-    if (!this.viewer.hasModel()) return;
-    const va = env.viewer_actions;
-    if (!va) return;
-    const action = va.selection_action;
-    if (action === "clear" || action === "none" || action === undefined) {
-      if (action === "clear") await this.viewer.clearQueryRoles();
+    if (!this.viewer.hasModel()) {
+      // Without a viewer there is no highlight for a card to explain.
+      this.s.closeExplanation();
       return;
     }
-    const primary = va.primary_global_ids ?? [];
-    const context = va.context_global_ids ?? [];
-    if (primary.length === 0 && context.length === 0) return;
+    const va = env.viewer_actions;
+    const primary = va?.primary_global_ids ?? [];
+    const context = va?.context_global_ids ?? [];
+    const action = va?.selection_action;
+    const highlights = Boolean(va) && action !== "clear" && action !== "none" &&
+      action !== undefined && (primary.length > 0 || context.length > 0);
+
+    // A newer completed query that highlights nothing retires the PREVIOUS
+    // explanation and its highlight together, so the panel and the viewer can
+    // never disagree (task26 §2).
+    if (!highlights) {
+      const hadExplanation = this.s.explanation !== null;
+      this.s.closeExplanation();
+      if (action === "clear" || hadExplanation) await this.viewer.clearQueryRoles();
+      return;
+    }
+
     const { missing } = await this.viewer.applyQueryRoles(primary, context);
+    // Replace or retire the card from the SAME response that produced the
+    // highlight, so the two are applied as one step.
+    if (env.answer_explanation) {
+      this.s.openExplanation(env.answer_explanation, primary, context);
+    } else {
+      this.s.closeExplanation();
+    }
 
     const notices: string[] = [];
     // The viewer set is capped at 2,000; the exact total in the answer is not
     // (spec_v006 §10.9). Disclose the difference rather than letting the
     // highlighted count silently contradict the stated total.
-    if (va.viewer_matches_truncated && va.viewer_matches_total) {
+    if (va?.viewer_matches_truncated && va.viewer_matches_total) {
       notices.push(
         `Highlighted the first ${primary.length} of ${va.viewer_matches_total} matching objects.`,
       );
@@ -420,6 +549,43 @@ export class AppController {
     }
   }
 
+  // ---- query explanation card (task26 §5) --------------------------------
+
+  /**
+   * Highlight one displayed subgroup of the current result.
+   *
+   * Purely a viewer operation over GlobalIds the accepted answer already
+   * supplied: no natural-language query, no LLM call, no backend request, and
+   * no change to the conversation. A group with no identities is not applied —
+   * the panel disables those, and this is the second guard.
+   */
+  async selectExplanationGroup(key: string): Promise<void> {
+    const explanation = this.s.explanation;
+    if (!explanation) return;
+    const group = (explanation.groups ?? []).find((g) => g.key === key);
+    const ids = group?.global_ids ?? [];
+    if (!group || ids.length === 0) return;
+    this.s.setExplanationGroup(key);
+    await this.viewer.applyQueryRoles(ids, []);
+  }
+
+  /** Restore the ORIGINAL primary/context roles exactly, from stored state. */
+  async showAllExplanationResults(): Promise<void> {
+    if (!this.s.explanation) return;
+    this.s.setExplanationGroup(null);
+    await this.viewer.applyQueryRoles(
+      this.s.explanationPrimaryGuids,
+      this.s.explanationContextGuids,
+    );
+  }
+
+  /** The card's own close control. Closing also clears its result highlight. */
+  async closeExplanation(): Promise<void> {
+    if (!this.s.explanation) return;
+    this.s.closeExplanation();
+    await this.viewer.clearQueryRoles();
+  }
+
   async focusCitation(citation: EntityCitation): Promise<void> {
     if (!this.viewer.hasModel()) return;
     // Deterministic — never calls the LLM (spec_v006 §11.4).
@@ -436,6 +602,8 @@ export class AppController {
     this.cancelQuery();
     this.s.clearMessages();
     this.s.setRetryQuestion(null);
+    // The explanation describes the query result being cleared (task26 §6).
+    this.s.closeExplanation();
     await this.viewer.clearQueryRoles();
     // A group highlight is a query-result role, so it clears too — and the
     // in-flight token is retired so a late group response cannot re-highlight
@@ -459,6 +627,10 @@ export class AppController {
     this.s.clearMessages();
     this.s.setRetryQuestion(null);
     this.s.clearSelection();
+    this.s.closeExplanation();
+    // Reset App returns the viewer to its normal unloaded/default mode and
+    // disposes every plan resource (task28 §1.2).
+    this.retireFloors();
     this.viewer.clearManualSelection();
     await this.viewer.clearQueryRoles();
     await this.viewer.unloadModel();

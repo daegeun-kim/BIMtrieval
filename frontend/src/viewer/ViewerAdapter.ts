@@ -20,6 +20,12 @@ import fragmentsWorkerUrl from "@thatopen/fragments/worker?url";
 import * as THREE from "three";
 
 import { EdgeOverlay, type EdgeRole } from "./EdgeOverlay";
+import {
+  planAvailability,
+  resolvePlanRange,
+  storeyLocalY,
+  type SceneBand,
+} from "./floorPlan";
 import { type Profile, detectProfile } from "./profileDetection";
 import { ProjectedSizePolicy, asPolicyModel } from "./ProjectedSizePolicy";
 import {
@@ -27,6 +33,11 @@ import {
   DIM_MATERIAL,
   EDGES,
   MANUAL_MATERIAL,
+  PLAN,
+  PLAN_CUT_COLOR,
+  PLAN_CUT_OPACITY,
+  PLAN_FILL_COLOR,
+  PLAN_FILL_OPACITY,
   PLANE_COLOR,
   PLANE_OPACITY,
   PRIMARY_MATERIAL,
@@ -40,7 +51,7 @@ import {
 // camera-controls ACTION values. Read from the live instance's own constructor
 // rather than importing camera-controls (a transitive dependency of
 // @thatopen/components) so no new direct dependency is introduced.
-const ACTION = { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } as const;
+const ACTION = { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16, ZOOM: 32 } as const;
 
 export interface ViewerCallbacks {
   onManualSelectionChange?: (guids: string[]) => void;
@@ -51,6 +62,34 @@ export interface RoleApplyResult {
   missing: string[];
 }
 
+/**
+ * One logical floor band as the backend's read-only `/floors` contract reports
+ * it (task28 §2.1). `min_elevation`/`max_elevation` are deliberately absent:
+ * those are stored project-unit diagnostics, NOT scene coordinates, so the
+ * adapter cannot accidentally use them as Three.js Y values. Scene heights come
+ * only from the loaded artifact, resolved through `storey_global_ids`.
+ */
+export interface FloorContractBand {
+  band_index: number;
+  label: string;
+  storey_global_ids: string[];
+}
+
+/** Whether one floor can actually be shown, for the button's enabled state. */
+export interface FloorPlanState {
+  bandIndex: number;
+  label: string;
+  enabled: boolean;
+  /** Concise reason when the floor cannot be mapped into scene coordinates. */
+  reason: string | null;
+}
+
+export interface PlanModeResult {
+  ok: boolean;
+  /** A concise, non-blocking limitation to surface, if any. */
+  reason?: string;
+}
+
 /** Classified base-color membership for the loaded model (task14 §1). */
 interface BaseClassification {
   roof: number[];
@@ -58,6 +97,20 @@ interface BaseClassification {
 }
 
 type ViewerWorld = OBC.SimpleWorld<OBC.SimpleScene, OBC.OrthoPerspectiveCamera, OBC.SimpleRenderer>;
+
+/** Detach and release one plan-only drawable's geometry and material. */
+function disposeDrawable(object: THREE.Object3D): void {
+  try {
+    object.removeFromParent();
+    const drawable = object as THREE.Mesh;
+    drawable.geometry?.dispose();
+    const material = drawable.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(material)) material.forEach((m) => m?.dispose());
+    else material?.dispose();
+  } catch {
+    // disposal is best-effort; never fail a mode change over it
+  }
+}
 
 export class ViewerAdapter {
   private components: OBC.Components | null = null;
@@ -108,6 +161,34 @@ export class ViewerAdapter {
    */
   private sizePolicy = new ProjectedSizePolicy();
   private sizePolicyActive = false;
+
+  // -------------------------------------------------------------------------
+  // Floor-plan mode (task28). Every mutable object here is imperative viewer
+  // state — cameras, clipping planes, section meshes — so none of it belongs in
+  // the serializable application store (task28 §6).
+  // -------------------------------------------------------------------------
+  private views: OBC.Views | null = null;
+  private planView: OBC.View | null = null;
+  /** The active logical band, or null in normal 3D mode. */
+  private planBandIndex: number | null = null;
+  /** Logical bands mapped into this artifact's scene space, ascending. */
+  private sceneBands: SceneBand[] = [];
+  /**
+   * The perspective pose to return to. Captured only when FIRST leaving 3D, so
+   * switching floor-to-floor never overwrites it (task28 §1.2).
+   */
+  private savedPose: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
+  /** Live cut contour/fill layers for the ACTIVE floor only (task28 §4.3). */
+  private planSection: { group: THREE.Group } | null = null;
+  /**
+   * Monotonic token so an older floor's asynchronous section result can never
+   * overwrite a newer selection (task28 §4.3, §6).
+   */
+  private planToken = 0;
+  /** The active plan range, for tests/diagnostics. */
+  private planRange: { cut: number; lower: number } | null = null;
+  /** True while the projected-size policy is suspended for plan mode. */
+  private sizePolicySuspended = false;
 
   constructor(maxSelection = 5) {
     this.maxSelection = maxSelection;
@@ -210,6 +291,28 @@ export class ViewerAdapter {
   }
 
   /**
+   * Plan navigation on the floor-plan camera (task28 §1.2): every drag pans and
+   * the wheel zooms the orthographic frustum — no button orbits.
+   *
+   * The library's own `PlanMode` (set when the View is given a world) already
+   * zeroes the rotate speeds and maps left-drag to truck; this makes the middle
+   * and right buttons pan too, so the desktop mapping stays consistent with 3D
+   * mode instead of leaving a dead button.
+   */
+  private configurePlanControls(camera: OBC.OrthoPerspectiveCamera): void {
+    const controls = camera.controls;
+    if (!controls) return;
+    try {
+      controls.mouseButtons.left = ACTION.TRUCK;
+      controls.mouseButtons.middle = ACTION.TRUCK;
+      controls.mouseButtons.right = ACTION.TRUCK;
+      controls.mouseButtons.wheel = ACTION.ZOOM; // orthographic zoom, not dolly
+    } catch {
+      // controls shape can differ across versions; never fail plan mode over it
+    }
+  }
+
+  /**
    * 50 mm lens on a 36x24 mm full-frame camera (task14 §2).
    *
    * Uses three.js's own focal-length/film-gauge support rather than hard-coding
@@ -269,11 +372,23 @@ export class ViewerAdapter {
    * correct aspect) and re-applied standalone on any panel/resize change
    * (which reshapes/repositions the SAME already-framed view without moving
    * the camera).
+   *
+   * The same call is correct for the floor-plan mode's ORTHOGRAPHIC camera
+   * (task28 §4.3): `OrthographicCamera.updateProjectionMatrix` widens the
+   * horizontal frustum by exactly `width / fullWidth`, so a box that
+   * `fitToBox` sized against the full canvas width lands filling precisely
+   * the `leftWidth` visible region, centered on it — never clipped and never
+   * stretched, since `fullHeight === height` leaves the vertical mapping
+   * untouched. `OrthoPerspectiveCamera`'s own aspect handling re-applies the
+   * stored offset on every projection update, so it survives resizes.
    */
   private applyViewOffset(): void {
-    const cam = this.world?.camera.three as THREE.PerspectiveCamera | undefined;
+    const cam = this.world?.camera.three as
+      | (THREE.Camera & Partial<THREE.PerspectiveCamera> & Partial<THREE.OrthographicCamera>)
+      | undefined;
     const dom = this.rendererDom();
-    if (!cam || !cam.isPerspectiveCamera || !dom) return;
+    if (!cam || !(cam.isPerspectiveCamera || cam.isOrthographicCamera) || !dom) return;
+    if (!cam.setViewOffset || !cam.clearViewOffset) return;
     const canvasW = dom.clientWidth || 1;
     const canvasH = dom.clientHeight || 1;
     const minLeftWidth = canvasW * VIEWER_CAMERA.minEffectiveWidthFraction;
@@ -747,6 +862,12 @@ export class ViewerAdapter {
   }
 
   async unloadModel(): Promise<void> {
+    // Model unload / model switch returns the viewer to its normal 3D mode and
+    // disposes every plan resource (task28 §1.2). Plan state is never persisted.
+    await this.exitPlanMode();
+    this.sceneBands = [];
+    this.savedPose = null;
+    this.sizePolicySuspended = false;
     this.manual.clear();
     this.queryPrimary = [];
     this.queryPrimarySet = new Set();
@@ -822,6 +943,548 @@ export class ViewerAdapter {
     return this.basePlane !== null;
   }
 
+  /** The decorative grid is hidden while a plan is shown (task28 §4.2). */
+  private setBasePlaneVisible(visible: boolean): void {
+    if (this.basePlane) this.basePlane.visible = visible;
+  }
+
+  isBasePlaneVisible(): boolean {
+    return this.basePlane?.visible ?? false;
+  }
+
+  // -------------------------------------------------------------------------
+  // Floor-plan mode (task28 §3, §4)
+  // -------------------------------------------------------------------------
+
+  isPlanMode(): boolean {
+    return this.planBandIndex !== null;
+  }
+
+  getPlanBandIndex(): number | null {
+    return this.planBandIndex;
+  }
+
+  /** The active plan range in SCENE Y, for tests/diagnostics. */
+  getPlanRange(): { cut: number; lower: number } | null {
+    return this.planRange ? { ...this.planRange } : null;
+  }
+
+  /** Bands as mapped into this artifact's scene space, for tests/diagnostics. */
+  getSceneBands(): SceneBand[] {
+    return this.sceneBands.map((b) => ({ ...b }));
+  }
+
+  hasPlanSection(): boolean {
+    return this.planSection !== null;
+  }
+
+  /**
+   * Adopt the backend's logical floor contract and map each band into THIS
+   * artifact's scene space (task28 §3), returning what the floor buttons may
+   * offer.
+   *
+   * Scene heights are read from the loaded artifact only: each constituent
+   * storey's own `Elevation` attribute plus the model's public coordinate
+   * height — the same pair `Views.createFromIfcStoreys` adds — pushed through
+   * the model object's own world matrix so the result is comparable with
+   * `model.box`, which Fragments already reports in world space. The contract's
+   * stored `min_elevation`/`max_elevation` are never used as scene Y values, and
+   * no model-specific offset is introduced.
+   *
+   * A band whose storeys cannot resolve a finite scene elevation stays visible
+   * but disabled with a concise reason — never a guessed plane.
+   */
+  async setFloorContract(floors: FloorContractBand[]): Promise<FloorPlanState[]> {
+    this.sceneBands = [];
+    if (!this.model || floors.length === 0) {
+      return floors.map((f) => ({
+        bandIndex: f.band_index,
+        label: f.label,
+        enabled: false,
+        reason: "The 3D model is not ready yet.",
+      }));
+    }
+
+    const elevations = await this.readStoreySceneElevations(floors);
+    this.sceneBands = [...floors]
+      .sort((a, b) => a.band_index - b.band_index)
+      .map((band) => {
+        const ys = band.storey_global_ids
+          .map((gid) => elevations.get(gid))
+          .filter((y): y is number => typeof y === "number" && Number.isFinite(y));
+        return {
+          bandIndex: band.band_index,
+          label: band.label,
+          minSceneY: ys.length ? Math.min(...ys) : Number.NaN,
+          maxSceneY: ys.length ? Math.max(...ys) : Number.NaN,
+          // Every constituent storey must resolve; a partially resolved band
+          // would silently cut at the wrong height (task28 §3).
+          resolved: ys.length === band.storey_global_ids.length && ys.length > 0,
+        };
+      });
+
+    const min = this.modelMinSceneY();
+    return this.sceneBands.map((band) => ({
+      bandIndex: band.bandIndex,
+      label: band.label,
+      ...planAvailability(this.sceneBands, band.bandIndex, min),
+    }));
+  }
+
+  /**
+   * Artifact-native scene Y per storey GlobalId.
+   *
+   * Two bounded worker round trips for the whole contract (one id resolution,
+   * one attribute read) — never one per floor, and never a scan of the model.
+   */
+  private async readStoreySceneElevations(
+    floors: FloorContractBand[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!this.model) return out;
+    const gids = [...new Set(floors.flatMap((f) => f.storey_global_ids))];
+    if (gids.length === 0) return out;
+    try {
+      const localIds = await this.model.getLocalIdsByGuids(gids);
+      const known: { gid: string; localId: number }[] = [];
+      localIds.forEach((id, i) => {
+        if (typeof id === "number") known.push({ gid: gids[i]!, localId: id });
+      });
+      if (known.length === 0) return out;
+
+      const data = await this.model.getItemsData(
+        known.map((k) => k.localId),
+        { attributesDefault: false, attributes: ["Elevation"] },
+      );
+      const [, coordinateHeight] = await this.model.getCoordinates();
+      if (!Number.isFinite(coordinateHeight)) return out;
+
+      // The stored elevation + coordinate height is in the model object's LOCAL
+      // space; the model's own world matrix carries it into scene space.
+      const toScene = this.modelLocalToSceneY();
+      known.forEach((k, i) => {
+        const attr = data[i]?.Elevation as { value?: unknown } | undefined;
+        const raw = attr?.value;
+        if (typeof raw !== "number" || !Number.isFinite(raw)) return;
+        out.set(k.gid, toScene(storeyLocalY(raw, coordinateHeight)));
+      });
+    } catch {
+      // An unreadable artifact leaves every band unresolved, which disables the
+      // affected floors rather than placing a guessed plane.
+    }
+    return out;
+  }
+
+  /** Local -> scene Y through the loaded model object's own world matrix. */
+  private modelLocalToSceneY(): (localY: number) => number {
+    const object = this.model?.object;
+    if (!object) return (y) => y;
+    try {
+      object.updateWorldMatrix(true, false);
+      const matrix = object.matrixWorld;
+      const point = new THREE.Vector3();
+      return (localY: number) => point.set(0, localY, 0).applyMatrix4(matrix).y;
+    } catch {
+      return (y) => y;
+    }
+  }
+
+  /**
+   * The loaded model's finite geometric minimum in scene Y — the lowest logical
+   * band's lower boundary (task28 §3.2). Never a floor elevation.
+   */
+  private modelMinSceneY(): number {
+    try {
+      const box = this.model?.box;
+      if (box && !box.isEmpty() && Number.isFinite(box.min.y)) return box.min.y;
+    } catch {
+      // fall through
+    }
+    return Number.NaN;
+  }
+
+  /**
+   * Switch the existing viewer into a top-down orthographic plan of one logical
+   * floor (task28 §1.2).
+   *
+   * Same components, same world, same canvas, same Fragments model: only the
+   * camera in use and two clipping planes change. Selection, query roles, chat,
+   * and panels are untouched — this issues no query and calls no LLM.
+   */
+  async enterPlanMode(bandIndex: number): Promise<PlanModeResult> {
+    const world = this.world;
+    const components = this.components;
+    if (!world || !components || !this.model) {
+      return { ok: false, reason: "The 3D model is not ready yet." };
+    }
+
+    const range = resolvePlanRange(this.sceneBands, bandIndex, this.modelMinSceneY());
+    if (!range.ok) return { ok: false, reason: range.reason };
+
+    // Only the FIRST departure from 3D captures the pose to return to, so
+    // switching floor-to-floor never overwrites it (task28 §1.2).
+    if (this.planBandIndex === null) this.savePerspectivePose();
+
+    const token = ++this.planToken;
+    this.disposePlanSection();
+    this.closePlanView();
+
+    try {
+      const views = this.ensureViews(world);
+      const plane = new THREE.Plane(new THREE.Vector3(0, -1, 0), range.range.cut);
+      const view = views.createFromPlane(plane, { id: `floor-plan-${token}`, world });
+      // The View's far plane sits `range` below the cut, which is exactly the
+      // lower boundary this task requires — so lower floors cannot appear
+      // through openings (task28 §3.2).
+      view.range = range.range.cut - range.range.lower;
+      views.open(view.id);
+      this.planView = view;
+      this.planBandIndex = bandIndex;
+      this.planRange = { cut: range.range.cut, lower: range.range.lower };
+    } catch {
+      this.closePlanView();
+      this.planBandIndex = null;
+      this.planRange = null;
+      return { ok: false, reason: "This floor plan could not be opened for this model." };
+    }
+
+    this.configurePlanControls(this.planView.camera);
+    // Fragments' own LOD/culling must follow the camera actually rendering.
+    try {
+      this.model.useCamera(this.planView.camera.three as THREE.PerspectiveCamera);
+    } catch {
+      // best-effort; a stale LOD camera degrades detail, never correctness
+    }
+    this.setBasePlaneVisible(false);
+    await this.suspendSizePolicy();
+    this.applyViewOffset();
+    await this.fitPlanFootprint(range.range);
+    await this.updateFragments();
+
+    // Contours are requested for the ACTIVE floor only, never precomputed for
+    // every floor at load, and a stale result can never replace a newer one.
+    const contoured = await this.buildPlanSection(this.planView.plane, token);
+    if (!contoured && token === this.planToken) {
+      return {
+        ok: true,
+        reason: "Cut outlines aren't available for this floor; showing the clipped model.",
+      };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Return to the normal perspective 3D view (task28 §1.2).
+   *
+   * Removes both clipping boundaries and every plan-only overlay, then restores
+   * the exact pose and target that existed before plan mode. Remains available
+   * even after a plan-rendering failure (task28 §6).
+   */
+  async exitPlanMode(): Promise<void> {
+    const wasPlan = this.planBandIndex !== null || this.planView !== null;
+    this.planToken++; // retire any in-flight section for the outgoing floor
+    this.disposePlanSection();
+    this.closePlanView();
+    this.planBandIndex = null;
+    this.planRange = null;
+    if (!wasPlan) return;
+
+    // Fragments LOD follows the perspective camera again.
+    try {
+      const cam = this.world?.camera.three;
+      if (cam) this.model?.useCamera(cam as THREE.PerspectiveCamera);
+    } catch {
+      // best-effort
+    }
+    this.setBasePlaneVisible(true);
+    // 50 mm lens, desktop control mapping, and panel-aware centering are
+    // re-asserted on the restored perspective camera before the pose, so the
+    // projection is already correct when the camera lands.
+    this.applyLens();
+    this.configureControls();
+    this.applyViewOffset();
+    this.restorePerspectivePose();
+    await this.resumeSizePolicy();
+    await this.updateFragments();
+  }
+
+  private ensureViews(world: ViewerWorld): OBC.Views {
+    if (!this.views) {
+      const views = this.components!.get(OBC.Views);
+      // This adapter saves and restores the pose itself, so the component's own
+      // camera snapshot is turned off rather than left to fight with it.
+      views.restoreCameraOnClose = false;
+      this.views = views;
+    }
+    this.views.world = world;
+    return this.views;
+  }
+
+  private closePlanView(): void {
+    const view = this.planView;
+    this.planView = null;
+    if (!view || !this.views) return;
+    try {
+      // Deleting the entry closes it if open and disposes its camera, helpers,
+      // and clipping planes — the component's documented lifecycle.
+      this.views.list.delete(view.id);
+    } catch {
+      try {
+        this.views.close(view.id);
+      } catch {
+        // never fail a return to 3D over cleanup
+      }
+    }
+  }
+
+  private savePerspectivePose(): void {
+    const controls = this.world?.camera.controls;
+    if (!controls) return;
+    try {
+      const position = new THREE.Vector3();
+      const target = new THREE.Vector3();
+      controls.getPosition(position);
+      controls.getTarget(target);
+      this.savedPose = { position, target };
+    } catch {
+      this.savedPose = null;
+    }
+  }
+
+  private restorePerspectivePose(): void {
+    const pose = this.savedPose;
+    this.savedPose = null;
+    const controls = this.world?.camera.controls;
+    if (!pose || !controls) return;
+    try {
+      const { position: p, target: t } = pose;
+      controls.setLookAt(p.x, p.y, p.z, t.x, t.y, t.z, false);
+    } catch {
+      // a failed restore must never block the return to 3D
+    }
+  }
+
+  /** The saved perspective pose, for tests (task28 §8.2). Cloned — a caller
+   *  must not be able to mutate the pose the viewer will restore. */
+  getSavedPose(): { position: THREE.Vector3; target: THREE.Vector3 } | null {
+    if (!this.savedPose) return null;
+    return {
+      position: this.savedPose.position.clone(),
+      target: this.savedPose.target.clone(),
+    };
+  }
+
+  /**
+   * Frame the model footprint, clipped to the active range, inside the currently
+   * unobstructed viewer region — the same `fitBox` path (and therefore the same
+   * view-offset centering) every other fit uses.
+   */
+  private async fitPlanFootprint(range: { cut: number; lower: number }): Promise<void> {
+    const box = this.model?.box;
+    if (!box || box.isEmpty()) return;
+    const footprint = box.clone();
+    footprint.min.y = Math.max(footprint.min.y, range.lower);
+    footprint.max.y = Math.min(footprint.max.y, range.cut);
+    if (footprint.min.y > footprint.max.y) {
+      footprint.min.y = range.lower;
+      footprint.max.y = range.cut;
+    }
+    await this.fitBox(footprint);
+  }
+
+  /**
+   * Real cut geometry at the upper plane, via the loaded model's public
+   * `getSection` (task28 §4.2).
+   *
+   * The heavy work happens in the existing Fragments worker, for the ACTIVE
+   * floor only. Nothing is fabricated: no door swings, no window/furniture/
+   * stair symbols, no room tags, dimensions, annotations, north arrows, or
+   * scale bars — only the intersection of the plane with geometry the prepared
+   * artifact actually contains.
+   *
+   * Two layers when a query highlight is active, so the established semantic
+   * roles survive into the plan (task28 §4.2, §5): the base cut in plan ink,
+   * then the query-primary cut in the existing blueprint blue drawn over it.
+   * With no highlight it is a single base layer and a single worker call.
+   *
+   * The plane is transformed into the model object's local space before the
+   * call (and the results mounted UNDER that object) because `getSection`
+   * computes and returns geometry in the model's own space, exactly as
+   * Fragments does for its own clipping planes.
+   */
+  private async buildPlanSection(worldPlane: THREE.Plane, token: number): Promise<boolean> {
+    const model = this.model;
+    if (!model) return false;
+    try {
+      const inverse = new THREE.Matrix4().copy(model.object.matrixWorld).invert();
+      const localPlane = worldPlane.clone().applyMatrix4(inverse);
+
+      const group = new THREE.Group();
+      // Off the plane that produced it, so the GPU's coplanar clip test cannot
+      // stipple the contour away (see PLAN.cutInsetM).
+      group.position.y = -PLAN.cutInsetM;
+
+      const base = await this.sectionLayer(localPlane, undefined, {
+        color: PLAN_CUT_COLOR,
+        contourOpacity: PLAN_CUT_OPACITY,
+        fillColor: PLAN_FILL_COLOR,
+        fillOpacity: PLAN_FILL_OPACITY,
+        fillRenderOrder: PLAN.baseFillRenderOrder,
+        contourRenderOrder: PLAN.baseContourRenderOrder,
+      });
+      if (token !== this.planToken) {
+        base.forEach(disposeDrawable);
+        return false;
+      }
+      base.forEach((object) => group.add(object));
+
+      if (this.rolesActive && this.queryPrimary.length > 0) {
+        const primary = await this.sectionLayer(localPlane, this.queryPrimary, {
+          color: PRIMARY_MATERIAL.color as THREE.Color,
+          contourOpacity: 1,
+          fillColor: PRIMARY_MATERIAL.color as THREE.Color,
+          fillOpacity: PLAN_FILL_OPACITY,
+          fillRenderOrder: PLAN.primaryFillRenderOrder,
+          contourRenderOrder: PLAN.primaryContourRenderOrder,
+        });
+        if (token !== this.planToken) {
+          base.forEach(disposeDrawable);
+          primary.forEach(disposeDrawable);
+          return false;
+        }
+        primary.forEach((object) => group.add(object));
+      }
+
+      if (group.children.length === 0) return false;
+      if (token !== this.planToken) {
+        group.children.slice().forEach(disposeDrawable);
+        return false;
+      }
+      model.object.add(group);
+      this.planSection = { group };
+      return true;
+    } catch {
+      // Section generation is a visual layer: on failure the truthful clipped
+      // orthographic view remains, and no other floor's contours are shown.
+      return false;
+    }
+  }
+
+  /** One `getSection` call turned into a contour + fill pair, or an empty list. */
+  private async sectionLayer(
+    localPlane: THREE.Plane,
+    localIds: number[] | undefined,
+    style: {
+      color: THREE.Color;
+      contourOpacity: number;
+      fillColor: THREE.Color;
+      fillOpacity: number;
+      fillRenderOrder: number;
+      contourRenderOrder: number;
+    },
+  ): Promise<THREE.Object3D[]> {
+    const model = this.model;
+    if (!model) return [];
+    const section = await model.getSection(localPlane, localIds);
+    const vertexCount = section?.index ?? 0;
+    if (!section?.buffer || vertexCount <= 0) return [];
+
+    // Copy out of the worker's fixed 600k-float scratch buffer so the overlay
+    // retains only the vertices it actually uses (task28 §4.3).
+    const positions = new Float32Array(section.buffer.subarray(0, vertexCount * 3));
+    const out: THREE.Object3D[] = [];
+
+    const indices = section.fillsIndices ?? [];
+    if (indices.length >= 3) {
+      const fillGeometry = new THREE.BufferGeometry();
+      fillGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      fillGeometry.setIndex(indices);
+      const fill = new THREE.Mesh(
+        fillGeometry,
+        new THREE.MeshBasicMaterial({
+          color: style.fillColor.clone(),
+          opacity: style.fillOpacity,
+          transparent: true,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      fill.frustumCulled = false;
+      fill.renderOrder = style.fillRenderOrder;
+      out.push(fill);
+    }
+
+    const contourGeometry = new THREE.BufferGeometry();
+    contourGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const contour = new THREE.LineSegments(
+      contourGeometry,
+      new THREE.LineBasicMaterial({
+        color: style.color.clone(),
+        opacity: style.contourOpacity,
+        transparent: style.contourOpacity < 1,
+        depthWrite: false,
+      }),
+    );
+    contour.frustumCulled = false;
+    contour.renderOrder = style.contourRenderOrder;
+    out.push(contour);
+    return out;
+  }
+
+  /**
+   * Rebuild the active floor's cut layers after a highlight change, so query
+   * and selection roles stay synchronized while plan mode is active (task28
+   * §1.3). A no-op outside plan mode.
+   */
+  private async refreshPlanSection(): Promise<void> {
+    const view = this.planView;
+    if (!view || this.planBandIndex === null) return;
+    const token = ++this.planToken;
+    this.disposePlanSection();
+    await this.buildPlanSection(view.plane, token);
+  }
+
+  private disposePlanSection(): void {
+    const section = this.planSection;
+    this.planSection = null;
+    if (!section) return;
+    try {
+      section.group.children.slice().forEach(disposeDrawable);
+      section.group.removeFromParent();
+    } catch {
+      // never fail a floor switch or a return to 3D over cleanup
+    }
+  }
+
+  /**
+   * Suspend the perspective-only projected-size policy and make every object it
+   * hid visible again, so the plan is not missing geometry (task28 §4.3).
+   */
+  private async suspendSizePolicy(): Promise<void> {
+    if (this.sizePolicySuspended) return;
+    this.sizePolicySuspended = true;
+    if (!this.sizePolicyActive || !this.model) return;
+    const restore = this.sizePolicy.restoreAll();
+    if (restore.length === 0) return;
+    try {
+      await asPolicyModel(this.model).setVisible(restore, true);
+      this.recolorEdges();
+    } catch {
+      // visibility failures must never crash the viewer
+    }
+  }
+
+  /** Re-evaluate the policy against the restored perspective camera. */
+  private async resumeSizePolicy(): Promise<void> {
+    if (!this.sizePolicySuspended) return;
+    this.sizePolicySuspended = false;
+    await this.applyProjectedSizePolicy();
+  }
+
+  isSizePolicySuspended(): boolean {
+    return this.sizePolicySuspended;
+  }
+
   // -------------------------------------------------------------------------
   // Projected-size policy (task23 issue 2)
   // -------------------------------------------------------------------------
@@ -851,6 +1514,12 @@ export class ViewerAdapter {
    */
   private async applyProjectedSizePolicy(): Promise<void> {
     if (!this.sizePolicyActive || !this.model || !this.world) return;
+    // Suspended for floor-plan mode (task28 §4.3): the projected-size rule is
+    // derived from a perspective FOV and must never run against an orthographic
+    // camera as though it were perspective. `enterPlanMode` restored every
+    // hidden object so nothing is missing from the plan, and `exitPlanMode`
+    // re-evaluates against the restored perspective camera.
+    if (this.sizePolicySuspended) return;
     const camera = this.world.camera.three as THREE.PerspectiveCamera;
     if (!camera?.isPerspectiveCamera) return;
     const dom = this.rendererDom();
@@ -1047,6 +1716,10 @@ export class ViewerAdapter {
       // clearing the highlight must immediately reapply its size/category state
       // (task23 issue 2). Runs before the single Fragments refresh below.
       await this.applyProjectedSizePolicy();
+      // While a plan is shown, the cut layers carry the same roles, so they are
+      // rebuilt for the new highlight rather than left describing the previous
+      // one (task28 §1.3). Never returns to perspective mode.
+      if (this.isPlanMode()) await this.refreshPlanSection();
       await this.updateFragments();
     } catch {
       // a highlight failure must never crash the viewer (spec_v006 §11.3, §15)
@@ -1165,6 +1838,17 @@ export class ViewerAdapter {
       }
     });
     this.disposers = [];
+    // Plan-only cameras, clipping planes, section meshes, and materials go with
+    // the rest of the imperative layer (task28 §4.3).
+    this.planToken++;
+    this.disposePlanSection();
+    this.closePlanView();
+    this.planBandIndex = null;
+    this.planRange = null;
+    this.sceneBands = [];
+    this.savedPose = null;
+    this.sizePolicySuspended = false;
+    this.views = null;
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
     this.removeBasePlane();

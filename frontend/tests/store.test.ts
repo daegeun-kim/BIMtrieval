@@ -54,3 +54,82 @@ describe("store", () => {
     expect(useStore.getState().activeModelId).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Floor-plan state (task28 §6): current-session only and serializable — no
+// camera pose, clipping plane, or section object ever lands in the store.
+// ---------------------------------------------------------------------------
+
+const OPTION = {
+  bandIndex: 0,
+  label: "Floor 1",
+  enabled: true,
+  reason: null,
+  storeyNames: ["01 begane grond"],
+};
+
+describe("floor-plan store state (task28 §6)", () => {
+  beforeEach(() => {
+    useStore.getState().clearFloors();
+  });
+
+  it("starts in 3D with no floors", () => {
+    const s = useStore.getState();
+    expect(s.floorMode).toBe("3d");
+    expect(s.floorBandIndex).toBeNull();
+    expect(s.floorOptions).toEqual([]);
+    expect(s.floorsAvailable).toBe(false);
+  });
+
+  it("holds only the four documented pieces of plan state", () => {
+    const s = useStore.getState();
+    s.setFloorOptions(2, [OPTION], true);
+    s.setFloorMode("plan", 0);
+    const after = useStore.getState();
+    expect(after.floorMode).toBe("plan");
+    expect(after.floorModelId).toBe(2);
+    expect(after.floorBandIndex).toBe(0);
+    expect(after.floorsLoading).toBe(false);
+    // No imperative viewer object leaked into the serializable store.
+    expect(JSON.stringify(after.floorOptions)).toBe(JSON.stringify([OPTION]));
+  });
+
+  it("returning to 3D always clears the active band", () => {
+    const s = useStore.getState();
+    s.setFloorOptions(2, [OPTION], true);
+    s.setFloorMode("plan", 0);
+    s.setFloorMode("3d", 0);
+    expect(useStore.getState().floorBandIndex).toBeNull();
+  });
+
+  it("a new contract replaces the previous model's floors outright", () => {
+    const s = useStore.getState();
+    s.setFloorOptions(2, [OPTION], true);
+    s.setFloorMode("plan", 0);
+    s.setFloorsLoading(5);
+    const after = useStore.getState();
+    expect(after.floorModelId).toBe(5);
+    expect(after.floorOptions).toEqual([]);
+    expect(after.floorMode).toBe("3d");
+    expect(after.floorBandIndex).toBeNull();
+    expect(after.floorsLoading).toBe(true);
+  });
+
+  it("disabling one floor leaves every other floor alone", () => {
+    const s = useStore.getState();
+    s.setFloorOptions(2, [OPTION, { ...OPTION, bandIndex: 1, label: "Floor 2" }], true);
+    s.setFloorOptionDisabled(1, "not locatable");
+    const options = useStore.getState().floorOptions;
+    expect(options[0]!.enabled).toBe(true);
+    expect(options[1]!.enabled).toBe(false);
+    expect(options[1]!.reason).toBe("not locatable");
+  });
+
+  it("never writes plan state to session or local storage", () => {
+    const s = useStore.getState();
+    s.setFloorOptions(2, [OPTION], true);
+    s.setFloorMode("plan", 0);
+    const keys = [...Object.keys(sessionStorage), ...Object.keys(localStorage)];
+    expect(keys.filter((k) => /floor|plan/i.test(k))).toEqual([]);
+  });
+});

@@ -44,3 +44,13 @@ class UnsupportedFilterOperatorError(PlanValidationError):
 
 class UnknownEntityOrRelationshipError(PlanValidationError):
     """A plan referenced an entity_id/relationship_id/global_id that does not exist."""
+
+
+class UnitNotAvailableError(UnsupportedOperationError):
+    """The requested calculation cannot be made in the requested unit (task27 §4.3).
+
+    Raised when a field's values are not all on one scale, when the model gives
+    them no known unit, or when the caller asked for a unit the values are not
+    recorded in. Nothing is converted, so refusing is the only honest outcome —
+    the message states which unit the model actually uses.
+    """

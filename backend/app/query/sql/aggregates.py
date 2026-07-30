@@ -1,9 +1,14 @@
-"""Coverage-aware exact aggregation (spec_v003 §10, spec_v002 §9.2).
+"""Coverage-aware exact aggregation (spec_v003 §10, spec_v002 §9.2, task27 §4.3).
 
-Only aggregates numeric values whose semantic field and normalized unit are
-known, over the full matching set (not a sample). Reports missing coverage
-explicitly rather than implying completeness — "42% average X (based on 12
-of 50 matching entities)" not a silently-partial average presented as whole.
+Aggregates the RAW stored numbers over the full matching set (not a sample), and
+reports the unit those numbers are already in. Nothing is converted: the caller
+establishes that the field has one uniform effective IFC unit before calling,
+and that unit travels back on the result so an answer can never state a figure
+without the unit it was measured in.
+
+Missing coverage is reported explicitly rather than implying completeness —
+"42% average X (based on 12 of 50 matching entities)", not a silently-partial
+average presented as whole.
 """
 
 from __future__ import annotations
@@ -25,6 +30,9 @@ class AggregateResult:
     value: float | int | None
     matched_count: int
     coverage_count: int
+    #: The effective IFC unit the aggregated values are recorded in. None for
+    #: `count` and for non-dimensional numbers, which have no unit at all.
+    unit: str | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -41,8 +49,14 @@ def compute_aggregate(
     base_where: sa.ColumnElement,
     function: str,
     resolved_field: ResolvedField | None,
-    unit: str | None,
+    unit: str | None = None,
 ) -> AggregateResult:
+    """`sum`/`min`/`max`/`average` over the raw stored values, plus their unit.
+
+    `unit` is the field's EFFECTIVE IFC unit, established by the caller from the
+    semantic manifest. It is carried through to the result and never used to
+    scale a value.
+    """
     matched_count = session.execute(
         sa.select(sa.func.count()).select_from(entities_table).where(base_where)
     ).scalar_one()
@@ -56,7 +70,7 @@ def compute_aggregate(
         )
 
     assert resolved_field is not None
-    numeric_expr = resolved_numeric_expr(resolved_field, entities_table, unit)
+    numeric_expr = resolved_numeric_expr(resolved_field, entities_table)
     agg_func = _AGG_FUNCS[function]
 
     row = session.execute(
@@ -76,6 +90,7 @@ def compute_aggregate(
         value=float(value) if value is not None else None,
         matched_count=matched_count,
         coverage_count=coverage_count,
+        unit=unit,
         warnings=warnings,
     )
 
@@ -87,7 +102,6 @@ def compute_group_by(
     group_field: ResolvedField,
     function: str,
     agg_field: ResolvedField | None,
-    unit: str | None,
     limit: int,
 ) -> list[GroupBucket]:
     key_expr = resolved_text_expr(group_field, entities_table)
@@ -105,7 +119,7 @@ def compute_group_by(
         return [GroupBucket(key=r.key, value=r.cnt, count=r.cnt) for r in rows]
 
     assert agg_field is not None
-    numeric_expr = resolved_numeric_expr(agg_field, entities_table, unit)
+    numeric_expr = resolved_numeric_expr(agg_field, entities_table)
     agg_func = _AGG_FUNCS[function]
     stmt = (
         sa.select(

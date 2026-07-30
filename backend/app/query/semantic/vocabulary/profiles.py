@@ -128,17 +128,19 @@ class QuantityCoverageProfile:
     field_name: str
     populated_count: int
     total_count: int
-    unit_available: bool
 
     @property
     def missing_count(self) -> int:
         return max(0, self.total_count - self.populated_count)
 
     def profile_text(self) -> str:
+        # Deliberately no unit claim. Measure type and unit state are facts of
+        # the semantic manifest (task27 §3), which reads the IFC's own unit
+        # registry; asserting them here from a JSON key's presence was the
+        # second, competing unit path §4.3 forbids.
         return (
             f"{self.ifc_class} quantity {self.set_name}.{self.field_name}: "
-            f"{self.populated_count} populated / {self.missing_count} missing "
-            f"(unit {'available' if self.unit_available else 'unavailable'})."
+            f"{self.populated_count} populated / {self.missing_count} missing."
         )
 
     def excerpt(self, max_chars: int) -> str:

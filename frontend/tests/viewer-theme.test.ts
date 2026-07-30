@@ -8,6 +8,7 @@ import {
   DIM_MATERIAL,
   EDGES,
   MANUAL_MATERIAL,
+  PLAN,
   PRIMARY_MATERIAL,
   VIEWER_CAMERA,
   VIEWER_COLORS,
@@ -145,5 +146,55 @@ describe("50 mm full-frame camera math", () => {
   it("bounds zoom-out at ~3x the model diagonal", () => {
     expect(VIEWER_CAMERA.maxDistanceDiagonalFactor).toBe(3);
     expect(VIEWER_CAMERA.minMaxDistance).toBeGreaterThan(0);
+  });
+});
+
+describe("floor-plan cut hierarchy (task28 §4.2)", () => {
+  it("makes the cut contour the darkest ink in the viewer", () => {
+    const cut = lightness(VIEWER_COLORS.planCut);
+    for (const role of ["roof", "wall", "other", "dim", "context", "plane"] as const) {
+      expect(cut).toBeLessThan(lightness(VIEWER_COLORS[role]));
+    }
+    // Darker than any base edge, which is a base colour multiplied by `darken`.
+    expect(cut).toBeLessThan(lightness(VIEWER_COLORS.roof) * EDGES.darken);
+  });
+
+  it("keeps the cut fill restrained relative to its own contour", () => {
+    expect(lightness(VIEWER_COLORS.planFill)).toBeGreaterThan(lightness(VIEWER_COLORS.planCut));
+    expect(VIEWER_OPACITY.planCut).toBe(1);
+    expect(VIEWER_OPACITY.planFill).toBeLessThan(1);
+    expect(VIEWER_OPACITY.planFill).toBeGreaterThan(0);
+  });
+
+  it("draws every cut layer above the base and highlight edge overlays", () => {
+    // Base edge chunks render at 1 and the highlight overlay at 2 (task20 §2).
+    for (const order of [
+      PLAN.baseFillRenderOrder,
+      PLAN.baseContourRenderOrder,
+      PLAN.primaryFillRenderOrder,
+      PLAN.primaryContourRenderOrder,
+    ]) {
+      expect(order).toBeGreaterThan(2);
+    }
+    // A contour always outranks the fill it outlines, and query-primary cut
+    // geometry outranks the base cut it sits on.
+    expect(PLAN.baseContourRenderOrder).toBeGreaterThan(PLAN.baseFillRenderOrder);
+    expect(PLAN.primaryContourRenderOrder).toBeGreaterThan(PLAN.primaryFillRenderOrder);
+    expect(PLAN.primaryFillRenderOrder).toBeGreaterThan(PLAN.baseContourRenderOrder);
+  });
+
+  it("declares the nominal 1.2 m cut and a scale-free plane tolerance", () => {
+    expect(PLAN.cutOffsetM).toBe(1.2);
+    expect(PLAN.toleranceUlps).toBeGreaterThan(0);
+    // The coplanar-render inset is imperceptible at any plan zoom.
+    expect(PLAN.cutInsetM).toBeGreaterThan(0);
+    expect(PLAN.cutInsetM).toBeLessThan(0.01);
+  });
+
+  it("reuses the existing semantic roles rather than inventing plan colours", () => {
+    // Query-primary cut geometry uses the established blueprint blue, and
+    // manual selection keeps its own existing colour (task28 §5).
+    expect(PRIMARY_MATERIAL.color).toEqual(new THREE.Color(VIEWER_COLORS.primary));
+    expect(MANUAL_MATERIAL.color).toEqual(new THREE.Color(VIEWER_COLORS.manual));
   });
 });

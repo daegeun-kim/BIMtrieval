@@ -82,7 +82,6 @@ def vocab() -> ModelVocabulary:
             field_name="GrossArea",
             populated_count=30,
             total_count=50,
-            unit_available=True,
         )
     ]
     return v
@@ -130,10 +129,18 @@ def test_coverage_counts_are_recorded(index):
     assert fire.coverage_ratio == pytest.approx(0.4)
 
 
-def test_quantity_fields_are_numeric_and_carry_unit_availability(index):
+def test_quantity_fields_are_numeric_and_claim_no_unit_without_a_manifest(index):
+    """Unit facts come from the semantic manifest, never from the vocabulary.
+
+    This index is built with no session, so no manifest is readable. The field
+    must still be queryable as a number, but it must NOT claim a unit it has no
+    authority for — that assumption is what let a millimetre comparison run
+    against values recorded in feet (task27 §4.2, §4.3).
+    """
     area = _find(index, "quantity", "Qto_SlabBaseQuantities", "GrossArea")
     assert area.data_type == "number"
-    assert area.unit_available is True
+    assert area.measure_type is None
+    assert area.unit_available is False
     assert area.populated_count == 30 and area.total_count == 50
 
 
