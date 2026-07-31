@@ -273,6 +273,11 @@ export interface components {
             aggregate?: components["schemas"]["ExplanationAggregate"] | null;
             /** Relationship Endpoint Total */
             relationship_endpoint_total?: number | null;
+            graph?: components["schemas"]["ExplanationGraph"] | null;
+            /** Presentation Fallback Reason */
+            presentation_fallback_reason?: string | null;
+            /** Chart Unit */
+            chart_unit?: string | null;
             /** Limitation */
             limitation?: string | null;
             /** Known Parts */
@@ -422,6 +427,134 @@ export interface components {
             value?: number | null;
         };
         /**
+         * ExplanationGraph
+         * @description The bounded grouped topology of an accepted relationship traversal.
+         *
+         *     Present only when the grouped graph is complete and within the exact bounds
+         *     of task29 §5.3 (4-24 nodes, <= 40 edges, every edge authoritative). Carries
+         *     no internal database ids, raw relationship-member rows, canonical JSON, SQL,
+         *     predicates or unbounded paths.
+         */
+        ExplanationGraph: {
+            /** Nodes */
+            nodes?: components["schemas"]["ExplanationGraphNode"][];
+            /** Edges */
+            edges?: components["schemas"]["ExplanationGraphEdge"][];
+            /**
+             * Node Count
+             * @default 0
+             */
+            node_count?: number;
+            /**
+             * Edge Count
+             * @default 0
+             */
+            edge_count?: number;
+            /**
+             * Description
+             * @default
+             */
+            description?: string;
+        };
+        /**
+         * ExplanationGraphEdge
+         * @description One grouped edge of the relationship diagram (task29 §5.2).
+         *
+         *     Raw hops collapse into a single edge when they connect the same node pair
+         *     through the same relationship class, semantic role and endpoint-role pair.
+         *     `connection_count` is the number of DISTINCT stored connections represented.
+         *
+         *     Direction follows the recorded IFC roles — `source` is always the relating
+         *     side and `target` the related side — so the same stored connection
+         *     discovered from the opposite traversal direction is the same edge, not a
+         *     second one.
+         */
+        ExplanationGraphEdge: {
+            /** Id */
+            id: string;
+            /** Source Node Id */
+            source_node_id: string;
+            /** Target Node Id */
+            target_node_id: string;
+            /** Relationship Class */
+            relationship_class: string;
+            /** Semantic Role */
+            semantic_role: string;
+            /**
+             * Schema Direction
+             * @default relating_to_related
+             */
+            schema_direction?: string;
+            /** Source Role */
+            source_role: string;
+            /** Target Role */
+            target_role: string;
+            /**
+             * Connection Count
+             * @default 0
+             */
+            connection_count?: number;
+            /** Label */
+            label: string;
+        };
+        /**
+         * ExplanationGraphNode
+         * @description One grouped node of the relationship diagram (task29 §5.2).
+         *
+         *     Endpoint occurrences are grouped by the exact structural key
+         *     `IFC entity class + relationship class + endpoint role`, so entities of the
+         *     same class participating through the same relationship structure collapse
+         *     into one node. `entity_count` is the number of DISTINCT underlying entities
+         *     the node represents.
+         *
+         *     Node identity sets may **overlap**: the same physical entity appears in more
+         *     than one node when it participates through a different relationship class,
+         *     direction or endpoint role. They are therefore not a partition, and
+         *     selecting one never implies the others form a disjoint remainder.
+         */
+        ExplanationGraphNode: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            role: components["schemas"]["ExplanationGraphNodeRole"];
+            /** Ifc Class */
+            ifc_class?: string | null;
+            /** Relationship Class */
+            relationship_class?: string | null;
+            /** Semantic Role */
+            semantic_role?: string | null;
+            /** Endpoint Role */
+            endpoint_role?: string | null;
+            /**
+             * Entity Count
+             * @default 0
+             */
+            entity_count?: number;
+            /** Global Ids */
+            global_ids?: string[];
+            /**
+             * Global Ids Truncated
+             * @default false
+             */
+            global_ids_truncated?: boolean;
+            /**
+             * Selectable
+             * @default false
+             */
+            selectable?: boolean;
+        };
+        /**
+         * ExplanationGraphNodeRole
+         * @description Whether a presentation node is the query subject or a reached endpoint.
+         *
+         *     The seed/subject is always its own node and is never merged into an endpoint
+         *     group (task29 §5.2), so the two are distinguishable without the frontend
+         *     re-deriving anything.
+         * @enum {string}
+         */
+        ExplanationGraphNodeRole: "seed" | "endpoint";
+        /**
          * ExplanationGroup
          * @description A selectable subgroup of the highlighted set, backed by real identities.
          *
@@ -452,13 +585,24 @@ export interface components {
         };
         /**
          * ExplanationPresentation
-         * @description Which visualization the already-computed result supports (task26 §4.1).
+         * @description Which visualization the already-computed result supports (task29 §2.1).
          *
-         *     Derived deterministically from the authoritative operation and status — the
+         *     Derived deterministically from the authoritative operation and data — the
          *     frontend does not guess, and the choice cannot drift between the two.
+         *
+         *     Task 29 narrowed the panel to three presentation families: a bounded
+         *     scrollable table, a compact horizontal bar chart, and a grouped node-link
+         *     diagram. A result whose operation supports none of them gets **no payload**
+         *     at all rather than a decorative card, so the values below are the complete
+         *     set the selector may choose.
+         *
+         *     The Task 26 values are retained so an older client that still switches on
+         *     them keeps parsing the contract, but `presentation.py` never emits them:
+         *     the standalone metric, aggregate, relationship-metric and partial-split
+         *     visuals were removed (task29 §2.1).
          * @enum {string}
          */
-        ExplanationPresentation: "metric" | "table" | "distribution" | "aggregate" | "relationship" | "partial";
+        ExplanationPresentation: "result_table" | "group_table" | "comparison_table" | "relationship_table" | "bar_chart" | "relationship_graph" | "metric" | "table" | "distribution" | "aggregate" | "relationship" | "partial";
         /**
          * ExplanationRow
          * @description One already-retrieved example/endpoint object, for a bounded table.

@@ -93,6 +93,15 @@ def _expand(
                 m_from.c.entity_id.label("from_entity_id"),
                 m_to.c.entity_id.label("to_entity_id"),
                 m_to.c.endpoint_global_id.label("to_global_id"),
+                # Presentation-only columns off the SAME two joined member rows
+                # (task29 §5.1). Additive projection: the joins, filters,
+                # frontier, depth, direction, allowed classes, statement count
+                # and reached endpoint set are all untouched.
+                m_from.c.role.label("from_role"),
+                m_to.c.role.label("to_role"),
+                m_from.c.endpoint_global_id.label("from_global_id"),
+                m_from.c.endpoint_ifc_class.label("from_ifc_class"),
+                m_to.c.endpoint_ifc_class.label("to_ifc_class"),
             )
             .select_from(
                 m_from.join(_RT, _RT.c.id == m_from.c.relationship_id).join(
@@ -120,6 +129,12 @@ def _expand(
                     from_entity_id=row.from_entity_id,
                     to_entity_id=row.to_entity_id,
                     to_entity_global_id=row.to_global_id,
+                    from_role=row.from_role,
+                    to_role=row.to_role,
+                    from_entity_global_id=row.from_global_id,
+                    from_entity_ifc_class=row.from_ifc_class,
+                    to_entity_ifc_class=row.to_ifc_class,
+                    traversal_direction=direction,
                 )
             )
             visited_relationships.add(row.relationship_id)

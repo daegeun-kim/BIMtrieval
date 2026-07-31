@@ -1,6 +1,11 @@
-// The Query Explanation card: presentation choice, the persistent information
-// region, group selection, and the fixed stacked layout (tasks/task26.md §3,
-// §4, §5, §7).
+// The Query Explanation card: presentation rendering, the persistent
+// information region, subgroup selection, and the fixed stacked layout
+// (tasks/task29.md §3, §4, §6, §7; tasks/task26.md §3, §4, §5).
+//
+// The card renders only what the backend declared. Task 29 left it three
+// families — bounded table, horizontal bars, grouped diagram — and removed the
+// metric, aggregate and partial-split visuals, so a payload never arrives for a
+// scalar answer at all (see `explanation-gate.test.tsx` for that half).
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,7 +37,7 @@ function explanation(partial: Partial<AnswerExplanation> = {}): AnswerExplanatio
     request_label: "external doors on floor 3",
     operation: "count",
     result_status: "exact",
-    presentation: "metric",
+    presentation: "result_table",
     answer_basis: "exact_sql",
     interpretation: "doors whose storey is the third elevation band",
     retrieval_modes: ["sql"],
@@ -41,6 +46,9 @@ function explanation(partial: Partial<AnswerExplanation> = {}): AnswerExplanatio
     distribution: [],
     aggregate: null,
     relationship_endpoint_total: null,
+    graph: null,
+    presentation_fallback_reason: null,
+    chart_unit: null,
     limitation: null,
     known_parts: [],
     unknown_parts: [],
@@ -53,7 +61,10 @@ function explanation(partial: Partial<AnswerExplanation> = {}): AnswerExplanatio
       { key: "IfcWindow", label: "IfcWindow", exact_count: 4, shown_count: 4, truncated: false,
         global_ids: ["W1", "W2", "W3", "W4"] },
     ],
-    rows: [],
+    rows: [
+      { global_id: "D1", ifc_class: "IfcDoor", name: "Door A", storey_name: "Floor 3" },
+      { global_id: "D2", ifc_class: "IfcDoor", name: null, storey_name: null },
+    ],
     ...partial,
   } as AnswerExplanation;
 }
@@ -73,84 +84,138 @@ beforeEach(() => {
   });
 });
 
-describe("presentation selection (§4.1)", () => {
-  it("count renders a headline metric", () => {
-    mount({ presentation: "metric", operation: "count" });
-    expect(screen.getByTestId("ex-metric")).toHaveTextContent("9");
-  });
-
-  it("list renders a bounded result table", () => {
-    mount({
-      presentation: "table",
-      operation: "list",
-      rows: [
-        { global_id: "D1", ifc_class: "IfcDoor", name: "Door A", storey_name: "Floor 3" },
-        { global_id: "D2", ifc_class: "IfcDoor", name: null, storey_name: null },
-      ],
-      true_result_count: 9,
-    });
+describe("table presentations (§3)", () => {
+  it.each(["count", "list"])("%s renders a bounded scrollable result table", (operation) => {
+    mount({ operation, presentation: "result_table", true_result_count: 9 });
     const table = screen.getByRole("table");
     expect(within(table).getByText("Door A")).toBeInTheDocument();
+    // GlobalId is the final identity fallback.
     expect(within(table).getByText("D2")).toBeInTheDocument();
-    expect(within(table).getByText(/2 of 9 results/i)).toBeInTheDocument();
   });
 
-  it("group distribution renders bars from the existing buckets", () => {
+  it("discloses shown-versus-true totals whenever the table is capped", () => {
+    mount({ true_result_count: 9 });
+    expect(screen.getByText(/showing 2 of 9 results/i)).toBeInTheDocument();
+  });
+
+  it("never implies a capped table is exhaustive", () => {
+    mount({ true_result_count: 2 });
+    expect(screen.getByText(/^2 results$/i)).toBeInTheDocument();
+  });
+
+  it("a one-bucket distribution renders a table, not a single bar", () => {
     mount({
-      presentation: "distribution",
       operation: "group_distribution",
+      presentation: "group_table",
+      distribution: [{ key: "Floor 1", count: 120, value: null }],
+      groups: [],
+      rows: [],
+    });
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Floor 1")).toBeInTheDocument();
+    expect(within(table).getByText("120")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /distribution/i })).not.toBeInTheDocument();
+  });
+
+  it("a heterogeneous comparison renders a comparison table with its values", () => {
+    mount({
+      operation: "comparison",
+      presentation: "comparison_table",
       distribution: [
-        { key: "Floor 1", count: 120, value: null },
-        { key: "Floor 2", count: 61, value: null },
+        { key: "Floor 1", count: 2, value: 120 },
+        { key: "Floor 2", count: 2, value: null },
       ],
+      groups: [],
+      rows: [],
     });
-    const list = screen.getByRole("list", { name: /distribution/i });
-    expect(within(list).getByText("Floor 1")).toBeInTheDocument();
-    expect(within(list).getByText("120")).toBeInTheDocument();
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Comparison")).toBeInTheDocument();
+    expect(within(table).getByText("120")).toBeInTheDocument();
+    expect(within(table).getByText("—")).toBeInTheDocument();
   });
 
-  it("aggregate renders the value, unit, and matched/coverage information", () => {
+  it("a relationship fallback renders the endpoint table and states the reason", () => {
     mount({
-      presentation: "aggregate",
-      operation: "aggregate",
-      aggregate: { function: "sum", value: 812.5, unit: "m2", matched_count: 205,
-        coverage_count: 180, complete: false },
-    });
-    expect(screen.getByTestId("ex-aggregate")).toHaveTextContent("812.5");
-    expect(screen.getByTestId("ex-aggregate")).toHaveTextContent("m2");
-    expect(screen.getByText(/180 of 205 matched/i)).toBeInTheDocument();
-  });
-
-  it("relationship renders the endpoint count and a bounded endpoint table", () => {
-    mount({
-      presentation: "relationship",
       operation: "relationship",
+      presentation: "relationship_table",
+      presentation_fallback_reason:
+        "this relationship result is too large for the bounded diagram",
       relationship_endpoint_total: 2,
+      groups: [],
       rows: [
         { global_id: "R1", ifc_class: "IfcSpace", name: "Office", storey_name: null },
         { global_id: "R2", ifc_class: "IfcSpace", name: "Hall", storey_name: null },
       ],
+      true_result_count: 2,
     });
-    expect(screen.getByTestId("ex-endpoints")).toHaveTextContent("2");
     expect(screen.getByText("Office")).toBeInTheDocument();
-  });
-
-  it("partial renders the known/unknown split", () => {
-    mount({
-      presentation: "partial",
-      result_status: "partial",
-      known_parts: ["door count"],
-      unknown_parts: ["fire rating"],
-    });
-    expect(screen.getAllByText("door count").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("fire rating").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("ex-fallback")).toHaveTextContent(/too large for the bounded/i);
+    expect(screen.queryByTestId("ex-graph")).not.toBeInTheDocument();
   });
 });
 
-describe("the persistent information region (§4)", () => {
-  it("is present for every presentation — a chart or table never appears alone", () => {
-    for (const presentation of ["metric", "table", "distribution", "aggregate",
-      "relationship", "partial"] as const) {
+describe("horizontal bar chart (§4)", () => {
+  it("a multi-bucket distribution renders bars with exact labels and counts", () => {
+    mount({
+      operation: "group_distribution",
+      presentation: "bar_chart",
+      distribution: [
+        { key: "Floor 1", count: 120, value: null },
+        { key: "Floor 2", count: 61, value: null },
+      ],
+      groups: [],
+      rows: [],
+    });
+    const list = screen.getByRole("list", { name: /distribution/i });
+    expect(within(list).getByText("Floor 1")).toBeInTheDocument();
+    expect(within(list).getByText("120")).toBeInTheDocument();
+    expect(within(list).getByText("Floor 2")).toBeInTheDocument();
+    expect(within(list).getByText("61")).toBeInTheDocument();
+  });
+
+  it("a homogeneous numeric comparison renders its exact values and unit", () => {
+    mount({
+      operation: "comparison",
+      presentation: "bar_chart",
+      chart_unit: "m2",
+      distribution: [
+        { key: "Floor 1", count: 2, value: 120.5 },
+        { key: "Floor 2", count: 2, value: 61 },
+      ],
+      groups: [],
+      rows: [],
+    });
+    const list = screen.getByRole("list", { name: /distribution/i });
+    expect(within(list).getByText("120.5 m2")).toBeInTheDocument();
+    expect(within(list).getByText("61 m2")).toBeInTheDocument();
+  });
+
+  it("a distribution bucket is never selectable", () => {
+    mount({
+      operation: "group_distribution",
+      presentation: "bar_chart",
+      distribution: [
+        { key: "Floor 1", count: 120, value: null },
+        { key: "Floor 2", count: 4, value: null },
+      ],
+      groups: [],
+      rows: [],
+    });
+    const list = screen.getByRole("list", { name: /distribution/i });
+    expect(within(list).queryByRole("button")).not.toBeInTheDocument();
+  });
+});
+
+describe("the persistent information region (§6)", () => {
+  it("is present for every presentation — a chart, table or diagram never appears alone", () => {
+    for (const presentation of [
+      "result_table",
+      "group_table",
+      "comparison_table",
+      "relationship_table",
+      "bar_chart",
+      "relationship_graph",
+    ] as const) {
       const { unmount } = mount({ presentation });
       expect(screen.getByLabelText("What is shown")).toBeInTheDocument();
       expect(screen.getByTestId("ex-showing")).toBeInTheDocument();
@@ -198,9 +263,23 @@ describe("the persistent information region (§4)", () => {
       screen.getByText("fire rating is recorded on only some doors"),
     ).toBeInTheDocument();
   });
+
+  it("shows partial known/unknown information without a partial visual", () => {
+    mount({
+      result_status: "partial",
+      presentation: "result_table",
+      known_parts: ["door count"],
+      unknown_parts: ["fire rating"],
+    });
+    const info = screen.getByLabelText("What is shown");
+    expect(within(info).getByText("door count")).toBeInTheDocument();
+    expect(within(info).getByText("fire rating")).toBeInTheDocument();
+    // The base operation's presentation is unchanged by partial status.
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
 });
 
-describe("group selection and All results (§5)", () => {
+describe("group selection and All results (§3, §7)", () => {
   it("clicking a group applies it and marks it active", async () => {
     mount();
     await userEvent.click(screen.getByRole("listitem", { name: /IfcDoor/ }));
@@ -238,15 +317,10 @@ describe("group selection and All results (§5)", () => {
     expect(screen.getByRole("listitem", { name: /IfcDoor/ })).toBeEnabled();
   });
 
-  it("a distribution bucket is never a button", () => {
-    mount({
-      presentation: "distribution",
-      operation: "group_distribution",
-      distribution: [{ key: "Floor 1", count: 120, value: null }],
-      groups: [],
-    });
-    const list = screen.getByRole("list", { name: /distribution/i });
-    expect(within(list).queryByRole("button")).not.toBeInTheDocument();
+  it("a single-class result shows no class bars at all", () => {
+    mount({ groups: [] });
+    expect(screen.queryByRole("list", { name: /breakdown by class/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 
   it("has a close control that is reachable by keyboard", async () => {
@@ -258,7 +332,7 @@ describe("group selection and All results (§5)", () => {
   });
 });
 
-describe("fixed stacked layout geometry (§3)", () => {
+describe("fixed stacked layout geometry (§7)", () => {
   it("is 40% of the viewport alone and 32% beside the component panel", () => {
     expect(explanationColumnWidthPx(1600, false)).toBe(Math.round(1600 * EXPLAIN_COLUMN_VW));
     expect(explanationColumnWidthPx(1600, true)).toBe(

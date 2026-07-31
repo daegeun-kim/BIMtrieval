@@ -488,7 +488,7 @@ frontend actions degrade cleanly. Other future models expose these automatically
 canonical data with no schema change or re-ingestion.
 
 Contracts, routes, and validation results: `tasks/task13_done.md`; frontend-facing shape:
-`spec_v006_frontend_application.md` §10.8.
+`spec_v011_component_panel.md` §2.
 
 ---
 

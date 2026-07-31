@@ -1,6 +1,7 @@
 # BIM RAG Frontend
 
-Local desktop BIM viewer + conversational frontend (spec_v006). React +
+Local desktop BIM viewer + conversational frontend (spec_v006 hub, with
+spec_v008-v011 for viewer/chat/explanation/component panels). React +
 TypeScript + Vite, with a That Open Fragments 3D viewer and a floating chat
 panel over the full-viewport scene. Talks only to the local FastAPI backend —
 never to PostgreSQL or OpenAI directly.

@@ -35,6 +35,7 @@ from app.db.models import IfcEntity
 from app.query.binding.compile import CompiledPredicate
 from app.query.binding.evidence import ResultExample
 from app.query.graph.registry import REGISTRY
+from app.query.graph.schemas import TraversalHop
 from app.query.graph.traversal import traverse
 from app.query.sql.schemas import MAX_TRAVERSAL_DEPTH, TraverseRelationshipsPlan
 
@@ -45,6 +46,12 @@ _ET = IfcEntity.__table__
 #: Seeds are bounded by the existing typed-plan limit; a traversal from every
 #: object in a large class is neither useful nor executable.
 MAX_SEEDS = 50
+
+#: Ceiling on the presentation-only hop copy (task29 §5.1). Beyond it the
+#: topology is reported as too large rather than sampled — a truncated hop list
+#: would silently understate grouped node/edge counts, and §5.3 forbids hiding
+#: edges to squeeze a result under the graph threshold.
+MAX_TOPOLOGY_HOPS = 2000
 
 
 @dataclass
@@ -58,6 +65,16 @@ class GraphExecution:
     endpoints: list[ResultExample] = field(default_factory=list)
     #: Distinct traversal hops that produced those endpoints.
     path_count: int = 0
+    #: The seed entities this traversal started from. Retained so the
+    #: explanation panel can tell the query subject apart from the endpoints it
+    #: reached without merging the two (task29 §5.2).
+    seed_entity_ids: tuple[int, ...] = ()
+    #: Presentation-only copy of the hops that connect the seeds to the ACCEPTED
+    #: endpoints (task29 §5.1). Never read by the answer, the packet, or the LLM.
+    topology_hops: list[TraversalHop] = field(default_factory=list)
+    #: Set when the hop copy hit `MAX_TOPOLOGY_HOPS`, so the panel reports the
+    #: topology as too large instead of grouping an incomplete hop set.
+    topology_truncated: bool = False
     #: Set when traversal could not be performed or established nothing.
     unavailable_reason: str | None = None
     #: True when seeds existed and traversal ran but nothing connected.
@@ -105,6 +122,7 @@ def execute_graph(
         execution.statement_count += seed_statements
     seeds = seeds[:MAX_SEEDS]
     execution.seed_count = len(seeds)
+    execution.seed_entity_ids = tuple(seeds)
 
     if not seeds:
         # No seeds is NOT "no connection" — there was nothing to traverse from.
@@ -137,6 +155,7 @@ def execute_graph(
     execution.statement_count += hydrate_statements
     execution.endpoints = rows
     execution.path_count = len(result.hops)
+    _retain_topology(execution, result.hops, seeds, rows)
 
     if endpoint_ifc_classes and not rows:
         # Traversal succeeded but reached nothing of the requested kind. That is
@@ -144,6 +163,34 @@ def execute_graph(
         # licence to report the unfiltered endpoints instead.
         execution.established_nothing = True
     return execution
+
+
+def _retain_topology(
+    execution: GraphExecution,
+    hops: list[TraversalHop],
+    seeds: list[int],
+    endpoints: list[ResultExample],
+) -> None:
+    """Keep a bounded, presentation-only copy of the hops already returned.
+
+    This is an in-memory filter over rows traversal ALREADY produced — no
+    statement, join, predicate or endpoint is added (task29 §5.1).
+
+    Hops are restricted to the seeds and the ACCEPTED endpoints. The answer
+    claims exactly those objects, so a diagram drawn from a wider hop set would
+    show connections the answer never made. Where the restriction leaves an
+    accepted endpoint unconnected — possible only when endpoint filtering cut an
+    intermediate hop at depth > 1 — the grouping stage detects the uncovered
+    endpoint and falls back to the endpoint table rather than drawing an
+    orphaned node (task29 §5.3).
+    """
+    if len(hops) > MAX_TOPOLOGY_HOPS:
+        execution.topology_truncated = True
+        return
+    keep = set(seeds) | {e.entity_id for e in endpoints}
+    execution.topology_hops = [
+        hop for hop in hops if hop.from_entity_id in keep and hop.to_entity_id in keep
+    ]
 
 
 def _seed_from_predicate(session: Session, predicate: CompiledPredicate) -> tuple[list[int], int]:

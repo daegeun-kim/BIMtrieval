@@ -14,6 +14,7 @@ import type {
   SessionQueryRequest,
 } from "../api/types";
 import { MAX_HISTORY_TURNS } from "../config";
+import { selectableSubgroups } from "../explain/explanation";
 import { getCachedArtifact, putCachedArtifact } from "../storage/artifactCache";
 import { ViewerAdapter } from "../viewer/ViewerAdapter";
 import {
@@ -556,13 +557,16 @@ export class AppController {
    *
    * Purely a viewer operation over GlobalIds the accepted answer already
    * supplied: no natural-language query, no LLM call, no backend request, and
-   * no change to the conversation. A group with no identities is not applied —
-   * the panel disables those, and this is the second guard.
+   * no change to the conversation. A class group and a selectable grouped graph
+   * node use the same path, and both are resolved through
+   * `selectableSubgroups`, so a node the backend did not mark selectable is not
+   * applied — the panel renders those as non-interactive, and this is the second
+   * guard (task29 §5.4).
    */
   async selectExplanationGroup(key: string): Promise<void> {
     const explanation = this.s.explanation;
     if (!explanation) return;
-    const group = (explanation.groups ?? []).find((g) => g.key === key);
+    const group = selectableSubgroups(explanation).find((g) => g.key === key);
     const ids = group?.global_ids ?? [];
     if (!group || ids.length === 0) return;
     this.s.setExplanationGroup(key);

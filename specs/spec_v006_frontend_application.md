@@ -1,29 +1,53 @@
-# Specification v006: Frontend BIM Viewer and Conversational Application
+# Specification v006: Frontend Application (Hub)
 
 ## 1. Purpose and authority
 
-Define the first runnable frontend for the BIM RAG project: a lightweight, desktop-oriented,
-local application that connects the completed natural-language query pipeline to an interactive
-3D BIM viewer.
+Define the frontend for the BIM RAG project: a lightweight, desktop-oriented, local application that
+connects the natural-language query pipeline to an interactive 3D BIM viewer.
 
-This specification is authoritative for frontend behavior and for the narrow read-only backend
-contracts required by the frontend. It is governed by:
+This specification is the **hub** of the frontend specification family. It is authoritative for what
+is shared across the whole application:
+
+```text
+purpose, scope, and product boundaries
+technology baseline and development workflow
+shared layout and the panel system
+application and model lifecycle
+shared deterministic backend contracts
+state, persistence, and clearing semantics
+cross-cutting failure behavior
+accessibility, security, and privacy
+testing policy and acceptance criteria
+```
+
+Feature behavior is owned by four sibling specifications, each authoritative in its own area:
+
+| Spec | Owns |
+| --- | --- |
+| `spec_v008_3d_viewer.md` | viewer assets and delivery, coordinate model, camera/navigation, selection and picking, highlighting and appearance, rendering/resource policy, floor-plan mode |
+| `spec_v009_chat_panel.md` | conversation UI, composer, answer rendering and evidence, citations, selection chips, request lifecycle, chat controls |
+| `spec_v010_explanation_panel.md` | explanation presentation contract, opening gate, tables, bar chart, grouped relationship diagram, viewer synchronization, panel lifecycle |
+| `spec_v011_component_panel.md` | component detail and highlight-group contracts, panel behavior, isolated preview, Same type / Same family |
+
+Backend query semantics — interpretation, planning, retrieval, execution, classification, and answer
+wording — remain governed by:
 
 ```text
 spec_v002_query_architecture.md
 spec_v003_sql_query_path.md
 spec_v004_rag_query_path.md
 spec_v005_hybrid_query_orchestration.md
-tasks/task09_done.md
 ```
 
-Where an older frontend example conflicts with this specification, v006 takes precedence.
-Backend query semantics remain governed by v002-v005.
+Frontend specifications reference those semantics; they never restate or reinterpret them. Where an
+older frontend example conflicts with this family, this family takes precedence. Every rule has exactly
+one owning specification; cross-feature dependencies are expressed as links, not duplicated normative
+text.
 
 ## 2. Owner intent
 
-This is an interaction and visualization test for the BIM RAG pipeline, not a complete BIM
-authoring product. Start small, lightweight, and fast. Validate that a user can:
+This is an interaction and visualization test for the BIM RAG pipeline, not a complete BIM authoring
+product. Start small, lightweight, and fast. Validate that a user can:
 
 1. select and load an existing preprocessed BIM model;
 2. navigate and select objects in a 3D viewer;
@@ -34,12 +58,13 @@ authoring product. Start small, lightweight, and fast. Validate that a user can:
 7. clear the conversation or reset the complete visible application state.
 
 The LLM layer must remain as small as possible. Model listing, asset delivery, GlobalId resolution,
-selection, caching, UI behavior, and resets are deterministic operations and must not invoke an
-LLM. The frontend never connects directly to PostgreSQL or OpenAI.
+selection, caching, UI behavior, panel presentation, and resets are deterministic operations and must
+not invoke an LLM. **Submitting a question is the only frontend action that may reach an LLM.** The
+frontend never connects directly to PostgreSQL or OpenAI.
 
-Visual and component-level details may be decided during implementation with Claude's installed
-`frontend-design` plugin, but that design discretion must not expand the product scope, change the
-data/API contracts, add unnecessary panels, or compromise rendering performance.
+Visual and component-level details may be decided during implementation with the installed
+`frontend-design` workflow, but that design discretion must not expand product scope, change data/API
+contracts, add unnecessary panels, or compromise rendering performance.
 
 ## 3. Independent application boundary
 
@@ -51,89 +76,77 @@ backend/     # read-only FastAPI query service
 frontend/    # this React/Three.js application
 ```
 
-The frontend must not import ingestion or backend source code. It consumes versioned HTTP
-contracts and immutable viewer assets only.
+The frontend must not import ingestion or backend source code. It consumes versioned HTTP contracts
+and immutable viewer assets only.
 
-PostgreSQL remains the source for model metadata, BIM attributes, relationships, canonical
-identity, and embeddings. A prepared Fragments file is the browser rendering representation.
-The viewer artifact is data, not shared application code.
+PostgreSQL remains the source for model metadata, BIM attributes, relationships, canonical identity,
+and embeddings. A prepared Fragments file is the browser rendering representation; that artifact is
+data, not shared application code.
 
 ## 4. Scope
 
 ### 4.1 Included
 
-- React + TypeScript frontend application
-- Vite development/build tooling
-- npm dependency management
+- React + TypeScript frontend application with Vite tooling and npm dependency management
 - bright-mode, desktop-first interface
-- full-window Three.js/That Open BIM viewer
+- full-window Three.js / That Open BIM viewer
 - floating, resizable, collapsible chat panel
-- minimal model selector using display names
-- explicit model-load confirmation
-- optimized prepared Fragments asset loading
-- IndexedDB artifact caching
+- minimal model selector using display names, with explicit model-load confirmation
+- optimized prepared Fragments asset loading and IndexedDB artifact caching
 - IFC GlobalId-based viewer/backend identity
 - maximum-five viewer selection with chat-context chips
-- SQL/RAG/graph/hybrid answer display
-- primary/context highlighting and background dimming
+- SQL/RAG/graph/hybrid answer display with primary/context highlighting and background dimming
 - clickable entity citations that center and moderately enlarge the target
 - compact, collapsed evidence details
+- a synchronized query explanation panel for results a structured visualization materially improves
+- a bounded read-only component panel with an isolated preview and deterministic group highlighting
+- top-down orthographic floor-plan mode inside the existing viewer
 - Clear Chat and Reset App controls
 - loading, cancellation, error, retry, and degraded-state behavior
 - local frontend/backend development integration
-- deterministic narrow backend contracts defined in Section 10
-- unit/component and bounded browser integration tests
+- the deterministic narrow backend contracts in §9 and in the feature specifications
+- unit/component tests and a bounded browser integration suite
 
 ### 4.2 Excluded
 
 - user IFC upload
-- IFC parsing during normal frontend startup
-- runtime IFC-to-Fragments conversion in FastAPI
+- IFC parsing during normal frontend startup, and runtime IFC-to-Fragments conversion in FastAPI
 - PostGIS geometry ingestion or direct PostGIS-to-Three.js rendering
 - mobile-first UI
 - authentication or multi-user accounts
 - persistent chat history after the browser tab/session ends
-- charts, dashboards, catalog cards, or a catalog landing page
-- full object property panel
-- storey/class visibility controls
-- hide/isolate tools
-- measurement and section planes — **narrowly amended by the Task 28 amendment**: the fixed automatic
-  horizontal cut and lower boundary belonging to a selected logical floor, plus the compact floor
-  button stack, are now in scope. Arbitrary user-authored clipping planes, a general storey
-  browser, hide/isolate, measurements, reflected ceiling plans, elevations, and other drawing
-  modes remain excluded.
-- annotations or saved viewpoints
-- model or metadata editing
-- geometry editing
+- dashboards, catalog cards, or a catalog landing page
+- a full object property panel
+- storey/class visibility controls, hide/isolate tools
+- user-authored clipping planes, measurements, a general storey browser, reflected ceiling plans,
+  elevations, or other drawing modes — the fixed automatic horizontal cut, lower boundary, and compact
+  floor button stack of floor-plan mode are the only sectioning in scope (`spec_v008` §8)
+- annotations, saved viewpoints, exports, or saved visualizations
+- model, metadata, or geometry editing
 - streamed LLM tokens
-- frontend OpenAI access
-- frontend database access
+- frontend OpenAI access or frontend database access
+- charting systems beyond the specific bar chart and relationship diagram of `spec_v010`
 - production/cloud deployment
 
-## 5. Explorentory as UX reference
+No excluded feature may be added merely because a component library makes it available.
 
-Use the local Explorentory frontend as a behavioral reference:
+## 5. UX reference
+
+The local Explorentory frontend is a behavioral reference only:
 
 ```text
 C:\Users\kdgki\Desktop\MSCDP\Projects\Capstone\Explorentory\frontend
 ```
 
-Retain useful interaction principles:
+Retain its interaction principles: visualization is the dominant workspace; conversation is
+continuously available; the input stays anchored at the bottom of the chat surface; panels resize
+without breaking the visualization; loading and connection failures are visible and actionable; reset
+behavior is explicit; visual and conversational selections stay linked.
 
-- visualization is the dominant workspace;
-- conversation is continuously available;
-- the input stays anchored at the bottom of the chat surface;
-- panels can be resized without breaking the visualization;
-- loading and connection failures are visible and actionable;
-- reset behavior is explicit;
-- visual and conversational selections remain linked.
-
-Do not copy Explorentory's global plain-JavaScript implementation or real-estate-specific workflow.
-Use a typed component/state architecture appropriate for BIM geometry and API contracts.
+Do not copy its global plain-JavaScript implementation or real-estate-specific workflow. Use a typed
+component/state architecture appropriate for BIM geometry and API contracts.
 
 ## 6. Technology baseline
-
-Use:
 
 ```text
 React
@@ -149,16 +162,23 @@ React Testing Library
 Playwright for a small critical-path browser suite
 ```
 
-Before implementation, verify current That Open package names, compatibility, worker/WASM setup,
-and recommended Fragments APIs against official documentation. Do not use deprecated
-`web-ifc-three` or `web-ifc-viewer` packages when the maintained Components/Fragments stack is
-available.
+Verify current That Open package names, compatibility, worker/WASM setup, and recommended Fragments
+APIs against official documentation before implementation. Do not use the deprecated `web-ifc-three`
+or `web-ifc-viewer` packages.
 
-Keep dependencies small. Do not add a large UI framework unless the `frontend-design` workflow
-shows a concrete need that cannot be met cleanly with lightweight components and CSS. Record the
-reason for every material dependency.
+Keep dependencies small; record the reason for every material dependency. Do not add a large UI
+framework or a charting library unless a concrete need cannot be met cleanly with lightweight
+components, CSS, and SVG.
 
-Normal development is:
+Architecture invariants:
+
+- one typed API client over generated OpenAPI types;
+- all imperative scene code behind `src/viewer/ViewerAdapter.ts` — React requests typed viewer actions
+  and never touches Three.js objects directly;
+- a small serializable store plus a controller for async flows;
+- the Fragments worker bundled locally, never from a CDN.
+
+Normal development:
 
 ```powershell
 cd frontend
@@ -167,40 +187,61 @@ npm run dev
 ```
 
 The development URL is `http://localhost:5173`. VS Code Go Live is not the source-development
-workflow. A static server may serve `dist/` only after `npm run build` if the built asset paths and
-runtime configuration are verified.
+workflow. A static server may serve `dist/` only after `npm run build` if built asset paths and runtime
+configuration are verified.
 
-## 7. Visual structure
+## 7. Shared layout and panel system
 
-### 7.1 Primary layout
+### 7.1 Primary layout and theme
 
-The 3D viewer fills the browser viewport. The conversational surface floats above the viewer near
-the right edge rather than dividing the page with a full-height hard separator.
+The 3D viewer fills the browser viewport. Conversational and explanatory surfaces float above it near
+the right edge as separate cards; the page is never divided by a full-height hard separator.
 
-The chat panel must have:
+All floating cards share one surface treatment: clear outer margin from viewport edges (20 px),
+rounded corners, restrained bright-mode surface with shadow/border separation, and consistent
+typography and spacing.
 
-- clear outer margin from viewport edges;
-- rounded/filleted corners;
-- restrained bright-mode surface and shadow/border separation;
-- a resizable width within safe desktop bounds;
-- a collapse/expand control;
-- an answer-history region;
-- a bottom-anchored composer;
-- compact model/reset controls that do not dominate the conversation.
-
-When collapsed, the viewer expands visually and a small accessible control restores the panel.
-Resizing must trigger the viewer/renderer resize path without stretching or clipping the canvas.
-
-### 7.2 Bright mode only
-
-Implement one coherent bright theme. Do not add a theme toggle or dark-theme assets. Use readable
+Implement one coherent **bright theme**. Do not add a theme toggle or dark-theme assets. Use readable
 contrast, visible focus states, and colors that remain distinguishable over varied model materials.
 
-### 7.3 Minimal information
+### 7.2 The panel set
 
-Do not display branding or a product title beyond a neutral browser title if required. Show only:
+- **Chat panel** — floating card with a resizable width within safe desktop bounds, a collapse/expand
+  control, an answer-history region, a bottom-anchored composer, and compact model/reset controls that
+  do not dominate the conversation. When collapsed, the viewer expands visually and a small accessible
+  control restores the panel. Behavior: `spec_v009`.
+- **Right-side stack** — when the explanation panel is open, `.right-stack` becomes a fixed right-side
+  column: 12 px gap, explanation above (60%) and chat below (40%), both rendered as separate floating
+  cards. No splitter, no resizer, no saved preference, no reordering. Inside the stack the chat drops
+  its inline width and drag handle (`.panel-stacked`); the user's stored width preference is preserved
+  and applies again when the stack closes. Collapsing the chat inside the stack reuses the existing
+  collapsed state — the chat becomes the restore tab and the explanation card takes the freed height
+  (`.right-stack-collapsed`). No new layout mode, no overlap, accessibly restorable.
+- **Component panel** — a 320 px card docked immediately left of the right-side column with the same
+  12 px gap. Behavior: `spec_v011`.
+- **Viewer overlay controls** — Reset app at the top-left, the Fit control at the bottom-left, and the
+  floor button stack under Reset app (`spec_v008` §8). Clear Chat stays inside the chat panel. These
+  actions are never adjacent to one another.
 
-- active model display name;
+Resizing or collapsing any panel must trigger the viewer/renderer resize path without stretching or
+clipping the canvas.
+
+### 7.3 One panel-geometry source
+
+The right-side column is 40vw wide, or 32vw while the component panel is docked beside it.
+`explanationColumnWidthPx(viewportWidth, componentOpen)` computes it in px in `App.tsx`, and that
+single value feeds both the `--chat-w` CSS variable (read by the column and the component panel's dock
+position) and `effectiveViewportObstructionPx`, which the viewer consumes for camera fitting and
+visible-region centering (`spec_v008` §4.4).
+
+**There must never be a second set of hard-coded panel measurements.** Any new panel or width rule
+extends this single computation.
+
+### 7.4 Minimal information
+
+Do not display branding or a product title beyond a neutral browser title. Show only:
+
+- the active model display name;
 - concise model/loading status;
 - minimal technical/model information near the bottom-left of the viewer when useful;
 - selection count/chips near the composer;
@@ -208,7 +249,7 @@ Do not display branding or a product title beyond a neutral browser title if req
 
 Do not create a permanent metadata inspector or dashboard.
 
-## 8. Application lifecycle
+## 8. Application and model lifecycle
 
 ### 8.1 Initial state
 
@@ -226,172 +267,92 @@ There is no catalog page and no card grid.
 
 ### 8.2 Selecting and loading a model
 
-A model can be proposed through either:
+A model can be proposed through either the deterministic display-name selector or the compact candidate
+controls returned by a catalog chat answer (`spec_v009` §4.4).
 
-- the deterministic display-name selector; or
-- compact candidate controls returned by a catalog chat answer.
+**Both routes require explicit user confirmation before downloading or loading geometry.** Confirmation
+uses the existing backend model-confirmation semantics and the frontend asset endpoint
+(`spec_v008` §2.3). Never load a candidate merely because the planner mentioned it.
 
-Both routes require explicit user confirmation before downloading/loading geometry. Confirmation
-uses the existing backend model-confirmation semantics and the frontend asset endpoint. Never load
-a candidate merely because the planner mentioned it.
-
-During loading, display bounded phases such as metadata, download/cache, viewer initialization,
-and scene ready. Progress must not imply precision the underlying library cannot provide.
+During loading, display bounded phases such as metadata, download/cache, viewer initialization, and
+scene ready. Progress must not imply precision the underlying library cannot provide.
 
 If model loading fails, keep chat available for catalog/general questions and provide one explicit
 retry action. Do not loop automatically.
 
 ### 8.3 Model switching
 
-The selector remains available after load. Switching requires confirmation, cancels outstanding
-viewer work, clears model-specific results/selections, safely disposes the old scene, and loads the
-new artifact. Do not retain cross-model selected GlobalIds or highlights.
+The selector remains available after load. Switching requires confirmation, cancels outstanding viewer
+and query work, clears model-specific results, selections, and panels, safely disposes the old scene,
+and loads the new artifact. Cross-model selected GlobalIds and highlights are never retained.
 
-## 9. Viewer asset preparation and delivery
+## 9. Shared deterministic backend contracts
 
-### 9.1 Rendering representation
+These contracts are read-only, LLM-free, bounded, and field-allowlisted. They never write the database,
+parse IFC, or return a server filesystem path. Route naming may follow existing backend conventions,
+but behavior and separation are fixed.
 
-Use a prepared That Open Fragments artifact for normal visualization. Do not reconstruct the scene
-from PostGIS and do not parse the raw IFC on every load.
-
-The repository-level local artifact convention is:
-
-```text
-model_assets/
-└── {source_model_id}/
-    └── {source_fingerprint}.frag
-```
-
-The backend derives the expected path from allowlisted configuration plus database model identity.
-No user-supplied filesystem path may be joined or opened directly.
-
-### 9.2 One-time TypeScript preparation tool
-
-Provide a manual TypeScript/npm preparation command under the frontend project, using the same
-maintained That Open Fragments importer/version family used by the viewer. It may read a local IFC
-path and must write only to the validated artifact convention.
-
-For the initial model, prepare from:
+### 9.1 Model list
 
 ```text
-C:\Users\kdgki\Desktop\MSCDP\Projects\BIM_RAG\ingestion\ifc_original\IFC Schependomlaan incl planningsdata.ifc
+GET /api/models
 ```
 
-This tool:
+Bounded selector list: `source_model_id`, `display_name` (safe `"Model {id}"` default when null),
+`source_fingerprint` (or an opaque asset version), and `viewer_asset_status`
+(`ready | missing | stale | unavailable`). Deterministic order by id.
 
-- is not imported or invoked by FastAPI;
-- is not part of normal `npm run dev` startup;
-- does not import `bim_rag`;
-- does not write PostgreSQL;
-- does not replace or edit the source IFC;
-- preserves the identity information needed to map rendered items to IFC GlobalIds;
-- records format/library version and source fingerprint metadata;
-- writes atomically so a failed conversion cannot leave a valid-looking partial artifact;
-- validates the completed artifact by loading it and sampling identity mappings.
+Do not expose local filesystem paths, database credentials, canonical JSON, or ingestion details. The
+selector displays only `display_name`; the other fields support identity, caching, and status
+internally or appear as minimal bottom-left viewer information.
 
-Do not add a Python/IfcOpenShell converter to the backend. If current That Open APIs require a
-minor adjustment to the file extension or sidecar metadata, Claude may choose the supported format
-while preserving this architecture and documenting the choice.
-
-### 9.3 Backend delivery
-
-The backend streams only the expected artifact for an existing model. Require:
-
-- model existence and current fingerprint validation;
-- path containment under the configured asset root;
-- no arbitrary path query parameter;
-- correct binary content type;
-- `ETag` or equivalent fingerprint-aware caching;
-- bounded errors for absent, stale, or unreadable artifacts;
-- optional range support only if the library/browser benefits and implementation remains simple;
-- no conversion and no database write.
-
-### 9.4 IndexedDB cache
-
-Cache the downloaded artifact in IndexedDB using a key containing at least:
-
-```text
-source_model_id
-source_fingerprint
-artifact_format_version
-```
-
-Validate the key before reuse. Never reuse a stale artifact after the source fingerprint or format
-changes. Start with a small configurable LRU limit appropriate to a local prototype (recommended
-default: at most two model artifacts) and gracefully handle quota denial by falling back to a
-non-persistent load.
-
-The cache survives Clear Chat and Reset App. Cache persistence is a performance optimization, not
-conversation/application state. No cache-management UI is required in the MVP.
-
-## 10. Narrow deterministic backend contracts
-
-Implement these contracts in a separate backend task before frontend integration. Exact route
-naming may be adjusted to match existing conventions, but behavior and separation are fixed.
-
-### 10.1 Model list
-
-Provide a read-only model-list endpoint for the minimal selector. Return only bounded fields needed
-by the UI, including:
-
-```text
-source_model_id
-display_name
-source_fingerprint or opaque asset version
-viewer_asset_status
-```
-
-Do not expose local filesystem paths, database credentials, canonical JSON, or ingestion details.
-The selector displays only `display_name`; other fields support identity/cache/status internally or
-appear as minimal bottom-left viewer information.
-
-### 10.2 Viewer asset
-
-Provide a read-only binary endpoint such as:
-
-```text
-GET /api/models/{source_model_id}/viewer-asset
-```
-
-Follow Section 9.3.
-
-### 10.3 GlobalId resolution
-
-Provide a deterministic read-only endpoint such as:
+### 9.2 GlobalId resolution
 
 ```text
 POST /api/models/{source_model_id}/entities/resolve
 ```
 
-Request:
-
 ```json
-{
-  "global_ids": ["IFC-GLOBAL-ID"]
-}
+{ "global_ids": ["IFC-GLOBAL-ID"] }
 ```
 
-Requirements:
+Requirements: maximum five identifiers; trim and stably deduplicate; scope every lookup to the route
+`source_model_id`; reject malformed or cross-model identity; return compact mappings only
+(`entity_id`, `global_id`, `ifc_class`, `name`) with explicit `unresolved` reporting; never return full
+canonical JSON; never invoke an LLM; never write the database.
 
-- maximum five identifiers;
-- trim/deduplicate while preserving stable order;
-- scope every lookup to the route `source_model_id`;
-- reject malformed or cross-model identity;
-- return compact mappings such as entity ID, GlobalId, IFC class, and name;
-- never return full canonical JSON;
-- never invoke an LLM;
-- never write the database.
+### 9.3 Query request selection
 
-### 10.4 Query request selection
+```text
+POST /api/query
+```
 
-Extend `POST /api/query` compatibly so the frontend can supply selected IFC GlobalIds scoped by
-`active_source_model_id`. The frontend must not need database integer IDs. Trusted backend code
-resolves GlobalIds before building planner context or selected-object retrieval plans.
+The frontend supplies selected IFC GlobalIds (`selected_global_ids`, maximum five) scoped by
+`active_source_model_id`; it never needs database integer ids. Trusted backend code resolves them to
+canonical entity ids before building planner context or selected-object retrieval plans. A selection
+with no active model is rejected before any LLM or database work.
 
-Retain backward compatibility for existing internal/backend tests where practical, but make
-GlobalIds the public browser contract. Never accept both representations when they disagree.
+GlobalIds are the public browser contract. The deprecated `selected_entity_ids` never overrides a
+conflicting GlobalId selection, and the two representations are never accepted together when they
+disagree.
 
-### 10.5 CORS and configuration
+### 9.4 Query response fields the whole frontend depends on
+
+`POST /api/query` additively carries:
+
+- `result_summary` — `exact_total`, `viewer_match_count`, `viewer_matches_total`, `truncated`,
+  `class_counts` (exact per-IFC-class counts over the full matching set), and `sample_detail`;
+- `viewer_actions` — the semantic roles, `primary_global_ids` (the full matching set up to 2,000),
+  `viewer_matches_total`, `viewer_matches_truncated`, and `viewer_source_location` (the safe HTTP asset
+  reference, never a filesystem path);
+- `answer_explanation` — the optional presentation payload owned by `spec_v010`.
+
+**Three independent limits** must never be conflated: the exact total, the 2,000-identity viewer cap,
+and the 50-item LLM evidence bound. `primary_entities` remains bounded evidence for grounding and
+citations and is **not** the highlight set. `sample_detail` is populated only on explicit sample-detail
+intent.
+
+### 9.5 CORS and configuration
 
 Allow only the configured local frontend origin, initially:
 
@@ -399,7 +360,8 @@ Allow only the configured local frontend origin, initially:
 http://localhost:5173
 ```
 
-Do not use wildcard CORS with credentials. The frontend reads its base URL from:
+Never wildcard CORS with credentials. `viewer_asset_root` and `cors_allow_origins` are backend-owned
+settings. The frontend reads its base URL from:
 
 ```text
 VITE_API_BASE_URL=http://localhost:8000
@@ -407,255 +369,26 @@ VITE_API_BASE_URL=http://localhost:8000
 
 No frontend environment variable may contain OpenAI or database credentials.
 
-### 10.6 OpenAPI types
+### 9.6 Generated types
 
-Generate or derive frontend TypeScript API types from FastAPI OpenAPI. Keep generation reproducible
-and checked by CI/tests. Do not hand-maintain multiple contradictory response interfaces.
+Frontend TypeScript API types are generated from the FastAPI OpenAPI document (`npm run gen:api` into
+`frontend/src/types/api.ts`). Generation stays reproducible and checked by tests. Do not hand-maintain
+multiple contradictory response interfaces. Regenerating types is the first step of any task consuming
+a new or extended contract.
 
-### 10.7 Implementation status (Task 10 — delivered)
+### 9.7 Feature-owned contracts
 
-The narrow backend contracts in §10 are implemented and validated (see `tasks/task10_done.md`). As
-built, read-only and LLM-free:
+The remaining narrow contracts are owned by their feature specification and are not restated here:
 
-- `GET /api/models` — bounded selector list: `source_model_id`, `display_name` (safe
-  `"Model {id}"` default when null), `source_fingerprint`, `viewer_asset_status`
-  (`ready | missing | stale | unavailable`). Deterministic order by id; field-allowlisted.
-- `GET /api/models/{source_model_id}/viewer-asset` — verifies model existence, derives the expected
-  path `{root}/{source_model_id}/{source_fingerprint}.frag` from database identity only, enforces
-  containment under the configured root, streams via `FileResponse` with a fingerprint `ETag` and
-  `If-None-Match` → 304, and returns bounded 404 `missing` / 409 `stale` / 503 `unavailable`. No
-  server path is ever returned.
-- `POST /api/models/{source_model_id}/entities/resolve` — 1–5 GlobalIds, trimmed/stable-deduped,
-  every lookup scoped to the route model (no cross-model resolution), compact identity only
-  (`entity_id`, `global_id`, `ifc_class`, `name`), with explicit `unresolved` reporting.
-- `POST /api/query` — public `selected_global_ids` (max 5) resolved to canonical entity IDs by
-  trusted backend code before planner context; selection with no active model is rejected before any
-  LLM/DB work; deprecated `selected_entity_ids` never overrides a conflicting GlobalId selection.
-- `viewer_actions.viewer_source_location` now carries the safe HTTP reference
-  `/api/models/{id}/viewer-asset`, never a filesystem path.
-- CORS: explicit allowlist (`viewer_asset_root` and `cors_allow_origins` are backend-owned settings;
-  default origin `http://localhost:5173`, no wildcard-with-credentials).
+| Contract | Owner |
+| --- | --- |
+| `GET /api/models/{id}/viewer-asset` | `spec_v008` §2.3 |
+| `GET /api/models/{id}/floors` | `spec_v008` §8.1 |
+| `GET /api/models/{id}/entities/{global_id}/details` | `spec_v011` §2.1 |
+| `POST /api/models/{id}/entities/highlight-group` | `spec_v011` §2.2 |
+| `answer_explanation` payload and topology transport | `spec_v010` §3 |
 
-The asset root default is `<repo>/model_assets` (overridable via `VIEWER_ASSET_ROOT`). The current
-model reports `viewer_asset_status="missing"` until the Task 11 preparation tool writes the artifact.
-
-### 10.8 Component detail + group contracts (Task 13 — delivered)
-
-Two further narrow contracts back the Task 14 component panel. Both are read-only, active-model
-scoped, deterministic, and **LLM-free** — no OpenAI call, no embedding, no IFC parse, no database
-write, and no session/chat mutation (details: `tasks/task13_done.md`).
-
-```text
-GET  /api/models/{source_model_id}/entities/{global_id}/details
-POST /api/models/{source_model_id}/entities/highlight-group
-```
-
-**Details** returns an allowlisted, count- and length-bounded schema — never raw canonical JSON,
-geometry, vectors, SQL, prompts, or paths:
-
-- `instance` — always available for a valid entity: GlobalId, IFC class, name, description,
-  object/predefined type, tag, storey name/GlobalId, elevation (when stored), materials, and
-  allowlisted quantities/properties.
-- `type` — present **only** when the source IFC explicitly supplied type data.
-- `family` — present **only** when an allowlisted family-like property exists in a stored property
-  set, returned with its source property-set/property name.
-- `availability` — truthful `instance`/`same_type`/`same_family` flags plus a concise reason for each
-  unavailable action, so the frontend can disable a button and say why.
-
-Absent optional layers are **omitted** rather than returned as empty placeholders. An unknown or
-cross-model GlobalId returns the same bounded 404 (`unknown_entity`), never revealing that the
-entity exists in another model.
-
-**Highlight-group** takes `{selected_global_id, scope: instance|type|family}` and returns the
-selected scope, truthful `available`, the **exact** `total`, up to 2,000 deterministically ordered
-`global_ids`, a `truncated` flag, compact `class_counts`, and a bounded `unavailable_reason`.
-Matching is exact: `instance` = the selected entity; `type` = explicit type GlobalId, falling back to
-the exact normalized stored type name only when the IFC gave no GlobalId; `family` = the exact
-normalized value of the same allowlisted stored property the selection's family came from. Never a
-name-derived guess.
-
-**Expected on the current model:** 0 of 6,989 Schependomlaan entities carry explicit
-`canonical_json.type`, so `same_type`/`same_family` are unavailable and must degrade cleanly. This is
-correct behavior, not an error. Future models expose these automatically from already-stored
-canonical data — no schema change or re-ingestion.
-
-### 10.9 Query response additions (Task 13 — delivered)
-
-`POST /api/query` gained, additively (a client ignoring them keeps working):
-
-- `result_summary` — `exact_total`, `viewer_match_count`, `viewer_matches_total`, `truncated`,
-  `class_counts` (exact per-IFC-class counts over the full matching set), and `sample_detail`.
-- `viewer_actions.viewer_matches_total` / `viewer_matches_truncated`.
-
-Count/aggregate/list results now carry their full matching GlobalIds (up to 2,000) in
-`viewer_actions.primary_global_ids` — previously a count returned no identities at all and
-highlighted nothing. The exact total, the 2,000 viewer cap, and the 50-item LLM evidence bound are
-three independent limits: `primary_entities` remains bounded evidence for grounding/citations and is
-**not** the highlight set. `sample_detail` is populated only on explicit sample-detail intent.
-
-### 10.10 Logical floor contract (Task 28 — delivered)
-
-```text
-GET /api/models/{source_model_id}/floors -> ModelFloorsResponse
-```
-
-One narrow, typed, allowlisted (`extra="forbid"`), read-only, source-model-scoped endpoint behind
-the viewer's floor-plan control. It reuses
-`app/query/semantic/spatial.py::build_storey_model()` — the same elevation-gap `FloorBand`
-clustering the natural-language floor interpretation resolves against — so the buttons and
-"the second floor" can never disagree. **There is no second floor detector.**
-
-Response: `source_model_id`, `available`, `unavailable_reason`, `reference_band_index`,
-`reference_basis` (`elevation_zero` | `lowest_band` | `none`), `total_storeys` (raw storeys, so the
-storey-versus-floor difference stays observable), and `floors` — one `FloorBandInfo` per **logical
-band**, never per raw `IfcBuildingStorey`: `band_index` (0-based, ascending by elevation), `label`,
-`is_reference`, `storey_global_ids`, bounded `storey_names`, `min_elevation`, `max_elevation`.
-
-Labels come from `spatial.band_label(band_index, reference_index)`, a pure helper beside the band
-model: the reference band is **Floor 1**, bands above continue upward, and bands below get neutral
-**Lower level N** names rather than an invented basement designation. Storey names are carried for
-tooltip/accessible use only and never discover, group, order, or label a floor.
-
-`min_elevation`/`max_elevation` are stored project-unit diagnostics for exactly one purpose —
-diagnostics. **They are not viewer scene coordinates** and must never be used as Three.js Y values
-(see §11.7). The frontend's `FloorContractBand` type deliberately omits them so the adapter cannot.
-
-Deterministic and LLM-free: no IFC parse, viewer-asset read, OpenAI call, embedding, or database
-write. A model with no usable storey elevations returns an honest `available: false` with a bounded
-reason, and the frontend then omits the control entirely. Additive — nothing was added to a shared
-envelope, so existing clients are unaffected.
-
-## 11. Viewer behavior
-
-### 11.1 Camera and basic controls
-
-Provide only the controls needed for the LLM/viewer experiment:
-
-- orbit, pan, and zoom with conventional mouse controls;
-- fit/home model;
-- click selection;
-- Ctrl/Shift additive selection;
-- response-driven highlight and fit;
-- citation-driven center and fit.
-
-Do not add hide/isolate, measurements, sections, storey browser, class tree, or editing controls.
-(Task 28 narrowly amends "sections" only for the fixed floor-plan cut described in the Task 28
-amendment; the floor
-button stack is the only new main-viewer control, and it is not a storey browser.)
-
-Fitting an object/result must center and enlarge it only moderately. Keep surrounding geometry
-visible and enforce a maximum approach/zoom so one small element never fills the entire viewport.
-
-### 11.2 Manual selection
-
-- Maximum five selected objects.
-- Clicking an object obtains its IFC GlobalId locally and resolves it through the deterministic
-  backend endpoint.
-- Show compact removable selection chips near the composer.
-- If five objects are already selected, explain the limit rather than silently replacing one.
-- Clicking empty viewer space clears manual selection.
-- No separate Clear Selection button is required.
-- Debounce/deduplicate resolution requests and ignore stale responses after model/session changes.
-
-Selected objects are included with the next question. Selecting geometry alone never calls the
-LLM.
-
-### 11.3 Query results
-
-Apply the complete semantic roles returned in `viewer_actions`:
-
-- primary matches: strong accessible highlight;
-- relationship context: distinct secondary, more muted highlight;
-- non-results: visibly dimmed while retaining spatial context;
-- relationship records themselves: evidence only, never rendered as meshes.
-
-Implement `select_and_fit`, `select_only`, `clear`, and `none` defensively. Missing/unrenderable
-GlobalIds must create a bounded warning without breaking the answer or viewer.
-
-Manual selection and query-result roles must remain internally distinct even if they overlap.
-
-### 11.4 Clickable answer entities
-
-Entity references displayed with an answer are clickable. Clicking one:
-
-- verifies it belongs to the active model;
-- selects/highlights the rendered object;
-- centers it;
-- zooms only slightly/moderately;
-- does not submit a query or call the LLM.
-
-### 11.5 Floor-plan mode (Task 28 — delivered)
-
-A mode of the **existing** viewer — same components, same world, same canvas, same Fragments model.
-Only the camera in use and two clipping planes change. It is not a second canvas, a generated
-image, a saved drawing, an explanation-panel visualization, or a replacement for the 3D model. Full
-contract in the Task 28 amendment.
-
-### 11.6 Scene coordinates versus stored elevations (Task 28 — load-bearing)
-
-Two distinct coordinate facts, previously only implicit, are now stated because Task 28 depends on
-keeping them apart:
-
-- a stored `IfcBuildingStorey.Elevation` is expressed in the model's own project length unit and is
-  **never** a Three.js Y value;
-- `model.box` is already world-space (Fragments applies `object.matrixWorld` in its getter), while
-  `Elevation + (await model.getCoordinates())[1]` — the pair the installed
-  `Views.createFromIfcStoreys` adds — is in the model object's **local** space, and
-  `model.getSection(plane)` both consumes and produces geometry in that same local space.
-
-Mapping a logical band into the scene therefore means: read the artifact-native `Elevation`, add the
-model's own coordinate height, then push the result through the model object's own world matrix.
-No model-specific offset, no `model.box.min.y` as a floor elevation, no geometry centroid.
-
-## 12. Chat behavior
-
-### 12.1 Conversation surface
-
-Use familiar chat interaction standards:
-
-- visually distinct user and assistant messages;
-- scrollable history with sensible auto-scroll behavior;
-- composer fixed at the panel bottom;
-- Enter submits;
-- Shift+Enter inserts a newline;
-- disabled submit for blank input;
-- visible pending state;
-- cancel control while a request is pending;
-- no automatic duplicate submission;
-- accessible keyboard/focus behavior.
-
-The `frontend-design` plugin may determine precise message styling and micro-interactions.
-
-### 12.2 Answer rendering
-
-Render sanitized Markdown supporting ordinary paragraphs, lists, emphasis, code snippets, and
-small tables. Disable raw HTML and unsafe URL protocols.
-
-Each answer may include a compact evidence disclosure, collapsed by default, containing:
-
-- route and answer basis;
-- SQL/RAG/relationship counts where present;
-- primary entities;
-- relationship-context entities;
-- relationships;
-- warnings/notes.
-
-Never display raw prompts, raw SQL, vectors, credentials, unrestricted canonical JSON, or internal
-stack traces.
-
-Clarification questions from the backend appear as normal assistant messages. Catalog candidates
-appear as compact selectable controls, not a separate catalog page.
-
-### 12.3 Request lifecycle
-
-The current backend is non-streaming. Show honest staged/busy feedback rather than fake token
-streaming. Allow frontend cancellation through `AbortController`; treat server cancellation as
-best-effort. Ignore late responses whose request, session, or active model is no longer current.
-
-For a retryable connection/provider failure, show one user-triggered Retry action. This is an MVP
-convenience expected to be reconsidered later. Never retry an LLM query automatically.
-
-## 13. State and clearing semantics
+## 10. State, persistence, and clearing
 
 Use a small typed store with separate conceptual state for:
 
@@ -665,173 +398,144 @@ Use a small typed store with separate conceptual state for:
 - chat messages and bounded history;
 - manual viewer selections;
 - current query evidence and viewer roles;
+- explanation payload, original highlight identities, and active subgroup;
+- component panel selection and detail state;
+- viewer mode (3D / plan) and active floor band;
 - pending request/cancellation identity;
-- panel dimensions/collapse state.
+- panel dimensions and collapse state.
 
-Persist only appropriate current-tab state to `sessionStorage`. Do not use localStorage for chat
-history. Persist model artifacts separately in IndexedDB.
+All store state is serializable and current-session only. Persist only appropriate current-tab state to
+`sessionStorage`; never place chat history in localStorage. Mutable Three.js / That Open objects, saved
+camera poses, and live clipping objects stay inside the imperative viewer layer, not the store. Model
+artifacts persist separately in IndexedDB (`spec_v008` §2.4).
 
-### 13.1 Clear Chat
+### 10.1 Clear Chat
 
 Clear Chat must:
 
 - cancel/retire the current query;
-- clear visible messages and bounded history supplied to the LLM;
+- clear visible messages and the bounded history supplied to the LLM;
 - clear current answer evidence and query-result highlights/dimming;
+- retire the explanation panel and any component-panel group highlight (both are query-result roles);
 - establish a fresh backend/frontend conversation identity;
 - keep the active model loaded;
 - keep manual viewer selection and selection chips;
-- keep the IndexedDB model cache;
-- keep panel layout preferences.
+- keep the component panel itself, the IndexedDB model cache, and panel layout preferences.
 
 It must not delete or alter database data.
 
-### 13.2 Reset App
+### 10.2 Reset App
 
 Reset App must:
 
 - cancel/retire pending requests and loads;
-- clear messages, LLM history, evidence, manual selections, and result roles;
-- clear the active/pending model;
-- dispose/unload scene geometry and viewer resources;
+- clear messages, LLM history, evidence, manual selections, result roles, the explanation panel, and
+  the component panel;
+- clear the active/pending model and leave floor-plan mode;
+- dispose/unload scene geometry, previews, and viewer resources;
 - return to the initial model-selection state;
 - establish a fresh session identity;
 - keep the IndexedDB model cache;
-- keep safe UI layout preferences if they do not change initial product state.
+- keep safe UI layout preferences that do not change initial product state.
 
 It must not delete stored models, database data, vectors, or prepared artifacts.
 
-Both controls require clear labels/tooltips. Reset App should require lightweight confirmation if
+Both controls require clear labels and tooltips. Reset App requires lightweight confirmation when
 accidental activation would discard a meaningful conversation.
 
-## 14. Performance and resource policy
+## 11. Cross-cutting failure behavior
 
-Prioritize responsiveness and conservative thresholds:
+Provide explicit, recoverable states for: backend unavailable; model list unavailable; asset
+missing/stale; artifact download failure; IndexedDB unavailable or quota denied; worker/WASM
+initialization failure; unsupported or corrupt Fragments artifact; a GlobalId that is not renderable or
+resolvable; query timeout or cancellation; LLM unavailable; SQL/RAG degraded modes returned by the
+backend; and a stale response after a model or reset change.
 
-- load only one active model into the scene;
-- use prepared Fragments, workers, culling/LOD facilities supported by the maintained stack;
-- do not fetch full canonical JSON for selection or chat display;
-- keep selection at five;
-- keep evidence lists bounded by the backend contract;
-- avoid rerendering the whole React tree on camera movement;
-- keep Three.js/That Open mutable objects outside serializable React state where appropriate;
-- debounce resize and identity-resolution work;
-- dispose models, materials, workers, event listeners, object URLs, and GPU resources on switch/reset;
-- cache at most a small number of artifacts initially;
-- measure first-load, cached-load, scene-ready, query, highlight, and reset timing;
-- report actual results rather than inventing unsupported performance claims.
+Errors must be bounded and actionable. Never expose credentials, local paths, stack traces, prompts, or
+provider internals. Never crash the whole UI because one entity cannot be highlighted, one panel cannot
+load, or one optional feature is unavailable — a feature whose data is missing degrades truthfully (it
+is disabled with a stated reason or omitted), and is never faked.
 
-If the current IFC cannot meet usable local interaction with supported Fragments settings, report
-the measured bottleneck before raising limits, adding large dependencies, or reducing identity
-correctness.
+Feature-specific failure behavior: `spec_v008` §8.8 and §9, `spec_v009` §9, `spec_v011` §8.
 
-## 15. Failure behavior
+## 12. Accessibility and desktop support
 
-Provide explicit, recoverable states for:
-
-- backend unavailable;
-- model list unavailable;
-- asset missing/stale;
-- artifact download failure;
-- IndexedDB unavailable/quota denied;
-- worker/WASM initialization failure;
-- unsupported/corrupt Fragments artifact;
-- GlobalId not renderable or not resolvable;
-- query timeout/cancellation;
-- LLM unavailable;
-- SQL/RAG degraded modes returned by backend;
-- stale response after model/reset change.
-
-Do not expose credentials, local paths, stack traces, prompts, or provider internals. Do not crash
-the whole UI because one entity cannot be highlighted.
-
-## 16. Accessibility and desktop support
-
-Target current desktop Chromium/Edge for the local prototype. Maintain sensible behavior at common
+Target current desktop Chromium/Edge for the local prototype and maintain sensible behavior at common
 laptop resolutions. Phone support is not required.
 
 Require:
 
-- keyboard-operable chat/model/reset controls;
+- keyboard-operable chat, model, panel, and reset controls;
 - visible focus indicators;
 - labels/tooltips for icon-only controls;
-- sufficient bright-theme contrast;
-- status text in addition to color;
+- sufficient bright-theme contrast, and status conveyed by text in addition to color;
 - reduced-motion respect for nonessential transitions;
-- an accessible non-canvas representation of selected/result entity names in chat/chips.
+- an accessible non-canvas representation of selected and result entity names in chat, chips, tables,
+  and diagram descriptions.
 
 The 3D canvas itself need not be fully keyboard-navigable in this MVP, but all essential query and
 reset behavior must remain available without precise pointer interaction.
 
-## 17. Security and privacy
+## 13. Security and privacy
 
-- No `OPENAI_API_KEY`, `db_url`, database credential, or complete local source path in frontend
-  source, build output, storage, logs, errors, or network payloads.
-- The frontend calls only the backend HTTP API and approved local viewer-asset route.
-- Sanitize Markdown and URLs.
-- Treat all API strings and model names as untrusted display data.
-- Never construct an asset URL from an arbitrary filesystem path.
-- Do not allow directory traversal through model IDs or asset routes.
+- No `OPENAI_API_KEY`, `db_url`, database credential, or complete local source path in frontend source,
+  build output, storage, logs, errors, or network payloads.
+- The frontend calls only the backend HTTP API and the approved viewer-asset route.
+- Sanitize Markdown and URLs; treat all API strings and model names as untrusted display data.
+- Never construct an asset URL from an arbitrary filesystem path, and do not allow directory traversal
+  through model ids or asset routes.
 - Do not place full model data or chat history in analytics; no analytics are required.
-- Do not add authentication for this local MVP, but keep boundaries compatible with later auth.
+- No authentication for this local MVP, but keep boundaries compatible with later auth.
 
-## 18. Testing and validation
+## 14. Testing and validation
 
-### 18.1 Unit/component tests
+### 14.1 Unit and component tests
 
-Cover:
-
-- generated API type use and response validation;
-- model selector and confirmation;
-- chat submission, Enter/Shift+Enter, cancellation, clarification, error, and manual retry;
-- evidence collapse and safe Markdown;
-- selected-chip maximum/removal;
-- GlobalId resolution scope/deduplication;
-- viewer-action role mapping;
-- moderate fit/camera guard behavior through viewer-adapter tests;
-- stale response rejection;
-- Clear Chat versus Reset App semantics;
-- sessionStorage restoration;
-- IndexedDB key invalidation and quota fallback;
-- no secret/config leakage.
+Cover: generated API type use and response validation; model selector and confirmation; chat
+submission, Enter/Shift+Enter, cancellation, clarification, error, and manual retry; evidence collapse
+and safe Markdown; selection-chip maximum and removal; GlobalId resolution scope and deduplication;
+viewer-action role mapping; picking, moderate-fit, and camera-guard behavior through viewer-adapter
+tests; edge overlay build/recolor/dispose; projected-size eligibility; floor-band geometry and plan-mode
+lifecycle; explanation gate, presentation selection, table/bar/graph rendering, group selection and
+**All results**; component detail/group staleness; stale response rejection; Clear Chat versus Reset App
+semantics; `sessionStorage` restoration; IndexedDB key invalidation and quota fallback; and absence of
+secret/config leakage.
 
 Mock network, viewer, worker, and LLM-backed API behavior. Frontend tests must never call OpenAI or
 PostgreSQL directly.
 
-### 18.2 Browser integration tests
+### 14.2 Browser integration tests
 
-Use a small stable prepared fixture artifact, not the full production IFC, for automated browser
-tests. Cover the critical path:
+Use the small tracked fixture artifact, not the production IFC, for automated browser tests. Cover the
+critical path:
 
 ```text
 start -> list models -> confirm/load -> select object -> ask -> receive answer
 -> highlight primary/context -> click citation -> Clear Chat -> Reset App
 ```
 
-Keep full-model performance validation as a separate local manual check so routine tests remain
-fast and reliable.
+plus deterministic viewer modes that can run against the fixture (floor-plan entry/exit).
 
-### 18.3 Contract tests
+Keep full-model performance validation as a separate local manual check so routine tests stay fast and
+reliable.
 
-Validate the frontend against backend OpenAPI and representative payloads for:
+### 14.3 Contract tests
 
-- model list;
-- viewer asset success/missing/stale;
-- GlobalId resolution;
-- query answers for SQL, RAG, graph, hybrid, clarify, error, and catalog candidate routes;
-- stable `viewer_actions` including empty groups;
-- CORS from `http://localhost:5173`.
+Validate the frontend against backend OpenAPI and representative payloads for: the model list; viewer
+asset success/missing/stale; GlobalId resolution; component details and highlight groups; the floors
+contract; query answers for SQL, RAG, graph, hybrid, clarify, error, and catalog-candidate routes;
+stable `viewer_actions` including empty groups; the additive `answer_explanation` payload; and CORS from
+`http://localhost:5173`.
 
-### 18.4 Full local acceptance test
+Additive backend fields must be proven additive: a non-qualifying response differs from a qualifying one
+only by the new optional field.
 
-Run backend:
+### 14.4 Full local acceptance test
 
 ```powershell
 cd backend
 poetry run uvicorn app.main:app --reload
 ```
-
-Run frontend in a separate terminal:
 
 ```powershell
 cd frontend
@@ -839,1034 +543,68 @@ npm install
 npm run dev
 ```
 
-Prepare the current model artifact once if absent, then verify uncached and cached loading,
-selection identity, representative chat queries, highlighting, citations, both clear operations,
+Prepare the current model artifact once if absent, then verify uncached and cached loading, selection
+identity, representative chat queries, highlighting, citations, panel behavior, both clear operations,
 resource disposal, and database non-mutation.
 
-## 19. Deferred PostGIS direction
+### 14.5 Evidence discipline
 
-PostGIS is valuable for later spatial SQL such as 3D proximity, intersection, bounding boxes,
-centroids, and spatial filtering. It is not part of this frontend specification.
+Report measured results; never invent unsupported performance claims. Headless-browser GL numbers are
+software rendering and are valid only as relative before/after evidence — real interaction smoothness is
+confirmed on the owner's hardware (`spec_v008` §7.1). A costly live LLM benchmark is not rerun for a
+deterministic presentation or viewer change; state plainly when it was skipped.
+
+## 15. Acceptance criteria
+
+The frontend is acceptable only when:
+
+1. React/TypeScript/Vite/npm development and production builds succeed, with typecheck and lint clean.
+2. The design conforms to the minimal bright floating-panel intent.
+3. Backend and frontend remain independent applications.
+4. No frontend code imports backend/ingestion code or contains secrets.
+5. The prepared artifact is reproducible, validated, immutable, and identity-compatible.
+6. The backend serves artifacts safely without parsing IFC or writing the database.
+7. Models load successfully from both network and IndexedDB cache paths.
+8. Viewer selection resolves by GlobalId within the active model, maximum five.
+9. SQL/RAG/graph/hybrid answers produce correct role-based viewer behavior.
+10. Citation clicks center and moderately enlarge objects without excessive zoom.
+11. Panels resize, collapse, stack, and close without breaking the viewer or its centering.
+12. The explanation panel opens only for results that satisfy its deterministic gate, and its subgroup
+    highlighting stays inside the identities the pipeline returned.
+13. The component panel degrades truthfully when type/family data is absent.
+14. Floor-plan mode derives floors from the single authoritative contract and restores the exact prior
+    perspective view.
+15. Clear Chat and Reset App follow their distinct required semantics.
+16. Normal UI actions other than question submission do not invoke an LLM.
+17. Errors are bounded, actionable, and expose no internal secrets or paths.
+18. Automated tests pass without live OpenAI or direct database access from frontend tests.
+19. Full local integration works with backend `:8000` and frontend `:5173`.
+20. No IFC/database/vector/PostGIS mutation occurs during frontend operation or validation.
+21. No excluded feature has been added.
+
+## 16. Standing implementation rules
+
+- **Backend contract first.** A frontend feature that depends on a new or extended backend contract must
+  not be implemented before that contract exists, is tested, and its types are regenerated. The contract
+  work and the frontend work are separate tasks.
+- **Additive contracts.** Extend response envelopes with optional fields; a client ignoring them keeps
+  working. Never repurpose an existing field's meaning.
+- **Deterministic by default.** Any behavior that can be computed from already-returned data must be,
+  and structurally so — presentation modules take no database session and import nothing from the query,
+  execution, or LLM layers.
+- **Truthful degradation.** Missing source data disables a control with a stated reason; it is never
+  inferred from names, geometry, proximity, or an LLM.
+- **One owner per rule.** New requirements go into the owning specification and are referenced, not
+  duplicated, elsewhere.
+
+## 17. Deferred PostGIS direction
+
+PostGIS is valuable for later spatial SQL such as 3D proximity, intersection, bounding boxes, centroids,
+and spatial filtering. It is not part of this frontend specification family.
 
 A future PostGIS specification should keep geometry ingestion under the independent ingestion
 application and expose only safe read-only spatial operations to the backend. Even then, PostGIS
 geometry does not replace the optimized Fragments viewer artifact.
 
 Do not install PostGIS, add geometry tables, extract IFC geometry into PostgreSQL, or add spatial
-planner operations under v006.
-
-## 20. Acceptance criteria
-
-The frontend MVP is acceptable only when:
-
-1. React/TypeScript/Vite/npm development and production builds succeed.
-2. The design is implemented using Claude's `frontend-design` plugin and conforms to the minimal
-   bright floating-panel intent.
-3. The backend and frontend remain independent applications.
-4. No frontend code imports backend/ingestion code or contains secrets.
-5. The prepared artifact is reproducible, validated, immutable, and identity-compatible.
-6. The backend serves artifacts safely without parsing IFC or writing the database.
-7. The current model loads successfully from both network and IndexedDB cache paths.
-8. Viewer selection resolves by GlobalId within the active model, maximum five.
-9. SQL/RAG/graph/hybrid answers produce correct role-based viewer behavior.
-10. Citation clicks center and moderately enlarge objects without excessive zoom.
-11. The floating chat panel resizes/collapses without breaking the viewer.
-12. Clear Chat and Reset App follow their distinct required semantics.
-13. Normal UI actions other than question submission/model-catalog questions do not invoke an LLM.
-14. Errors are bounded, actionable, and do not expose internal secrets/paths.
-15. Automated tests pass without live OpenAI or direct database access from frontend tests.
-16. Full local integration works with backend `:8000` and frontend `:5173`.
-17. No IFC/database/vector/PostGIS mutation occurs during frontend operation or validation.
-18. No excluded feature is added merely because a component library makes it available.
-
-## 21. Required implementation sequencing
-
-Implement in two tasks:
-
-1. A narrow backend viewer-contract task: model list, safe artifact delivery, GlobalId resolution,
-   browser selection contract, CORS, and contract tests. No frontend implementation.
-2. A frontend implementation task using the completed backend contract and Claude's
-   `frontend-design` plugin.
-
-Do not combine these tasks. The frontend task must stop if the backend contract prerequisite is
-not complete or if the installed `frontend-design` plugin cannot be invoked.
-
-## 22. Implementation status (Tasks 10 + 11 — delivered)
-
-Both sequenced tasks are complete (details: `tasks/task10_done.md`, `tasks/task11_done.md`).
-
-- Frontend delivered at `frontend/`: React 18 + TS strict + Vite 6 + npm; That Open
-  `@thatopen/components`/`@thatopen/fragments` 3.4.6, three 0.185.1, zustand 5; design implemented
-  with the `frontend-design` plugin ("measured drawing": bright sheet, blueprint-blue primary,
-  ochre context, teal manual selection, Space Grotesk / IBM Plex Sans / IBM Plex Mono).
-- Architecture: single typed API client over generated OpenAPI types (`npm run gen:api`); all
-  imperative scene code in `src/viewer/ViewerAdapter.ts`; zustand store for serializable state +
-  controller for async flows; fragments worker bundled locally (no CDN).
-- Prepared artifact: `npm run prepare:model` converted the Schependomlaan IFC (65.1 MB) to a
-  validated 5.48 MB `.frag` in ~5 s at `model_assets/1/{sha256}.frag` with GlobalId identity
-  round-trip validation; artifact gitignored, small `smoke-wall` fixture tracked for tests.
-- Caching: IndexedDB keyed by model id + fingerprint + format version, LRU 2, quota fallback;
-  survives Clear Chat and Reset App. Measured: uncached load→ready 2.8 s, cached 2.6 s.
-- Validation: typecheck/lint/39 unit tests/build/2 Playwright e2e all green; backend regression
-  268 tests green; full live integration exercised SQL/RAG/graph questions with role-based
-  highlighting, citations, clear/reset; DB and vector metadata byte-identical before/after.
-- PostGIS remains deferred (§19).
-
-### 22.1 Task 13 backend additions (delivered) — prerequisite for Task 14
-
-`tasks/task13_done.md` extended the backend contract only; no frontend file was changed. It added
-the component detail/group endpoints (§10.8), the `result_summary` and viewer-truncation response
-fields (§10.9), opt-in `BIM_RAG_TRACE=1` terminal tracing, and separated the exact/viewer/evidence
-limits. Backend regression: 349 tests green (268 baseline + 81 new), zero OpenAI calls.
-
-The frontend `frontend_openapi_snapshot.json` was deliberately **not** regenerated by Task 13 —
-that is Task 14's first step (`npm run gen:api`), so the pre-Task-14 frontend continued to run
-unchanged against the additive contract in between.
-
-## 23. Implementation status (Task 14 — delivered)
-
-`tasks/task14_done.md` refined the MVP into the current desktop viewer. Built on the Task 13
-contract (§10.8, §10.9), with `src/types/api.ts` regenerated from it first. Design implemented with
-the `frontend-design` plugin; no scope, API semantics, limit, or truthful-data rule was changed.
-
-### 23.1 Centralized viewer theme
-
-`frontend/src/viewer/viewerTheme.ts` is the single place any viewer color/opacity/camera constant
-may live — `highlightRoles.ts` and the inline background/grid colors in `ViewerAdapter` are gone.
-
-Organizing rule: **base model geometry is achromatic; every semantic role is chromatic.** Roof/wall/
-other are pure cool grays; primary/context/manual stay blueprint blue / ochre / teal. Role
-membership therefore reads as *presence of color* rather than hue discrimination, which survives
-color-vision deficiency and the varied grey/beige materials typical of BIM models.
-
-```text
-roof #67737f · wall #bcc6d0 · other #dce2e8
-primary #1f6feb · context #e8a94f (0.92) · manual #0fb5c9
-dim #c7ced6 (0.16) · plane #c4cdd6 (0.30) · background #e9edf1
-```
-
-Wall = `IfcWall` + `IfcWallStandardCase` (+ `IfcWallElementedCase`); roof = `IfcRoof`, plus
-`IfcSlab` **only** on an explicit `ROOF` predefined type; everything else `other`. Semantic base
-colors are restored after every highlight clear, never one uniform material.
-
-**Measured on the current model: it contains no `IfcRoof`, and all 279 `IfcSlab` carry no
-`PredefinedType` at all** (confirmed in both the database and the Fragments artifact; their names
-`dekvloer`/`vloerveld` are Dutch for floors). The roof role therefore matches zero entities and
-nothing renders dark — the truthful result, since inferring roof from name or class is forbidden.
-Wall coloring works (880 walls). A future model carrying explicit roof data colors automatically.
-
-### 23.2 Camera and navigation
-
-All inside `ViewerAdapter`. Left-drag pans, middle-drag orbits, wheel zooms (camera-controls
-defaults left to rotate, so this is set explicitly); a plain left click within a 4 px threshold
-selects, beyond it the gesture was a pan. Orbit pivot: cursor raycast → visual base plane →
-current target, never altering selection. Perspective uses three.js's own focal-length/film-gauge
-support (`filmGauge = 36`, `setFocalLength(50)`) ≈ 26.99° vertical, re-applied on resize. Zoom-out
-bound = `max(3 x bbox diagonal, 25 m)`, finite and recomputed per load. The base plane sits at the
-loaded model's own geometric minimum (`model.box.min.y`, scene-space, after the Fragments
-coordination transform) rather than IFC/world elevation 0 — amended by Task 19 (§26.3) because that
-elevation can sit above or below a model's actual geometry — with `depthWrite = false` so
-below-plane geometry is never clipped or occluded.
-
-### 23.3 Highlighting, chat, and the component panel
-
-Count/aggregate/list/RAG/graph/hybrid results all highlight their full viewer match set. Measured
-live: "How many doors are there in total?" → exact **205** with **205** highlighted (previously
-zero); "Show me all the walls" → exact **880** (648 + 232) with **880** highlighted while LLM
-evidence stayed at **50**. Above 2,000 the deterministic set is applied with a truncation notice,
-and the exact total stays distinct from the highlighted count.
-
-Chat shows the concise answer, exact total, and a compact class summary ("880 walls" — wall
-subtypes merge under one label); no component dump, evidence stays behind its collapsed disclosure,
-and one component's details appear only on the backend's explicit sample-detail intent.
-
-The component panel floats immediately left of chat (measured 1440x900: panel x=728 w=320, chat
-w=360 while paired, viewer keeps 728 px). It carries a lazy isolated preview, a bounded read-only
-detail list, and `Instance`/`Same type`/`Same family` actions. On the current model type/family are
-**disabled with a concrete reason** and absent fields are omitted. The actions call §10.8 and never
-create a chat message, LLM call, or session mutation; stale detail/group responses are rejected
-across rapid selection, close, model switch, Clear Chat, and Reset App.
-
-**Preview resource strategy**: it renders only the selected instance from geometry buffers
-extracted out of the already-loaded model (`getItemsGeometry`) — no second download, no re-parse,
-no model clone — and disposes every GPU/listener resource on change/close/switch/reset. Measured
-(precise-memory Chromium): shell 134.8 MB → +model 155.3 MB → +panel/preview 153.2 MB (**no
-measurable cost**) → after close 137.1 MB → after reset 135.2 MB (≈ shell baseline, no leak). Load →
-ready 2.6 s, matching the Task 11 baseline.
-
-### 23.4 Clear Chat and Reset App (§13 unchanged)
-
-**Reset App** moved to the viewer's top-left (measured at 20,20); **Clear Chat** stays in the chat
-panel (x=1341) and the bottom-left Fit control is unchanged — three distinct actions, never
-adjacent. Their §13.1/§13.2 semantics are unchanged; Clear Chat additionally drops the panel's group
-highlight (a query-result role) while keeping the panel, selection, model, and cache.
-
-### 23.5 Validation
-
-`gen:api` / `typecheck` / `lint` / **117 unit tests** (was 39) / `build` / **2 e2e** all green, plus
-full local integration against the real backend, frontend, and artifact. Database and vector
-metadata identical before and after (6989 / 3473 / 10462; 10462 embeddings, dim 1024). PostGIS
-remains deferred (§19).
-
-## 24. Implementation status (Task 15 — delivered)
-
-`tasks/task15_done.md` refined viewer selection and appearance (backend terminal-output changes are
-recorded in `spec_v005` §23). Zoom limits and the Fit control were explicitly out of scope.
-
-### 24.1 Entity edges (kept, measured)
-
-Every rendered entity carries ~1px feature edges: ONE merged `THREE.LineSegments`
-(`src/viewer/EdgeOverlay.ts`) built asynchronously after scene-ready from the already-loaded
-model's geometry, with an RGBA vertex-color attribute and a localId→range index. Edge color always
-follows the entity's current face role (base roof/wall/other and every highlight role), darkened
-×0.72; transparent faces get more-opaque edges (dim 0.16→0.40, unfocused 0.45→0.75). All values sit
-in `viewerTheme.ts` (`EDGES`). Recolors rewrite only changed entities and upload only the dirty
-span. Measured on the full model (matched headed runs): 187,411 segments; build 1.08 s async;
-load-ready and 880-wall highlight updates within noise of edges-off (12.5→11.1 ms); orbit 60.5 fps
-both; +12 MB settled heap. Disposal on unload/switch/reset; a mid-build model switch abandons
-cleanly. Gotcha for future work: yield with MessageChannel, not `setTimeout(0)` — background-tab
-timer clamping turned the ~1 s build into ~30 s; and headless-Chromium GL numbers are software
-rendering, not the real GPU.
-
-### 24.2 Picking under active query highlighting (amends §11.2/§11.3; ray-through amended by Task 19 §26.1)
-
-While blue primary results are present, only they can be picked: a ray meeting only dimmed
-non-results or ochre context geometry is treated exactly like an empty-space click — it clears the
-current focus rather than silently no-oping — checked against the already-resolved local-id set
-BEFORE any selection state changes (no flicker, no replacement, no backend/LLM call). As of Task 19
-(§26.1), transparent/dimmed geometry in front of a blue result along the same ray no longer blocks
-it: picking considers every ordered ray intersection and selects the nearest blue result. A plain
-click focuses a blue result and opens/updates the component panel; Ctrl/Shift additive selection
-stays primary-only and capped at five; empty-space clicks clear the focus. Focused results stay
-opaque `#1f6feb`; unfocused primaries drop to the same blue at 0.45 opacity (`primaryUnfocused`) —
-never teal; removing the last focus restores all primaries to opaque blue. Without query roles, §11.2 behavior
-is unchanged (anything pickable, teal manual selection).
-
-### 24.3 Component preview height
-
-The isolated preview viewport doubled to `min(320px, 36vh)` (`PREVIEW.viewportHeightPx`),
-responsive on short viewports; the detail list below remains scrollable and the panel is otherwise
-unchanged.
-
-### 24.4 Validation
-
-Backend 366 tests / frontend 138 tests (117 + 21 new picking/edge/preview) / build / 2 e2e green;
-headed-browser screenshots verified base edges, 880-wall highlighting with edges, focused/unfocused
-appearance, and the 320 px preview. Database, vectors, and the prepared artifact unchanged.
-
-## 25. Implementation status (Task 18 — delivered)
-
-`tasks/task18_done.md` made the viewer's rendering adaptive and invalidation-driven instead of
-continuous, motion/profile-aware, and spatially culled, in response to measured lag and idle GPU
-power draw on the larger of the two test models ("model 2": 27,388 items, 5,370,488 edge vertices —
-substantially larger than the Schependomlaan reference §24.1 was measured against). No backend, RAG,
-LLM, ingestion, or database change; no category/discipline/storey-based hiding was introduced. All
-numbers below are from headless Chromium (software rendering — not the RTX 5080 Laptop the owner
-validated on; see the completion report for the machine-specific subjective pass) and are load-bearing
-only as *relative* before/after evidence, per §24.1's own documented gotcha about headless GL numbers.
-
-### 25.1 Manual, invalidation-driven main rendering
-
-`SimpleRenderer` runs in its supported MANUAL mode (`RendererMode.MANUAL`) instead of the library's
-default AUTO, driven by one centralized scheduler (`src/viewer/RenderScheduler.ts`) that flips
-`needsUpdate` on invalidation (camera motion, Fragments results, load/unload, highlight, edge
-changes, fit, pixel-ratio change, base-plane changes, resize, visibility resume) and coalesces
-same-tick requests into one frame. `document.hidden` suspends the entire `Components` tick loop
-(`Components.enabled = false`, not just the draw call — verified in the installed library source);
-resuming calls the library's own documented restart path (`Components.init()`) and renders one
-bounded frame. Measured on model 2: continuous idle rendering eliminated (**0 draw calls over a 3 s
-idle window**, versus continuous rendering every tick before); a hidden tab drops from ~91
-`requestAnimationFrame` calls/1.5 s to **0**, resuming at ~61/1 s with no accumulated burst.
-
-### 25.2 Adaptive main-viewer pixel ratio (amends the implicit `min(devicePixelRatio, 2)` default)
-
-Replaces the library's fixed ceiling of 2 with `PIXEL_RATIO` (`viewerTheme.ts`): moving
-1.0–1.25 (balanced) / 0.85–1.0 (large-model), stationary 1.5 (balanced) / 1.25 (large-model), always
-additionally capped at the display's own `devicePixelRatio`. The moving value steps to its low end
-only under a sustained-slow verdict from a hysteresis/cooldown-gated frame-time sampler
-(`ViewerPerformanceController`, 30-sample window, 1.5 s minimum between verdict flips) — never on one
-slow frame. Measured on model 2: stationary settles at 1.25 (large-model profile); moving
-sustained-slow correctly stepped to the 0.85 low end under real measured frame cost in this
-environment; CSS canvas size is unaffected by internal drawing-buffer changes (confirmed 1400×900
-unchanged across all pixel-ratio transitions); picking correctness is unaffected (verified after an
-orbit).
-
-### 25.3 Fragments LOD/visibility update throttle
-
-Drives the installed `FragmentsModels.settings.maxUpdateRate` (a public, pre-existing throttle —
-verified in the installed package source, already gating every `core.update()` call before its
-`force` branch) from motion/profile state instead of a duplicate hand-rolled throttle: 120 ms
-(balanced) / 200 ms (large-model) while moving, 100 ms (the library default) at rest. Highlight/load
-calls remain forced, wrapped in a guard that zeroes the rate for the duration of the call so a
-forced update can never be silently skipped by a throttle window set moments earlier during motion.
-Measured on model 2: throttled calls during a rapid drag settle to a couple per burst (not one per
-tick); exactly one forced call fires at rest.
-
-### 25.4 Spatially chunked edge overlay (supersedes §24.1's single-object design)
-
-§24.1's "ONE merged `THREE.LineSegments`... `frustumCulled` forced false" design is superseded.
-`EdgeOverlay.ts` now buckets each entity's edge-vertex centroid into a uniform 3D grid cell (sized
-from the model bounding box and item count) during the same yielded batch-extraction loop, and
-mounts one `LineSegments` per populated cell with a real computed bounding sphere/box and
-`frustumCulled = true`. Measured on model 2: **71 populated chunks** (within the 50–150 target),
-each independently frustum-culled; zooming into one facade dropped draw calls from 952 to ~410–422
-and triangles from ~1.03M to ~256–258k (both largely from Fragments' own LOD, compounded by edge
-culling) with average FPS rising from ~4 to ~55–56 in the same headless environment. A diagnostic
-(edges fully disabled) measured on the SAME model before this rewrite showed disabling the
-whole-model overlay alone roughly doubled stationary average FPS and cut the worst single
-main-thread long task from ~2.8 s to ~0.2 s — the strongest single piece of evidence motivating this
-rewrite. The `localId -> {chunkIndex, start, count}` index is retained for deterministic recoloring;
-`recolor()` uploads only the touched span of each touched chunk (not a global envelope). Disposal
-iterates every chunk's geometry/material; a build finishing after `dispose()` is ignored via the
-existing disposed-flag guard. Model-switch round-trip (model 2 → Schependomlaan → model 2) reproduced
-identical chunk/vertex/item counts with no console errors.
-
-Screen-size LOD culling (`EdgeOverlay.updateLod`, run at camera rest and on resize, not per frame
-during motion) hides a chunk once its bounding-sphere projected size drops below 2 px (4 px to
-restore, hysteresis), with a relaxed 0.75 px / 1.5 px pair for chunks containing a selected/query-
-primary entity (`highlightCount`, maintained incrementally by `recolor()`), so results stay legible
-farther from the camera than base context, per the "no public per-object LOD threshold API" finding
-below.
-
-Base-model edges hide on camera `wake` (zeroing only the ALPHA channel of non-highlighted vertex
-ranges — selected/query-primary edges are never touched) and restore 150 ms after `rest`, cancelled
-and restarted if motion resumes before the delay elapses.
-
-No public Fragments API exposes numeric per-object LOD screen-size thresholds (`screenSize` is a
-private method in the installed package's type declarations) — the surrounding update-frequency,
-pixel-ratio, and custom-edge-chunk LOD policies above stand in for it, as the task's own documented
-fallback allows; no private/minified internals were patched.
-
-### 25.5 Edge angle threshold (amends §24.1's fixed 25°)
-
-`EDGES.thresholdAngleDeg` is now `{ balanced: 25, largeModel: 40 }`, chosen by the model's
-provisional profile before the edge build starts (so a large model builds at the coarser angle on
-its first pass, never a rebuild). Evaluated 25°/38°/40° on model 2: **no measurable vertex-count
-difference across the range for this specific model** (5,370,488 vertices at every tested value) —
-most of its edges are either true ~90° corners (included at any threshold in this range) or
-coplanar-triangulation diagonals at ~0° (excluded at any threshold in this range), so the angle
-choice is not a performance lever for this artifact. `balanced` is kept at the unchanged, previously
-validated 25°; `largeModel` is set to 40° (the top of the accepted range) as a zero-measured-cost
-hedge for a future model with more curved/faceted geometry, where the threshold would matter more.
-
-### 25.6 Query-highlight transparency (amends §23.1's dim/context values)
-
-Benchmarked three candidates on model 2 with real query-primary roles applied (via direct
-client-side role application — no OpenAI/backend call): (1) the original 0.16 opacity plus
-motion-hidden edges; (2) fully opaque (1.0) light-neutral with edges disabled; (3) moderate 0.35
-opacity with edges disabled. **Candidate 2 was rejected after live testing**: with non-result
-geometry fully opaque, every sampled interior/hidden query-primary result was occluded from every
-external camera angle — a real, screenshotted failure of "primary and manual selections must remain
-clearly blue and legible," material for a query tool whose results are frequently interior elements
-(partition walls, MEP, doors), not just exterior-visible surfaces. Candidate 3 was selected:
-`VIEWER_OPACITY.dim = 0.35` (was 0.16), `EDGES.alpha.dim = 0` (was 0.4, i.e. non-result edges are now
-fully disabled rather than merely dimmed). This keeps every primary visible through the same
-transparency guarantee as the original while measurably reducing visual line density.
-
-### 25.7 Component preview scheduling (amends §24.3's implicit indefinite auto-rotation)
-
-`PreviewScene` now: gates rendering on an `IntersectionObserver` (pauses fully off-screen/obscured)
-and `document.visibilitychange` (pauses backgrounded), stopping the RAF chain entirely rather than
-skipping work inside it; caps auto-rotation at 30 fps (balanced) / 20 fps (large-model, matching the
-main viewer's profile); bounds auto-rotation to a **12 s lifetime** (previously indefinite
-pause/resume); and uses a dynamic pixel ratio (1.0 while actively dragging/wheel-zooming, 1.25
-otherwise, including while auto-rotating). Measured on model 2's component panel: ~72 draw calls
-during a 2 s auto-rotating window, **0 draw calls** in a 2 s window sampled after the 12 s lifetime
-expired while idle.
-
-### 25.8 Adaptive profiles and instrumentation
-
-`detectProfile()` (`src/viewer/profileDetection.ts`) classifies "balanced" vs "large-model" from
-artifact byte size, item count, and (once known) edge vertex count only — never model name, ID,
-category, discipline, or storey — with hysteresis against the previous verdict, called twice per
-load (provisional right after the artifact downloads, final once the edge build resolves). Model 2
-(27,388 items, 5,370,488 edge vertices) is automatically classified `large-model`; a small,
-discoverable-but-secondary control in the existing bottom-left status readout
-(`perf: <profile> (auto|manual)`, cycling Automatic → Balanced → Large model on click) lets the user
-override it, taking effect immediately via the same shared `ViewerPerformanceController` every
-adaptive system already subscribes to — no reload required.
-
-A dev-only, opt-in (`?perf=1`) instrumentation overlay (`ViewerInstrumentation.ts` +
-`ViewerInstrumentationOverlay.tsx`) reports FPS, frame time, draw calls/triangles/lines, canvas
-size and effective pixel ratio, long-task count, forced-vs-throttled Fragments update counts, edge
-build duration/vertex/chunk counts, model item count, and current motion/profile state. It is never
-constructed outside `import.meta.env.DEV` plus the explicit runtime opt-in, sends no telemetry
-externally, and adds no backend logging.
-
-### 25.9 Validation
-
-Frontend unit suite green (173 tests, 16 files, including new coverage for the scheduler,
-performance controller, profile detection, spatially chunked edge overlay, motion-hide/restore, and
-the profile-override adapter API); typecheck, lint, and production build all clean. One pre-existing
-Playwright e2e failure (`critical-path.spec.ts`'s evidence-disclosure assertion) was traced to
-already-uncommitted, unrelated work that removed `EvidenceDisclosure`/`ResultSummaryView` rendering
-from `Message.tsx` before this task began — not a regression introduced here, and out of this task's
-scope to fix. Baseline-vs-final measured comparison, selected numeric values, and the owner's
-real-hardware subjective validation are recorded in `tasks/task18_done.md`. Database, vectors, and
-the prepared artifact format are unchanged.
-
-## 26. Implementation status (Task 19 — delivered)
-
-`tasks/task19_done.md` corrected three viewer presentation defects — picking, camera centering, and
-the base plane. No backend, ingestion, database, IFC, or query-pipeline change; no source geometry,
-coordinate, or prepared-artifact mutation.
-
-### 26.1 Pick through transparent non-results to blue results (amends §24.2)
-
-`ViewerAdapter.resolvePickLocalId` branches only while query-primary roles are active and at least
-one blue result exists: it calls the Fragments-supported `model.raycastAll(...)` (one local worker
-round trip, no backend/LLM call), filters the ordered intersections to the already-resolved
-`queryPrimarySet`, and returns the nearest eligible hit by `distance`. Transparent/dimmed geometry is
-never hidden or given a per-entity picking mesh — it is simply excluded as an occluder for this
-filtered ray query, exactly as before for face rendering. A ray with no blue hit is treated
-identically to a total miss (the pre-existing empty-space-click path), which — as a deliberate
-behavior change from Task 15 — now clears a non-additive selection instead of silently no-oping,
-since dimmed geometry is meant to be transparent to picking rather than a rejecting wall. Without
-active roles, picking is unchanged (single nearest-hit `model.raycast`). Both focused and unfocused
-blue primaries stay eligible; the additive-selection cap and existing middle-button orbit-pivot
-raycast are untouched.
-
-### 26.2 Center within the unobstructed left region (amends §11.1, §23.2)
-
-`ViewerAdapter.setViewportObstruction(px)` — called from `App.tsx` via `effectiveViewportObstructionPx`
-(`state/store.ts`), which reuses the same live chat width and component-open state already driving
-the `--chat-w` CSS variable, never a hard-coded copy — stores the current right-side panel width and
-calls `applyViewOffset()`, the single method behind all camera centering. It uses three.js's own
-`camera.setViewOffset(leftWidth, canvasHeight, 0, 0, canvasWidth, canvasHeight)` (`leftWidth =
-canvasWidth - obstructionPx`, floored at `VIEWER_CAMERA.minEffectiveWidthFraction` of the canvas):
-passing the narrower `leftWidth` as the offset's `fullWidth` sets `camera.aspect =
-leftWidth / canvasHeight` for `CameraControls.fitToBox`'s synchronous distance calculation (so a fit
-sizes content to the visible region, not the full canvas), while the rendered `width`/`height`
-(`canvasWidth`/`canvasHeight`) keep the final image undistorted and content fit-centered on the look
-axis lands exactly at pixel `leftWidth / 2` — the visible-region centroid — with no extra shift term.
-Because this only edits the projection matrix, not camera position, Fragments' own
-camera+mouse+dom picking and the existing orbit-pivot raycast stay pixel-correct with no special
-casing. `fitBox` (the one method behind `fitAll`, query-result fit, citation fit, and component-panel
-group fit alike) calls `applyViewOffset()` before `fitToBox`, so every fit/focus operation shares
-identical viewport logic. `resize()` re-applies it from the fresh canvas size. Calling
-`setViewportObstruction` alone (a panel opening, closing, collapsing, or resizing) re-centers the
-already-framed view via the same offset math without moving the camera or calling `fitToBox` — no
-unexpected reset. The 50 mm lens, existing fit expansion/minimum-fit-size, and the finite zoom-out
-bound are all untouched (fov and the bbox-diagonal zoom bound are independent of this projection
-offset).
-
-### 26.3 Base plane at the model's geometric minimum (amends §23.2)
-
-`resolveGroundY` now sets `groundY = model.box.min.y` (scene-space, after the Fragments coordination
-transform — the same box already used for camera fitting and the zoom bound) instead of deriving it
-from `getCoordinationMatrix()`'s IFC/world elevation 0. A missing, empty, or non-finite box falls
-back to scene `0`. The value resets to `0` on `unloadModel()`/model switch and is recomputed on every
-successful load; `getGroundY()` (unchanged test seam) now returns this geometric-minimum value, which
-also backs the orbit-pivot fallback plane (`setPivotFromCursor`). The grid's material, opacity,
-extent, and non-occluding `depthWrite = false` behavior are unchanged; below-plane geometry is never
-clipped, hidden, or moved. This is a presentation-only reference value — never reported as an
-`IfcBuildingStorey` elevation or the IFC coordinate origin, and no IFC file, database row, or prepared
-artifact is read, translated, or rewritten to compute it.
-
-### 26.4 Validation
-
-Frontend unit suite green (**196 tests, 17 files** — up from the 173/16 baseline in §25.9: new
-picking-through-transparency and nearest-blue-hit cases in `viewer-picking.test.tsx`, new
-geometric-minimum/negative/positive/fallback/reset cases in `viewer-controls.test.ts`, and a new
-14-case `viewer-viewport-offset.test.ts`); typecheck, lint, and production build all clean.
-Playwright critical-path: 1 of 2 specs green; the other fails on
-the same pre-existing, unrelated `evidence-disclosure` assertion recorded in §25.9 (traced to
-already-uncommitted work that removed `EvidenceDisclosure` rendering before this task began) — not a
-regression from this task, and confirmed unrelated since none of the three fixes touch chat/evidence
-rendering. Manual validation against a real loaded model (§5 of `tasks/task19_done.md`: click-through
-selection, panel-driven recentering across chat/component-panel states, and base-plane placement on
-models whose geometric minima differ from IFC elevation zero) is left to the owner's local
-backend+browser environment, consistent with this project's existing pattern for real-hardware/
-real-model checks (§25.9's real-GPU validation). Database, vectors, and the prepared artifact format
-are unchanged.
-
-## 27. Implementation status (Task 20 — interaction-time regression fix)
-
-`tasks/task20_done.md` corrects an interaction-time regression the owner observed on the real RTX
-5080 Laptop GPU after Task 18: model 2 (27,388 items / 5,370,488 edge vertices / 71 spatial edge
-chunks) lagged more during orbit/pan/zoom than before Task 18, even though stationary GPU usage had
-improved. No backend, ingestion, database, or query-pipeline change. Every Task 18 stationary/hidden-
-tab power-saving mechanism is preserved unchanged; only interaction-time behavior is corrected.
-
-### 27.1 Edge motion-hide replaced with chunk visibility, not per-vertex alpha (amends §25.4)
-
-`EdgeOverlay.setMotion()` no longer calls a bulk per-vertex alpha rewrite (`setBaseEdgeAlpha`,
-removed) across all populated chunks on every motion start/stop. Camera motion now toggles each
-populated chunk's `THREE.LineSegments.visible` directly — a bounded O(chunks) (tens to ~160) boolean
-write that actually excludes the geometry from the draw, never a per-vertex color rewrite, never a
-GPU color-buffer upload (`BufferAttribute.addUpdateRange`/`needsUpdate` are never touched by motion —
-unit-tested by spying on `THREE.BufferAttribute.prototype.addUpdateRange` across a full
-hide/restore cycle and asserting zero calls). Screen-size LOD culling (§25.4/§25.8) and motion hiding
-now derive a chunk's final visibility through one shared `applyChunkVisibility()` helper
-(`visible = !motionHidden && !lodCulled`), so the two mechanisms can never fight each other — an
-LOD-culled chunk restored from motion-hidden state stays correctly culled rather than incorrectly
-reappearing. The existing `EDGE_RESTORE_DELAY_MS` cancel/restart timer semantics are unchanged.
-
-### 27.2 Selected/query-primary edges: a small separate highlight overlay (amends §25.4)
-
-Selected and query-primary edges no longer stay visible by being spared from an alpha-zero sweep
-inside the base chunks. `EdgeOverlay` now maintains a second, small, always-separate
-`THREE.LineSegments` object containing ONLY the current query-primary/manual/unfocused-primary
-entities' edges, built exclusively inside `recolor()`'s existing per-entity role-diff loop (no new
-full scan) whenever an entity's role enters or leaves the highlighted set. Its positions/colors are
-sliced directly out of the owning base chunk's already-extracted typed arrays — no additional worker
-round trip, no whole-model clone, one object total (never one per entity). The highlight overlay is
-visible ONLY while base chunks are motion-hidden (at rest the base chunks already draw these same
-vertices in the correct color, so showing both would be redundant overdraw) and is rebuilt only on a
-genuine highlighted-set/color change — unit-tested that repeated `setMotion(true)`/`setMotion(false)`
-transitions with no intervening `recolor()` leave the highlight geometry's attribute array reference
-byte-identical (no rebuild), while a role change updates it bounded to only the affected entities'
-vertex counts. `dispose()` releases both the base chunks and the highlight overlay.
-
-### 27.3 Fragments updates return to rest-only during motion (amends §25.3)
-
-The per-render-tick handler in `ViewerAdapter.init()` no longer calls an unforced
-`fragments.core.update()` every 120ms (balanced) / 200ms (large-model) while the camera moves — the
-diagnosed source of periodic worker/LOD frame stalls during interaction. The only remaining call site
-of `fragments.core.update()` anywhere in the viewer is the pre-existing `forceFragmentsUpdate()`,
-always invoked with `force = true` (model load, highlight change, camera rest, resize/visibility
-restoration) — verified by exhaustive grep, not merely by removing the call in isolation.
-`FRAGMENTS_THROTTLE_MS`/`applyFragmentsThrottle()` (the public `maxUpdateRate` configuration) are left
-in place as a harmless, inert safety net rather than removed, since they were not themselves the
-diagnosed cause.
-
-### 27.4 Pixel ratio frozen for the duration of one continuous interaction (amends §25.2)
-
-`ViewerAdapter` no longer re-applies the adaptive main-viewer pixel ratio on every
-`ViewerPerformanceController.onSustainedSlowChange` flip — that reactive subscription (the actual
-source of Task 18's mid-gesture drawing-buffer churn) is removed. `applyPixelRatio()` itself, and its
-existing high/low moving-range selection driven by `isSustainedSlow()`, are unchanged; it is now only
-invoked on a real motion or profile transition, so the chosen value is applied once when a gesture
-starts and once when it rests, never reallocated again inside the same continuous interaction. In
-practice this converges to the large-model moving low value (0.85) once sustained-slow has already
-been observed by the time a drag begins, matching the task's cited figure, while preserving Task 18's
-frame-time-driven adaptivity for the initial choice.
-
-### 27.5 Corrected frame-time sampling excludes idle gaps (amends §25.2's supporting mechanism)
-
-`ViewerPerformanceController` gained `recordTick(nowMs)`, which owns tick-timestamp bookkeeping
-internally instead of trusting a caller-computed delta: while resting, no sample is recorded and the
-internal timestamp resets; every real motion transition (`setMotion()`) also resets it, so the very
-first tick after a gesture starts is skipped rather than measured against a stale timestamp left over
-from an idle/stationary gap. `ViewerAdapter`'s per-tick handler was simplified to a single
-`this.perf.recordTick(performance.now())` call, replacing a local `lastTickAt` variable that
-previously fed every tick unconditionally into the rolling sample regardless of motion state. A new
-`getMovingFrameStats()` reuses the existing 30-sample ring to expose moving-only average/worst frame
-interval without duplicate storage. Unit-tested: an idle tick recorded before motion starts never
-contributes a sample; the first post-transition tick is skipped; a resting→moving→resting→moving
-sequence never bridges a stale cross-boundary delta.
-
-### 27.6 Focused instrumentation additions (§18's development-only overlay)
-
-`InstrumentationSnapshot` gained `movingFps`/`movingFrameIntervalAvgMs`/`movingFrameIntervalWorstMs`
-(from `ViewerPerformanceController.getMovingFrameStats()`), `baseEdgeChunksVisibleDuringMotion`/
-`highlightEdgeVertexCount`/`highlightEdgeDrawables` (from `EdgeOverlay`'s new getters), and
-`pixelRatioChangesThisInteraction` (a counter reset on every motion transition, incremented from
-`applyPixelRatio()` after a real `setPixelRatio()` call). All are assembled in
-`ViewerAdapter.getInstrumentationSnapshot()`, the only object with references to all three source
-classes, and merged onto `ViewerInstrumentation`'s existing base snapshot. "Edge color bytes uploaded
-because of motion transitions" is intentionally not added as a live counter (would require globally
-wrapping `THREE.BufferAttribute`, disproportionate to the task) — it is instead proven structurally
-by §27.1's unit test. Still dev-only (`import.meta.env.DEV` + `?perf=1`), still negligible cost when
-disabled.
-
-### 27.7 Validation
-
-Frontend unit suite green (**203 tests, 17 files** — up from the 196/17 baseline in §26.4: five new
-`EdgeOverlay` motion/highlight-overlay cases in `viewer-picking.test.tsx`, four new `recordTick`/
-`getMovingFrameStats` cases in `viewer-performance-controller.test.ts`); typecheck, lint, and
-production build all clean. Playwright critical-path: 1 of 2 specs green, same pre-existing unrelated
-`evidence-disclosure` failure recorded in §25.9/§26.4 (confirmed unrelated — this task's diff touches
-only `EdgeOverlay.ts`, `ViewerAdapter.ts`, `ViewerPerformanceController.ts`,
-`ViewerInstrumentation(Overlay)`, and their tests). Structural guarantees verified by code inspection:
-zero unforced `fragments.core.update()` call sites remain outside `forceFragmentsUpdate()`.
-
-**The real-hardware gate is PENDING OWNER CONFIRMATION.** Per task20 §8, headless Chromium software
-rendering cannot validate GPU interaction performance (documented gotcha, `task15_done.md`) — the
-owner must reproduce the same model 2 / viewport / camera path used for Task 18's baseline
-(`task18_done.md`) with `?perf=1` open and confirm: at least 30 FPS during orbit/pan/zoom, no visible
-periodic stutter, no visible freeze at motion start or the 150ms edge restoration, base edges absent
-during motion with blue query-primary/manual edges remaining legible, zero periodic Fragments updates
-during motion, and stationary rendering remaining near-zero after settlement. If the real-hardware
-result is still worse than the pre-Task-18 viewer, task20 §9 requires stopping and reporting the
-evidence rather than layering another optimization automatically — that decision remains the owner's.
-Database, vectors, and the prepared artifact format are unchanged.
-
-## 28. Implementation status (Task 22 — Task 18 main-viewer rollback)
-
-The owner confirmed on the real RTX 5080 Laptop hardware that model 2 still lagged during pan/orbit/
-zoom after Task 20, worse than the pre-Task-18 viewer. This is the exact decision point task20 §9
-reserved for the owner: revert the remaining Task 18 adaptive main-viewer machinery rather than layer
-another optimization. **The owner chose that full rollback.** Diagnosis: on this GPU the raw per-frame
-render cost was never the bottleneck; the per-gesture *transition* work Task 18/20 added — a forced
-`fragments.core.update(true)` on every camera rest, base-edge hide/restore on every wake/rest, and
-pixel-ratio reallocation on every motion transition — produced a visible hitch on every start/stop of
-a gesture. Natural navigation (many small start/stop nudges) hit that machinery constantly. The
-pre-Task-18 viewer had none of it: continuous fixed-quality rendering, uniformly heavier while idle
-but smooth during interaction.
-
-This section supersedes §25.1, §25.2, §25.3, §25.8, and §27.3–§27.5 for the main viewer. No backend,
-RAG, LLM, ingestion, or database change. No category/discipline/storey-based hiding.
-
-### 28.1 Removed (the adaptive main-viewer machinery)
-
-- `src/viewer/RenderScheduler.ts` (manual `RendererMode.MANUAL` + invalidation scheduling +
-  hidden-tab suspension) — the renderer returns to `SimpleRenderer`'s default **automatic continuous**
-  rendering. There is no longer a manual `needsUpdate` flow, render holds, or `requestFrame` call
-  sites. `document.hidden` suspension is dropped with it (the accepted trade-off: higher idle GPU, in
-  exchange for zero interaction-time scheduling overhead).
-- `src/viewer/ViewerPerformanceController.ts` (motion state machine, frame-time sampler, sustained-slow
-  verdict) — deleted.
-- `src/viewer/ViewerInstrumentation.ts` + `ViewerInstrumentationOverlay.tsx` (the dev-only `?perf=1`
-  overlay) — deleted, along with `ViewerAdapter.getInstrumentationSnapshot()` and the `App.tsx` mount.
-- Adaptive pixel ratio (`applyPixelRatio`, `PIXEL_RATIO`) — deleted; the library's own
-  `min(devicePixelRatio, 2)` default stands again.
-- Fragments update throttling (`applyFragmentsThrottle`, the `maxUpdateRate` juggling and forced-update
-  race guard, `FRAGMENTS_THROTTLE_MS`) — deleted. Fragments LOD/visibility now refreshes via one plain
-  `fragments.core.update(true)` (`ViewerAdapter.updateFragments`) on **model load, camera rest, and an
-  actual highlight/material change** — the exact pre-Task-18 cadence. No per-motion or per-tick update.
-- Camera-motion edge hiding — the `perf.onMotionChange -> EdgeOverlay.setMotion` wiring and the
-  rest-triggered `runEdgeLod` call are removed from `ViewerAdapter`. Base edges stay visible during
-  interaction (frustum culling still removes off-screen chunks).
-- The adaptive-profile status-readout button (§25.8) and its CSS — removed as a dead control.
-
-### 28.2 Kept (independently useful, not a transition-hitch source)
-
-- **Spatially chunked, frustum-culled edge overlay** (`EdgeOverlay.ts`, §25.4/§27.1/§27.2) — kept
-  unchanged and strictly better than the pre-Task-18 single whole-model `frustumCulled = false`
-  object, because off-screen chunks are now genuinely culled when zoomed in. Its `setMotion`/
-  `updateLod`/highlight-overlay code remains in the class but is simply no longer called by the
-  adapter; recoloring, disposal, and stale-build safety are unchanged.
-- **Task 19 UX** (§26): pick-through-transparency, `setViewOffset` centering within the unobstructed
-  region, and the base plane at the model's geometric minimum — all retained.
-- **Component preview power management** (`PreviewScene.ts`, §25.7) — retained; it is separate from the
-  main viewer and was never implicated in the pan/orbit lag. The `Profile` type and
-  `detectProfile()` (`profileDetection.ts`) are retained solely to size the preview's fps cap /
-  pixel ratio; `ViewerAdapter.getProfile()/setProfileOverride()` still expose it, but it no longer
-  influences any main-viewer rendering decision.
-
-### 28.3 Validation
-
-Frontend unit suite green (**178 tests, 15 files** — the 25-test drop is exactly the two deleted
-machinery test files, `render-scheduler.test.ts` and `viewer-performance-controller.test.ts`; the
-`EdgeOverlay` motion/highlight/LOD tests and the adapter profile-override tests remain and pass because
-those units are unchanged). `npm run typecheck`, `npm run lint`, and `npm run build` all clean.
-
-The interaction-smoothness gate is again the owner's to confirm on the real RTX 5080 — but the change
-is a removal, not a new mechanism, and restores the pre-Task-18 rendering path the owner remembers as
-smooth (plus the retained chunk culling). Database, vectors, and the prepared artifact format are
-unchanged.
-
-## Task 23 amendment — Projected-size rendering policy
-
-Adds a screen-size-driven visibility filter. It composes with, and does not replace, any existing
-rendering reduction: Fragments LOD/visibility, frustum culling, the chunked EdgeOverlay, mesh
-simplification, renderer scheduling, pixel ratio, camera controls, and the Task 22 continuous-
-rendering model are all unchanged, with their existing configuration and update timing.
-
-### 1. The rule
-
-Each renderable object's projected size is its bounding-sphere diameter in CSS px under the active
-perspective camera:
-
-```text
-px = (2 * radius * viewportHeightPx) / (2 * distance * tan(fov / 2))
-```
-
-Hysteresis: an object enters the reduced state below **20 px** and leaves it only above **24 px**;
-between the two it keeps its previous state. The decision depends ONLY on projected size — never on
-absolute camera distance, and never on whether the camera is moving. A camera inside an object's
-bounding sphere yields `Infinity`, so an enclosing object is never hidden.
-
-The camera's horizontal view offset (task19 §2) rescales only the horizontal axis (it passes
-`fullHeight === height`), so the vertical mapping used here stays correct with or without an offset.
-
-### 2. When it is evaluated
-
-Model load, camera `rest`, viewport resize, view-offset/projection change, and highlight changes.
-There is **no per-frame whole-model scan and no periodic Fragments update during camera motion** —
-this policy deliberately introduces no navigation, motion, wake, or stationary rendering mode, since
-per-gesture transition work was the source of the Task 18/20 hitches that Task 22 removed.
-
-Each evaluation is a numeric pass over cached centres/radii, and applies only the ids whose
-visibility actually CHANGED, via one bounded `setVisible` call per direction, followed by the single
-Fragments refresh the caller already performs.
-
-### 3. What is retained below 20 px
-
-Retained at any projected size:
-
-- walls, including every wall subtype the viewer already recognises;
-- roofs;
-- slabs — both explicit roof slabs and ordinary floor slabs;
-- doors and windows with explicit IFC `IsExternal = true`;
-- columns with explicit IFC `LoadBearing = true`.
-
-Everything else non-highlighted is hidden below 20 px and restored above 24 px, through the existing
-rendering and material path, without reloading the model.
-
-Exterior/load-bearing status is NEVER guessed from names, geometry, position, material, proximity,
-or an LLM. Only an explicit IFC boolean qualifies: a missing, null, string, or otherwise ambiguous
-value does not. Model 1 stores these in a non-standard flattened pset, so none of its doors/windows/
-columns qualify — the correct outcome under this rule.
-
-**Implementation trap:** the property read requires `getItemsData(ids, { attributesDefault: true,
-relations: { IsDefinedBy: … } })`. With a pruned attribute list the Fragments API returns the
-relation array EMPTY, which silently reads as "property absent" for every object.
-
-### 4. Highlighted and selected objects
-
-Query-primary results and manual selections bypass the filter entirely and are never hidden, however
-small or non-fundamental. Highlighting an otherwise filtered object makes it visible immediately;
-clearing the highlight reapplies its current size/category state. The policy never drops or broadens
-the identities the query pipeline returned.
-
-Detail level for highlighted objects is already handled by existing mechanisms — Fragments' own
-mesh LOD, and the EdgeOverlay's dedicated `highlightFarEnterPx` / `highlightFarExitPx` chunk
-thresholds — so no new per-object detail control was added for them, as the task allows when an
-applicable control already exists.
-
-### 5. Interaction guarantees
-
-- Filtered objects remain loaded and restore deterministically above 24 px.
-- An object hidden by the policy cannot be picked: `resolvePickLocalId` rejects a hit on a
-  size-hidden id, so selection identity does not depend on whether Fragments raycasts invisible
-  geometry.
-- Hidden faces must not leave a floating wireframe, so a `hidden` edge role with alpha 0 was added
-  to the theme. This is a visibility change only — no class mapping, colour, opacity, or semantic
-  role changes.
-- The isolated component preview is unaffected: the policy is driven by the main camera only.
-- Classification and bounding volumes are cached once at load; camera updates never re-read IFC
-  data, rebuild geometry, regenerate artifacts, or call the backend/database/embedding service/LLM.
-- Failure is safe: if the required Fragments APIs are missing or classification throws, the policy
-  stays inactive and every object remains visible. It is an optimization, never a correctness
-  requirement.
-
-### 6. Measured eligibility (real artifacts)
-
-| model | items | retained at any size | hide candidates |
-| --- | --- | --- | --- |
-| 2 (27,388 items) | 2,641 | 24,747 (90.4%) | doors 54/551, columns 35/89, windows 407/428 qualify |
-| 1 (283,238 items) | 1,159 | 282,079 (99.6%) | none qualify — non-standard psets |
-
-Conditional-property counts match the database exactly. One-time classification cost measured at
-66 ms for model 2 and ~10 s for model 1, whose pathological flattened property sets make the
-per-item read ~100x more expensive. That pass runs asynchronously after the scene is usable — the
-same pattern as the edge overlay — so it never blocks load or input; on model 1 the policy simply
-becomes active a few seconds after the model appears.
-
-### 7. Known limitations
-
-- `getItemsWithGeometry()` was measured stalling for minutes on the 283k-item model, so it is NOT
-  used to pre-restrict the candidate set. Candidates self-restrict instead, because `getBoxes`
-  returns an empty box for a geometry-less item and those are skipped.
-- Live in-browser visual/performance verification on both models has NOT yet been performed; the
-  evidence above is unit tests plus artifact-level measurement.
-
----
-
-## Task 26 amendment — Synchronized Query Explanation Panel (delivered)
-
-One new frontend panel that explains the latest highlighted query result with an appropriate
-structured visualization. The natural-language query backend remains the main product; this card
-is a visual explanation of the backend's already-computed authoritative result, not a second
-analysis system, report builder, or replacement for the chat.
-
-### 1. Hard backend boundary (held)
-
-The existing query and LLM pipeline is behaviorally unchanged. Nothing was altered in manifest
-generation/loading, recommendations, the constraint ledger, binder/correction/answer prompts or
-schemas, model assignments, reasoning settings, LLM call count, binding, validation, closure,
-mode derivation, execution semantics, exact/zero/partial/unavailable/ambiguous classification,
-answer-packet content, final grounding validation, the deterministic fallback, the predicate used
-to produce the reported answer and viewer identities, or the prose answer itself.
-
-No additional LLM call is made for the panel, and the prose answer is never parsed to build the
-visualization.
-
-### 1.1 Additive presentation contract
-
-`QueryResponseEnvelope` gained ONE optional field, `answer_explanation: AnswerExplanation | None`,
-carrying a bounded, allowlisted (`extra="forbid"`) view of the **primary visual** answer part —
-the part that produced the highlight, which is not necessarily `results[0]`. The long-standing
-`result_summary` behavior (first answer part) is deliberately untouched.
-
-Schemas: `AnswerExplanation`, `ExplanationPresentation` (enum), `ExplanationGroup`,
-`ExplanationRow`, `ExplanationBucket`, `ExplanationAggregate`. All are OpenAPI-generated into
-`frontend/src/types/api.ts`. Exposed fields: part id, request label, operation, result status,
-presentation kind, answer basis, interpretation, retrieval modes, exact total, class breakdown,
-distribution buckets, aggregate value/unit/matched/coverage/completeness, relationship endpoint
-total, limitation, known/unknown parts, shown identity count, true result count, truncation state,
-bounded groups (with GlobalIds) and rows. Never SQL, prompts, predicates, canonical JSON,
-manifests, credentials, or database diagnostics.
-
-**The no-extra-computation guarantee is structural, not promised.**
-`app/query/binding/presentation.py` takes no `Session` and imports nothing from the query,
-execution, or LLM layers, so it cannot issue a statement or recompute a breakdown. It reads
-finished objects and copies bounded fields out of them. A test asserts the module's import list.
-
-**Identity hydration for displayed groups adds no query.** `hydrate_viewer_identities` has always
-`SELECT`ed `ifc_class` beside `global_id`; `ViewerHydration.primary_identities` now keeps the pair
-(`HydratedIdentity`). Selectable groups are a literal partition of the identities the viewer
-already received. Where no authoritative identity subset exists — notably distribution buckets,
-which are grouped counts — the value is displayed but **not** offered as a selectable group;
-`ExplanationBucket` has no `global_ids` field at all.
-
-Counts stay truthful under the viewer identity cap: `true_result_count` and a group's
-`exact_count` keep their real values, and `identities_truncated` / `truncated` disclose the gap.
-
-### 2. Panel lifecycle and synchronization
-
-The card represents the current query-result highlight, not chat history.
-
-- Opens only when the latest completed query returns a non-empty primary highlight **and** an
-  explanation payload for that same result. Both are applied in one step in
-  `applyViewerActions`, so they cannot diverge.
-- A newer qualifying result replaces the card outright, active subgroup included.
-- A newer completed query with no highlight retires the previous explanation **and** the previous
-  query highlight together.
-- Cleared on Clear Chat, Reset App, model switch/unload, and the card's own close control (which
-  also clears its query-result highlight).
-- Stale/canceled/superseded responses cannot reopen or overwrite it — the existing `queryToken`
-  guard returns before any explanation state is touched.
-- Opening the component panel by clicking an object does not replace the explanation or its
-  highlight. A deterministic **Same type**/**Same family** action does replace the highlight, so
-  it retires the explanation at the same moment.
-
-**Interpretation note (§2 "explicit viewer selection-clear action").** Clicking empty space clears
-only the *manual* selection; it has never cleared query roles, so the query highlight and the card
-both persist through it. The explicit clear is therefore the card's own close control, per the same
-section's requirement that closing it clears its highlight.
-
-### 3. Fixed desktop layout
-
-With no card open, the existing full-height resizable chat layout is unchanged.
-
-With the card open, `.right-stack` is a fixed right-side column: 20 px outer margins, 12 px gap,
-explanation above (60%) and chat below (40%), both rendered as separate floating cards with the
-same surface, border, radius, shadow, typography, spacing, and measured-drawing ticks as the chat
-panel. No splitter, no resizer, no saved preference, no reordering. Inside the stack the chat drops
-its inline width and drag handle (`.panel-stacked`); the user's stored width preference is
-preserved and applies again when the card closes.
-
-Column width is 40vw, or 32vw while the 320 px component panel is docked immediately left of it
-with the existing 12 px gap. `explanationColumnWidthPx(viewportWidth, componentOpen)` computes it
-in px in `App.tsx`; that single value feeds both the `--chat-w` CSS variable (which the column and
-the component panel's dock position read) and `effectiveViewportObstructionPx`, so camera fitting
-and visible-region centering account for the whole panel stack from one source — there is no second
-set of hard-coded obstruction measurements.
-
-Collapsing the chat inside the stack reuses the existing collapsed state: the chat becomes the
-existing restore tab and the explanation card takes the freed height
-(`.right-stack-collapsed`). No new layout mode, no overlap, accessibly restorable.
-
-### 4. Explanation content
-
-Two regions, always — visualization at the left, a persistent plain-language information region at
-the right. A chart or table never appears alone.
-
-The information region states what question part the card represents, what the backend interpreted,
-what is currently highlighted, shown-versus-true counts where truncation exists, operation/result
-status and answer basis, and any limitation, coverage note or known/unknown split. Selecting a
-group changes it to distinguish the subgroup from the full answer (`Showing: IfcDoor` /
-`5 of 9 query-result objects` / `Full result: 9 · external doors on floor 3`). It is descriptive
-only — every line restates a backend field, and it introduces no interpretation or factual claim.
-
-Presentation is chosen deterministically in the backend from the authoritative operation and
-status, so the frontend never guesses: count/existence → headline metric plus the class breakdown
-when meaningful (hidden for a single class); list/sample_detail → metric plus a bounded scrollable
-table; group_distribution → horizontal bars from the existing buckets; aggregate/extremum → value,
-unit and matched/coverage; relationship → endpoint count plus a bounded endpoint table;
-`partial` status → known-versus-unknown split, outranking the operation. Only the primary visual
-part is shown; answer parts are never unioned. Ordinary React/CSS/SVG — no charting dependency.
-
-### 5. Viewer interaction
-
-Displayed groups are backed by authoritative GlobalIds. Clicking a bar applies that subgroup as the
-viewer's primary highlight and marks it `aria-pressed`; **All results** appears whenever a subgroup
-is active and restores the original primary *and* relationship-context roles exactly from stored
-frontend state. Neither path issues a query, an LLM call, a backend request, or a chat turn. A
-group with no identities is rendered disabled rather than pretending to select a set nobody
-hydrated. Truncation is disclosed rather than implied away. Clicking an individual object still
-uses the existing deterministic object-detail flow and the existing, unmodified component panel.
-
-### 6. State and clearing
-
-Store state is serializable and current-session only: the bounded payload, the original
-primary/context GlobalIds (so **All results** needs no new query), the active subgroup, and
-lifecycle state. Nothing is persisted to local storage, no saved reports, no backend write tables.
-Manual object selection and the selected-object query chips are unchanged.
-
-### 7. Validation
-
-- Backend: `tests/binding/test_presentation.py` (26) and `tests/binding/test_explanation_envelope.py`
-  (7) — the builder cannot query, no breakdown is invented, the visual part (not the first part) is
-  described, clarification/zero responses expose nothing, groups are a subset of the highlighted
-  identities, groups without class information yield no selectable group, buckets carry no
-  identities, truncated sets keep true totals, and serializing the payload leaves answer text,
-  evidence, result summary and viewer identities unchanged. Plus three OpenAPI contract tests.
-- Frontend: `tests/explanation-controller.test.ts` (15), `tests/explanation-panel.test.tsx` (20),
-  `tests/explanation-layout.test.tsx` (7) — lifecycle, replacement, retirement, stale rejection,
-  per-operation presentation, the always-present information region, group selection, All results,
-  the fixed 60/40 stack, 40vw to 32vw, obstruction wiring, collapse behavior, and keyboard close.
-- Suites: frontend build, typecheck, lint clean; **249 frontend tests pass** (was 207). Backend
-  offline suite **688 pass, 10 failures — all pre-existing** (validate x3, llm_retry x5,
-  usage-output, settings), unchanged from the pre-Task-26 baseline.
-- Playwright: 1 passed, 1 failed. The failure (`.ev-toggle` not found in the critical-path
-  evidence assertion) was verified to reproduce identically on the pre-Task-26 tree and is
-  **pre-existing and unrelated**.
-- The costly live LLM benchmark was deliberately not rerun for this presentation task.
-
----
-
-## Task 28 amendment — Floor Plan Mode in the Main Viewer (delivered)
-
-A floor-plan viewing mode inside the **existing** main viewer. For every loaded model whose IFC
-spatial data establishes at least one identifiable logical floor, a compact vertical control appears
-under **Reset app**: `3D`, then one button per logical floor. Choosing a floor turns the same viewer
-into a top-down orthographic plan of that floor, cut ~1.2 m above it and bounded below so lower
-floors do not appear through openings. Choosing **3D** removes the cut and restores the exact
-perspective view that was active before plan mode.
-
-Not introduced: a second canvas, a second Three.js world, a generated image, a saved drawing, an
-explanation-panel visualization, an IFC rewrite, any LLM behavior change, or a general-purpose
-sectioning system.
-
-### 1. Hard boundary (held)
-
-Unchanged: natural-language query interpretation, prompts, schemas, model assignments, reasoning
-effort, LLM call count, semantic manifest generation, floor-band clustering, query execution, answer
-facts, viewer identity derivation, the Query Explanation panel's decision/visualization rules,
-component-detail behavior, Same type / Same family, chat history, selected-object chips, the
-one-loaded-model rule, existing colors and semantic roles, manual selection limits and picking
-semantics, right-side panel obstruction, and offline operation.
-
-The floor buttons are the only new main-viewer control. No tree, storey browser, visibility
-checklist, arbitrary clipping-plane editor, saved-view manager, hide/isolate, measurement,
-reflected ceiling plan, elevation, export, editing, or annotation was added.
-
-### 2. One authoritative floor definition
-
-`GET /api/models/{id}/floors` (§10.10) is the single source. It reuses
-`spatial.build_storey_model()`, so a model's 45 raw storeys still resolve to its 9 real floors, and
-multi-wing storeys at the same elevation stay one button. `spatial.band_label()` is a new pure
-helper shared by the endpoint and the existing floor interpretation.
-
-### 3. Scene-space plan range
-
-`frontend/src/viewer/floorPlan.ts` owns the arithmetic as pure functions (no scene access), so the
-numbers are exactly testable. Given bands already mapped into scene space (§11.6):
-
-```text
-base  = highest resolved scene elevation in the selected band
-cut   = min(base + 1.2 m, next_band_lowest_scene_elevation - tolerance)
-lower = (band_below.highest + selected.lowest) / 2, else model.box.min.y for the lowest band
-```
-
-The uppermost floor uses the nominal 1.2 m cut without inventing a next level. An **unresolved**
-band above cannot constrain the cut. The tolerance is `planeTolerance()`: a few Float32 ULPs scaled
-by the magnitudes actually being compared, so a metre model and a far-from-origin model each get a
-proportional separation — never a per-file tuned value. A band whose constituent storeys do not all
-resolve to a finite scene elevation, or whose range is non-finite or does not extend above the band,
-keeps its button **visible but disabled with a concise reason**. No guessed plane is ever placed.
-The lower boundary is presentation-only: it changes no containment, membership, coordinate, or query
-scope.
-
-### 4. Implementation
-
-- **Projection / navigation** — `OBC.Views` + `View` for the two-plane clipped view and reversible
-  camera ownership; the View's own `OrthoPerspectiveCamera` in `Orthographic` + `Plan` mode. The
-  View's `farPlane` sits `range` below the cut, which is exactly the required lower boundary, so no
-  second clipping mechanism was built. Every drag pans and the wheel zooms; nothing orbits.
-  `model.useCamera()` repoints Fragments' own LOD/culling at whichever camera is rendering. No
-  installed package was patched, no private field read, no second world created, and the
-  `ViewerAdapter` boundary is intact — React still only requests typed viewer actions.
-- **Camera save/restore** — the adapter saves the pose itself (`views.restoreCameraOnClose = false`)
-  and captures it **only on the first departure from 3D**, so floor-to-floor switching cannot
-  overwrite it. Returning to 3D re-asserts the 50 mm lens, desktop control mapping, and panel-aware
-  centering before restoring the exact position and target.
-- **Cut graphics** — `model.getSection(localPlane)` in the existing worker, for the **active floor
-  only**, never precomputed per floor at load. The world plane is transformed into model-local space
-  before the call and the results mounted under `model.object`, because `getSection` both consumes
-  and produces geometry in that space. Output is copied out of the worker's fixed 600k-float scratch
-  buffer so only the used vertices are retained. With a query highlight active a second layer is
-  requested for exactly the primary local ids and drawn over the base cut in the existing blueprint
-  blue — so the established roles survive into the plan and highlighted cut geometry stays legible
-  over the base contour. Layers are nudged `PLAN.cutInsetM` (2 mm) off the plane that produced them,
-  because exactly-coplanar geometry makes the GPU clip test a coin flip.
-- **Visual hierarchy** — `VIEWER_COLORS.planCut` is the darkest ink in the viewer (asserted against
-  every base gray and against the darkened edge colors), fully opaque, with a restrained
-  translucent `planFill`. All cut layers render above the base edge chunks (1) and the highlight
-  overlay (2). The decorative base grid is hidden in plan mode and restored on return. Nothing is
-  fabricated: no door swings, symbols, room tags, dimensions, annotations, north arrows, or scale
-  bars — source geometry remains the only graphic authority. This is a clean model-derived plan
-  slice, not a claim of Revit documentation equivalence.
-- **Perspective-only policies** — `applyViewOffset` was generalized to orthographic:
-  `OrthographicCamera.updateProjectionMatrix` widens the horizontal frustum by exactly
-  `width / fullWidth`, so a box `fitToBox` sized against the full canvas lands filling precisely the
-  unobstructed region, centered, never clipped and never stretched. The projected-size policy is
-  **suspended** rather than misapplied — entering plan mode restores everything it had hidden (so
-  the plan is not missing geometry) and leaving re-evaluates against the restored perspective
-  camera. Edge LOD remains unwired (§28 / Task 22).
-- **Lifecycle** — a monotonic `planToken` guarantees an older floor's asynchronous section can never
-  replace a newer selection. Switching floors, leaving plan mode, unloading, and disposing all
-  dispose the previous view, camera, cut fills, contours, and materials; repeated switching leaves
-  exactly one live view and one live overlay.
-- **State** — `3d`/`plan`, active source-model id, active band, and contract availability live in
-  the store and are serializable and current-session only. The saved pose and the live
-  clipping/section objects stay inside the imperative viewer layer. Nothing is persisted to local
-  storage.
-
-### 5. Independence from query presentation
-
-Entering or leaving plan mode creates no chat turn, issues no query, calls no LLM, and neither opens
-nor closes the Query Explanation panel. Query-primary, relationship-context, and manual-selection
-roles are untouched. A later query never chooses or changes a floor. A highlight arriving while a
-plan is active rebuilds the cut layers for the new roles and never silently returns to perspective.
-
-### 6. Failure behavior
-
-A floor-contract failure or a failed plan construction never unloads the model or breaks the 3D
-viewer. No usable floor data omits the control; one unmappable floor disables only that button; a
-response for a superseded model or load is ignored; a section-generation failure keeps the truthful
-clipped orthographic view and reports a concise non-blocking limitation; **3D** stays available
-after any plan-rendering failure.
-
-### 7. Validation
-
-- **Backend** — `tests/test_model_floors.py` (23): scoping and the bounded 404, the allowlisted
-  field set, GET-only, an inert session proving no statement is issued, one record per logical band
-  for sub-levelled and multi-wing models, elevation ordering against deliberately reverse-sorted
-  names, single-floor availability, reference-relative and neutral lower-level labels, a
-  `lowest_band` fallback, agreement with `resolve_floor_concept("the second floor")`, the honest
-  empty state, and descriptive-only bounded storey names. Plus 4 OpenAPI contract tests (documented
-  GET-only path, schemas, enum, additivity).
-- **Frontend** — `tests/floor-plan-geometry.test.ts` (24), `tests/viewer-plan-mode.test.ts` (37),
-  `tests/floor-controls.test.tsx` (18), `tests/floor-controller.test.ts` (19), plus additions to
-  `viewer-viewport-offset` (+4 orthographic), `viewer-theme` (+5 plan hierarchy), `store` (+6),
-  `api-client` (+2).
-- **Suites** — build, typecheck, and lint clean; **364 frontend tests pass** (was 249). Backend
-  offline suite **975 pass, 27 failures — all pre-existing** (validate x3, llm_retry x5, live
-  binding pipeline x16, rag_search, usage-output, settings), matching the Task 27 baseline exactly.
-- **Playwright** — 2 passed, 1 failed. The new `floor plan mode` case runs against the real
-  Fragments worker and WebGL on the tracked fixture artifact (one `IfcBuildingStorey` at elevation
-  0): the control appears only when the model is ready, renders one logical floor rather than one
-  raw storey, keeps storey names in the accessible description only, enters and leaves the plan with
-  no extra canvas, no chat turn, and no explanation panel, and disappears with Reset App. The
-  failure is the long-standing `.ev-toggle` critical-path assertion, re-verified to reproduce
-  identically on a stashed tree — **pre-existing and unrelated**.
-- The costly live LLM benchmark was deliberately not rerun for this deterministic viewer feature.
-
-### 8. Deviations from the task text, and why
-
-- Task 28 §4.2 describes relationship-context as "ochre" and manual selection as "teal". The
-  implemented theme has always used a deliberately uncolored gray context and the same blueprint
-  blue for manual selection (§23, `viewerTheme.ts`), and §5 of the same task forbids changing
-  existing colors and semantic roles. The existing roles were kept and the plan hierarchy was built
-  around them; the ordering the task actually asks for — cut contours stronger than projected edges,
-  highlighted cut geometry legible over the base contour — is satisfied and asserted.
-- Real-model verification against the ingested models (task28 §8.3) has **not** been performed in a
-  live browser session. The evidence above is the automated suites plus the Playwright run on the
-  fixture artifact. Raw-storey-versus-logical-floor counts, per-floor inspection, cut-versus-
-  projected legibility, bleed-through, highlight colors in plan, and repeated-switch resource growth
-  are all asserted by test, but not yet confirmed visually on models 1-4.
+planner operations under this family.

@@ -46,7 +46,7 @@ function explanation(partial: Partial<AnswerExplanation> = {}): AnswerExplanatio
     request_label: "external doors on floor 3",
     operation: "count",
     result_status: "exact",
-    presentation: "metric",
+    presentation: "result_table",
     answer_basis: "exact_sql",
     interpretation: "doors whose storey is the third elevation band",
     retrieval_modes: ["sql"],
@@ -268,6 +268,77 @@ describe("subgroup selection and restoration", () => {
     await controller.selectExplanationGroup("IfcSpace");
     expect(viewerStub.applyQueryRoles).not.toHaveBeenCalled();
     expect(useStore.getState().explanationGroupKey).toBeNull();
+  });
+});
+
+// A selectable grouped graph node is a subgroup like any other: the same
+// deterministic highlight path, no query and no LLM call (task29 §5.4).
+describe("grouped graph node selection", () => {
+  const graphExplanation = () =>
+    explanation({
+      operation: "relationship",
+      presentation: "relationship_graph",
+      groups: [],
+      graph: {
+        node_count: 4,
+        edge_count: 3,
+        description: "4 groups and 3 grouped connections.",
+        nodes: [
+          { id: "n0", label: "IfcBuildingStorey", role: "seed", ifc_class: "IfcBuildingStorey",
+            relationship_class: null, semantic_role: null, endpoint_role: null, entity_count: 1,
+            global_ids: ["S1"], global_ids_truncated: false, selectable: false },
+          { id: "n1", label: "IfcDoor", role: "endpoint", ifc_class: "IfcDoor",
+            relationship_class: "IfcRelContainedInSpatialStructure",
+            semantic_role: "containment", endpoint_role: "RelatedElements", entity_count: 5,
+            global_ids: ["D1", "D2", "D3", "D4", "D5"], global_ids_truncated: false,
+            selectable: true },
+          { id: "n2", label: "IfcWindow", role: "endpoint", ifc_class: "IfcWindow",
+            relationship_class: "IfcRelContainedInSpatialStructure",
+            semantic_role: "containment", endpoint_role: "RelatedElements", entity_count: 4,
+            global_ids: ["W1", "W2", "W3", "W4"], global_ids_truncated: false, selectable: true },
+          { id: "n3", label: "IfcSpace", role: "endpoint", ifc_class: "IfcSpace",
+            relationship_class: "IfcRelContainedInSpatialStructure",
+            semantic_role: "containment", endpoint_role: "RelatedElements", entity_count: 3,
+            global_ids: [], global_ids_truncated: true, selectable: false },
+        ],
+        edges: [],
+      },
+    });
+
+  beforeEach(async () => {
+    vi.spyOn(api, "query").mockResolvedValue(
+      envelope({ answer_explanation: graphExplanation() }),
+    );
+    await controller.submitQuestion("what is connected to floor 3?");
+    vi.clearAllMocks();
+  });
+
+  it("applies the node's authoritative identities and nothing else", async () => {
+    await controller.selectExplanationGroup("n1");
+    expect(viewerStub.applyQueryRoles).toHaveBeenCalledWith(["D1", "D2", "D3", "D4", "D5"], []);
+    expect(useStore.getState().explanationGroupKey).toBe("n1");
+  });
+
+  it("refuses the seed node and any node the backend did not mark selectable", async () => {
+    await controller.selectExplanationGroup("n0");
+    await controller.selectExplanationGroup("n3");
+    expect(viewerStub.applyQueryRoles).not.toHaveBeenCalled();
+    expect(useStore.getState().explanationGroupKey).toBeNull();
+  });
+
+  it("All results restores the exact original primary and context roles", async () => {
+    await controller.selectExplanationGroup("n2");
+    vi.clearAllMocks();
+    await controller.showAllExplanationResults();
+    expect(viewerStub.applyQueryRoles).toHaveBeenCalledWith(ALL_PRIMARY, ["CTX1"]);
+    expect(useStore.getState().explanationGroupKey).toBeNull();
+  });
+
+  it("never issues a query for node selection or restoration", async () => {
+    const spy = vi.spyOn(api, "query");
+    await controller.selectExplanationGroup("n1");
+    await controller.showAllExplanationResults();
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

@@ -50,6 +50,13 @@ export type ExplanationRow = Schemas["ExplanationRow"];
 export type ExplanationBucket = Schemas["ExplanationBucket"];
 export type ExplanationAggregate = Schemas["ExplanationAggregate"];
 
+// Task 29 — the bounded grouped relationship topology (task29 §5.1). The
+// frontend lays these nodes and edges out; it never re-derives the grouping,
+// the graph eligibility, or the presentation choice.
+export type ExplanationGraph = Schemas["ExplanationGraph"];
+export type ExplanationGraphNode = Schemas["ExplanationGraphNode"];
+export type ExplanationGraphEdge = Schemas["ExplanationGraphEdge"];
+
 // Task 28 — the read-only logical floor contract behind the floor-plan control
 // (task28 §2.1). Elevations on `FloorBandInfo` are stored project-unit
 // diagnostics, NOT viewer scene coordinates.

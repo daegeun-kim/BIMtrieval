@@ -140,3 +140,54 @@ def test_envelope_json_round_trips_and_stays_allowlisted():
     assert "answer_explanation" in payload
     forbidden = {"canonical_json", "sql", "raw_sql", "predicate", "prompt", "embedding"}
     assert not (set(payload["answer_explanation"]) & forbidden)
+
+
+# ---------------------------------------------------------------------------
+# Task 29 — a non-qualifying result carries no payload, and carries nothing else
+# away with it
+# ---------------------------------------------------------------------------
+
+
+def test_a_scalar_answer_keeps_its_full_response_and_omits_the_payload():
+    """The gate removes only the panel. The answer, evidence, result summary and
+    viewer identities of an aggregate answer are exactly what they were."""
+    results = [_result(operation="aggregate", total=205)]
+    hydration = _hydration()
+    env = _envelope(_outcome(results, hydration))
+
+    assert env.answer_explanation is None
+    assert env.answer == "There are 9 doors on floor 3."
+    assert env.result_summary is not None
+    assert env.result_summary.exact_total == 205
+    assert env.result_summary.viewer_matches_total == 3
+    assert env.viewer_actions.primary_global_ids == ["G1", "G2", "G3"]
+    assert env.viewer_actions.selection_action.value != "none"
+
+
+def test_the_qualifying_and_non_qualifying_envelopes_differ_only_by_the_payload():
+    hydration = _hydration()
+    with_panel = _envelope(_outcome([_result(operation="count")], hydration))
+    without_panel = _envelope(_outcome([_result(operation="existence")], hydration))
+
+    a = with_panel.model_dump(mode="json")
+    b = without_panel.model_dump(mode="json")
+    for volatile in ("request_id", "answer_explanation"):
+        a.pop(volatile, None)
+        b.pop(volatile, None)
+    assert a == b
+    assert with_panel.answer_explanation is not None
+    assert without_panel.answer_explanation is None
+
+
+def test_a_partial_count_still_carries_the_count_table_and_its_limitation():
+    result = _result(
+        status=ResultStatus.PARTIAL,
+        known_parts=["the door count"],
+        unknown_parts=["fire rating"],
+        limitation="fire rating is recorded on only some doors",
+    )
+    env = _envelope(_outcome([result], _hydration()))
+    assert env.answer_explanation is not None
+    assert env.answer_explanation.presentation.value == "result_table"
+    assert env.answer_explanation.limitation == "fire rating is recorded on only some doors"
+    assert env.answer_explanation.unknown_parts == ["fire rating"]

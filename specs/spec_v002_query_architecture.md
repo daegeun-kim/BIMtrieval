@@ -19,11 +19,18 @@ This specification establishes the boundaries shared by all query paths. Detaile
 spec_v003_sql_query_path.md
 spec_v004_rag_query_path.md
 spec_v005_hybrid_query_orchestration.md
-spec_v006_frontend_application.md
+spec_v006_frontend_application.md   # frontend hub
+spec_v008_3d_viewer.md
+spec_v009_chat_panel.md
+spec_v010_explanation_panel.md
+spec_v011_component_panel.md
 ```
 
-Frontend behavior is defined by `spec_v006_frontend_application.md`. Where an older frontend
-example in this specification conflicts with v006, v006 is authoritative.
+Frontend behavior is defined by the frontend specification family: the hub
+`spec_v006_frontend_application.md` (shared layout, model lifecycle, state/clearing, shared
+contracts, accessibility, security) and its feature specifications v008 (3D viewer), v009 (chat
+panel), v010 (query explanation panel), and v011 (component panel). Where an older frontend example
+in this specification conflicts with that family, the family is authoritative.
 
 ## 1.1 Current application and frontend-contract amendment
 
@@ -719,8 +726,10 @@ POST /api/query
 ```
 
 Low-level SQL, RAG, graph, and planning endpoints remain development-only. The narrow deterministic
-model-list, viewer-asset, and GlobalId-resolution endpoints defined by v006 are also public frontend
-contracts, but they never invoke an LLM.
+frontend endpoints are also public contracts, but they never invoke an LLM: model list and
+GlobalId resolution (`spec_v006_frontend_application.md` §9), viewer asset and logical floors
+(`spec_v008_3d_viewer.md` §2.3, §8.1), and component details/highlight groups
+(`spec_v011_component_panel.md` §2).
 
 ### 16.1 Request envelope
 
@@ -858,7 +867,7 @@ Use frontend caching and selection debouncing. Indexed object lookup should not 
 The tree below records the original scaffold plan. Task 09 superseded its Python paths. The active
 top-level applications are `ingestion/`, `backend/`, and `frontend/`; backend code is under
 `backend/app/`, with no backend ingestion package. The authoritative frontend tree and boundaries
-are defined in `spec_v006_frontend_application.md`.
+are defined in `spec_v006_frontend_application.md` (§3, §6).
 
 Separate backend and frontend at repository level.
 

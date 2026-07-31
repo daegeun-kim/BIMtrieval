@@ -126,18 +126,139 @@ class ResultSummary(BaseModel):
 
 
 class ExplanationPresentation(str, Enum):
-    """Which visualization the already-computed result supports (task26 §4.1).
+    """Which visualization the already-computed result supports (task29 §2.1).
 
-    Derived deterministically from the authoritative operation and status — the
+    Derived deterministically from the authoritative operation and data — the
     frontend does not guess, and the choice cannot drift between the two.
+
+    Task 29 narrowed the panel to three presentation families: a bounded
+    scrollable table, a compact horizontal bar chart, and a grouped node-link
+    diagram. A result whose operation supports none of them gets **no payload**
+    at all rather than a decorative card, so the values below are the complete
+    set the selector may choose.
+
+    The Task 26 values are retained so an older client that still switches on
+    them keeps parsing the contract, but `presentation.py` never emits them:
+    the standalone metric, aggregate, relationship-metric and partial-split
+    visuals were removed (task29 §2.1).
     """
 
+    #: `count` / `list` over authoritative displayed identities.
+    RESULT_TABLE = "result_table"
+    #: A one-bucket distribution — a single bar carries no comparison.
+    GROUP_TABLE = "group_table"
+    #: A structured comparison whose existing values are heterogeneous.
+    COMPARISON_TABLE = "comparison_table"
+    #: A relationship result that does not qualify for the bounded diagram.
+    RELATIONSHIP_TABLE = "relationship_table"
+    #: A distribution with >= 2 buckets, or a homogeneous numeric comparison.
+    BAR_CHART = "bar_chart"
+    #: A relationship result with a complete, in-bounds grouped topology.
+    RELATIONSHIP_GRAPH = "relationship_graph"
+
+    # --- Task 26 values, accepted for backward compatibility, never chosen ---
     METRIC = "metric"
     TABLE = "table"
     DISTRIBUTION = "distribution"
     AGGREGATE = "aggregate"
     RELATIONSHIP = "relationship"
     PARTIAL = "partial"
+
+
+class ExplanationGraphNodeRole(str, Enum):
+    """Whether a presentation node is the query subject or a reached endpoint.
+
+    The seed/subject is always its own node and is never merged into an endpoint
+    group (task29 §5.2), so the two are distinguishable without the frontend
+    re-deriving anything.
+    """
+
+    SEED = "seed"
+    ENDPOINT = "endpoint"
+
+
+class ExplanationGraphNode(BaseModel):
+    """One grouped node of the relationship diagram (task29 §5.2).
+
+    Endpoint occurrences are grouped by the exact structural key
+    `IFC entity class + relationship class + endpoint role`, so entities of the
+    same class participating through the same relationship structure collapse
+    into one node. `entity_count` is the number of DISTINCT underlying entities
+    the node represents.
+
+    Node identity sets may **overlap**: the same physical entity appears in more
+    than one node when it participates through a different relationship class,
+    direction or endpoint role. They are therefore not a partition, and
+    selecting one never implies the others form a disjoint remainder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    role: ExplanationGraphNodeRole
+    ifc_class: str | None = None
+    relationship_class: str | None = None
+    semantic_role: str | None = None
+    #: The schema role name this group participates through, e.g. `RelatedElements`.
+    endpoint_role: str | None = None
+    entity_count: int = 0
+    #: Bounded authoritative GlobalIds, for supported node selection only.
+    global_ids: list[str] = Field(default_factory=list)
+    #: True when `entity_count` exceeds the GlobalIds carried here, so a
+    #: selection can never read as the whole group.
+    global_ids_truncated: bool = False
+    #: Selectable only when those GlobalIds are an authoritative subset of the
+    #: original query-result highlight (task29 §5.4).
+    selectable: bool = False
+
+
+class ExplanationGraphEdge(BaseModel):
+    """One grouped edge of the relationship diagram (task29 §5.2).
+
+    Raw hops collapse into a single edge when they connect the same node pair
+    through the same relationship class, semantic role and endpoint-role pair.
+    `connection_count` is the number of DISTINCT stored connections represented.
+
+    Direction follows the recorded IFC roles — `source` is always the relating
+    side and `target` the related side — so the same stored connection
+    discovered from the opposite traversal direction is the same edge, not a
+    second one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    source_node_id: str
+    target_node_id: str
+    relationship_class: str
+    semantic_role: str
+    #: Always `relating_to_related`: the arrow is the IFC schema's direction.
+    schema_direction: str = "relating_to_related"
+    source_role: str
+    target_role: str
+    connection_count: int = 0
+    label: str
+
+
+class ExplanationGraph(BaseModel):
+    """The bounded grouped topology of an accepted relationship traversal.
+
+    Present only when the grouped graph is complete and within the exact bounds
+    of task29 §5.3 (4-24 nodes, <= 40 edges, every edge authoritative). Carries
+    no internal database ids, raw relationship-member rows, canonical JSON, SQL,
+    predicates or unbounded paths.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[ExplanationGraphNode] = Field(default_factory=list)
+    edges: list[ExplanationGraphEdge] = Field(default_factory=list)
+    node_count: int = 0
+    edge_count: int = 0
+    #: Plain-language description of the nodes and edges, for assistive
+    #: technology. Composed from the same grouped values shown in the diagram.
+    description: str = ""
 
 
 class ExplanationGroup(BaseModel):
@@ -226,6 +347,15 @@ class AnswerExplanation(BaseModel):
     distribution: list[ExplanationBucket] = Field(default_factory=list)
     aggregate: ExplanationAggregate | None = None
     relationship_endpoint_total: int | None = None
+
+    #: The grouped relationship topology, when the diagram qualifies (task29 §5).
+    graph: ExplanationGraph | None = None
+    #: Why a relationship result is shown as a table instead of the diagram, or
+    #: `None` when no fallback applied. Stated in the panel's information region;
+    #: it introduces no new interpretation or graph claim (task29 §5.3, §6).
+    presentation_fallback_reason: str | None = None
+    #: Unit for a value-based bar chart, when the existing result carries one.
+    chart_unit: str | None = None
 
     limitation: str | None = None
     known_parts: list[str] = Field(default_factory=list)

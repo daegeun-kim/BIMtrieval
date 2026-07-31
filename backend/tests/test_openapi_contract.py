@@ -134,24 +134,99 @@ def test_answer_explanation_contract_is_documented(client):
     assert "answer_explanation" not in schemas["QueryResponseEnvelope"].get("required", [])
 
 
-def test_explanation_presentation_enum_is_documented(client):
-    schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    assert set(schemas["ExplanationPresentation"]["enum"]) == {
-        "metric",
-        "table",
-        "distribution",
-        "aggregate",
-        "relationship",
-        "partial",
-    }
-
-
 def test_only_selectable_groups_carry_identities(client):
     """A distribution bucket has no authoritative identity subset, so the
     contract gives it no way to claim one (task26 §1.1)."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     assert "global_ids" in schemas["ExplanationGroup"]["properties"]
     assert "global_ids" not in schemas["ExplanationBucket"]["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Task 29 — the deterministic presentation families and the grouped graph
+# ---------------------------------------------------------------------------
+
+
+def test_explanation_presentation_enum_is_documented(client):
+    """The six presentations the selector may choose, plus the Task 26 values
+    retained only so an older client keeps parsing the contract (task29 §2.1)."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    values = set(schemas["ExplanationPresentation"]["enum"])
+    assert {
+        "result_table",
+        "group_table",
+        "comparison_table",
+        "relationship_table",
+        "bar_chart",
+        "relationship_graph",
+    } <= values
+    assert {"metric", "table", "distribution", "aggregate", "relationship", "partial"} <= values
+
+
+def test_relationship_graph_contract_is_documented(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    for name in (
+        "ExplanationGraph",
+        "ExplanationGraphNode",
+        "ExplanationGraphEdge",
+        "ExplanationGraphNodeRole",
+    ):
+        assert name in schemas, name
+
+    assert set(schemas["ExplanationGraphNodeRole"]["enum"]) == {"seed", "endpoint"}
+
+    graph = schemas["ExplanationGraph"]["properties"]
+    for field in ("nodes", "edges", "node_count", "edge_count", "description"):
+        assert field in graph, field
+
+    node = schemas["ExplanationGraphNode"]["properties"]
+    for field in (
+        "id",
+        "label",
+        "role",
+        "ifc_class",
+        "relationship_class",
+        "semantic_role",
+        "endpoint_role",
+        "entity_count",
+        "global_ids",
+        "global_ids_truncated",
+        "selectable",
+    ):
+        assert field in node, field
+
+    edge = schemas["ExplanationGraphEdge"]["properties"]
+    for field in (
+        "id",
+        "source_node_id",
+        "target_node_id",
+        "relationship_class",
+        "semantic_role",
+        "schema_direction",
+        "source_role",
+        "target_role",
+        "connection_count",
+        "label",
+    ):
+        assert field in edge, field
+
+
+def test_graph_payload_exposes_no_internal_database_identifiers(client):
+    """§5.1: no internal numeric ids, raw relationship-member rows, canonical
+    JSON, SQL, predicates or unbounded paths in the public payload."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    forbidden = {"entity_id", "relationship_id", "entity_ids", "hops", "paths", "members"}
+    for name in ("ExplanationGraph", "ExplanationGraphNode", "ExplanationGraphEdge"):
+        assert not (set(schemas[name]["properties"]) & forbidden), name
+
+
+def test_presentation_selection_fields_are_additive_and_optional(client):
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    props = schemas["AnswerExplanation"]["properties"]
+    for field in ("graph", "presentation_fallback_reason", "chart_unit"):
+        assert field in props, field
+    required = set(schemas["AnswerExplanation"].get("required", []))
+    assert not ({"graph", "presentation_fallback_reason", "chart_unit"} & required)
 
 
 # ---------------------------------------------------------------------------

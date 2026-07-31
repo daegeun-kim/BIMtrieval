@@ -6,9 +6,13 @@ The active backend is the independent Poetry application under `backend/app/`. R
 `backend/src/...` path later in this document as `backend/app/...`. The backend has no dependency
 on ingestion Python code.
 
-`spec_v006_frontend_application.md` is authoritative for frontend behavior. Its narrow deterministic
-model-list, viewer-asset, and GlobalId-resolution endpoints do not add LLM calls and do not alter
-the two-call planner/answer architecture described here.
+The frontend specification family is authoritative for frontend behavior: the hub
+`spec_v006_frontend_application.md` plus `spec_v008_3d_viewer.md`, `spec_v009_chat_panel.md`,
+`spec_v010_explanation_panel.md`, and `spec_v011_component_panel.md`. Their narrow deterministic
+endpoints — model list and GlobalId resolution (v006 §9), viewer asset and logical floors (v008),
+component details and highlight groups (v011) — add no LLM calls and do not alter the planner/answer
+architecture described here. The additive `answer_explanation` presentation payload (v010) is built
+from finished result objects and likewise adds no call.
 
 The frontend sends selected IFC GlobalIds scoped to an active `source_model_id`. Trusted backend
 code resolves them to canonical entity IDs before existing SQL/RAG/graph planning and execution.

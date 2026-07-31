@@ -10,17 +10,21 @@ import {
   truncationLine,
 } from "./explanation";
 
-// The persistent basic-information region at the card's right (task26 §4).
+// The persistent basic-information region at the card's right (task26 §4,
+// task29 §6).
 //
-// It is present for EVERY presentation — a chart or table never appears alone —
-// and it is descriptive only: every line restates a field the backend already
-// established. It introduces no interpretation and no factual claim of its own.
+// It is present for EVERY presentation — a chart, table or diagram never appears
+// alone — and it is descriptive only: every line restates a field the backend
+// already established. It introduces no interpretation, and no graph claim of
+// its own: the graph/table fallback reason below is the backend's own sentence.
 export default function ExplanationInfo({
   explanation,
   group,
+  groupIsGraphNode = false,
 }: {
   explanation: AnswerExplanation;
   group: ExplanationGroup | null;
+  groupIsGraphNode?: boolean;
 }) {
   const truncation = truncationLine(explanation, group);
   const coverage = coverageLine(explanation);
@@ -40,6 +44,12 @@ export default function ExplanationInfo({
         {group && (
           <p className="ex-info-line ex-info-muted" data-testid="ex-full-result">
             Full result: {fullResultLine(explanation)}
+          </p>
+        )}
+        {group && groupIsGraphNode && (
+          <p className="ex-info-line ex-info-muted" data-testid="ex-overlap-note">
+            Diagram groups can share objects, so the other groups are not the
+            remainder of this one.
           </p>
         )}
       </section>
@@ -70,6 +80,11 @@ export default function ExplanationInfo({
         </p>
       )}
       {coverage && <p className="ex-info-note">{coverage}</p>}
+      {explanation.presentation_fallback_reason && (
+        <p className="ex-info-note" data-testid="ex-fallback">
+          {explanation.presentation_fallback_reason}
+        </p>
+      )}
       {explanation.limitation && <p className="ex-info-note">{explanation.limitation}</p>}
 
       {(known.length > 0 || unknown.length > 0) && (

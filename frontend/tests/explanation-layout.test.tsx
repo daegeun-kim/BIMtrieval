@@ -53,7 +53,7 @@ const EXPLANATION = {
   request_label: "external doors on floor 3",
   operation: "count",
   result_status: "exact",
-  presentation: "metric",
+  presentation: "result_table",
   answer_basis: "exact_sql",
   interpretation: null,
   retrieval_modes: ["sql"],
@@ -62,6 +62,9 @@ const EXPLANATION = {
   distribution: [],
   aggregate: null,
   relationship_endpoint_total: null,
+  graph: null,
+  presentation_fallback_reason: null,
+  chart_unit: null,
   limitation: null,
   known_parts: [],
   unknown_parts: [],
@@ -69,7 +72,9 @@ const EXPLANATION = {
   true_result_count: 9,
   identities_truncated: false,
   groups: [],
-  rows: [],
+  rows: [
+    { global_id: "D1", ifc_class: "IfcDoor", name: "Door A", storey_name: "Floor 3" },
+  ],
 } as AnswerExplanation;
 
 const VIEWPORT = 1600;
@@ -194,5 +199,46 @@ describe("the fixed stacked layout", () => {
     const panel = screen.getByLabelText("Component details");
     expect(panel).toHaveClass("component-panel");
     expect(screen.getByRole("group", { name: /highlight matching objects/i })).toBeInTheDocument();
+  });
+});
+
+// A result that supports no presentation carries no payload at all, so the
+// original full-height chat stays and no blank explanation space is reserved
+// (task29 §2, §7).
+describe("non-qualifying results reserve no panel space", () => {
+  it("leaves the original full-height chat layout and no empty card", async () => {
+    useStore.setState({ explanation: null });
+    await renderApp();
+    expect(screen.queryByTestId("right-stack")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Query explanation")).not.toBeInTheDocument();
+    const chat = screen.getByLabelText("Conversation");
+    expect(chat).not.toHaveClass("panel-stacked");
+    expect(chat.querySelector(".panel-resizer")).not.toBeNull();
+  });
+
+  it("retires the prior card when a newer result stops qualifying", async () => {
+    useStore.setState({ explanation: EXPLANATION });
+    const { rerender } = await renderApp();
+    expect(screen.getByTestId("right-stack")).toBeInTheDocument();
+
+    useStore.getState().closeExplanation();
+    await rerenderApp(rerender);
+    expect(screen.queryByTestId("right-stack")).not.toBeInTheDocument();
+    expect(columnWidth()).toBe(useStore.getState().panelWidth);
+  });
+
+  it("switching to floor-plan mode neither creates nor closes explanation content", async () => {
+    useStore.setState({ explanation: EXPLANATION });
+    const { rerender } = await renderApp();
+
+    useStore.getState().setFloorMode("plan", 0);
+    await rerenderApp(rerender);
+    expect(screen.getByLabelText("Query explanation")).toBeInTheDocument();
+
+    useStore.getState().setFloorMode("3d", null);
+    await rerenderApp(rerender);
+    expect(screen.getByLabelText("Query explanation")).toBeInTheDocument();
+    // …and the diagram is never a plan, section, elevation or model image.
+    expect(screen.queryByTestId("ex-graph")).not.toBeInTheDocument();
   });
 });

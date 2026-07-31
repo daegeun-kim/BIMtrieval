@@ -21,6 +21,27 @@ class TraversalHop:
     to_entity_id: int | None
     to_entity_global_id: str | None
 
+    # --- Presentation-only columns (task29 §5.1) ----------------------------
+    #
+    # Every field below already existed on the `relationship_members` rows the
+    # traversal statement ALREADY joins (`role`, `endpoint_global_id`,
+    # `endpoint_ifc_class` on both the `m_from` and `m_to` aliases), so carrying
+    # them adds no statement, join, predicate, or reached endpoint. They exist
+    # so the explanation panel can reproduce the recorded topology — the answer,
+    # the endpoints and the LLM packet never read them.
+    #
+    # Defaulted to `None` so a hop constructed without them (fixtures, callers
+    # that only need reachability) stays valid and simply yields no diagram.
+    from_role: str | None = None
+    to_role: str | None = None
+    from_entity_global_id: str | None = None
+    from_entity_ifc_class: str | None = None
+    to_entity_ifc_class: str | None = None
+    #: Which traversal direction discovered this hop. Recorded for diagnostics
+    #: only: arrow direction is derived from the IFC roles above, never from
+    #: discovery order (task29 §5.2).
+    traversal_direction: str | None = None
+
 
 @dataclass
 class TraversalResult:

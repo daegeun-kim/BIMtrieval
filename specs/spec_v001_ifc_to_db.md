@@ -28,7 +28,8 @@ code. The backend reads the database and never imports `bim_rag`.
 PostGIS geometry extraction remains deferred to a separate future specification. It is not
 part of v001 or the frontend MVP. Browser rendering uses an optimized viewer artifact rather
 than reconstructing the model directly from PostGIS. Viewer-asset preparation is governed by
-`spec_v006_frontend_application.md` and does not change the v001 database/vector pipeline.
+`spec_v008_3d_viewer.md` (under the frontend hub `spec_v006_frontend_application.md`) and does not
+change the v001 database/vector pipeline.
 
 ## 1. Purpose
 

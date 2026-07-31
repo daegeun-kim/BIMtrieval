@@ -3,7 +3,7 @@ import { controller } from "../state/controller";
 import { useStore } from "../state/store";
 import ExplanationInfo from "./ExplanationInfo";
 import ExplanationVisual from "./ExplanationVisual";
-import { activeGroup } from "./explanation";
+import { activeGroup, isGraphNodeSelection } from "./explanation";
 
 // The Query Explanation card (tasks/task26.md). A visual explanation of the
 // backend's already-computed authoritative result — not a second analysis
@@ -19,6 +19,7 @@ export default function ExplanationPanel() {
 
   if (!explanation) return null;
   const group = activeGroup(explanation, groupKey);
+  const groupIsGraphNode = isGraphNodeSelection(explanation, groupKey);
 
   return (
     <section className="explain-panel" aria-label="Query explanation">
@@ -58,7 +59,11 @@ export default function ExplanationPanel() {
           activeKey={groupKey}
           onSelect={(g) => void controller.selectExplanationGroup(g.key)}
         />
-        <ExplanationInfo explanation={explanation} group={group} />
+        <ExplanationInfo
+          explanation={explanation}
+          group={group}
+          groupIsGraphNode={groupIsGraphNode}
+        />
       </div>
     </section>
   );

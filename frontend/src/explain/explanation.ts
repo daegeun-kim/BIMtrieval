@@ -1,10 +1,53 @@
-// Pure derivations for the query-explanation card (tasks/task26.md §4).
+// Pure derivations for the query-explanation card (tasks/task26.md §4,
+// tasks/task29.md §2, §6).
 //
 // Everything here is descriptive: it restates fields the backend already
 // computed for the accepted answer. Nothing in this file introduces a new
 // interpretation or factual claim, and nothing derives a count that the
-// payload did not supply.
-import type { AnswerExplanation, ExplanationGroup } from "../api/types";
+// payload did not supply. In particular the presentation choice, the graph
+// grouping and the graph eligibility are read from the payload — never
+// recalculated here (task29 §6).
+import type {
+  AnswerExplanation,
+  ExplanationGraphNode,
+  ExplanationGroup,
+} from "../api/types";
+
+/**
+ * A graph node read as a subgroup, so one selection mechanism serves both.
+ *
+ * `exact_count` is the node's own distinct-entity count and `shown_count` the
+ * bounded GlobalIds actually applied, so a capped node selection discloses the
+ * gap exactly as a capped class group does (task29 §5.4).
+ */
+export function graphNodeAsGroup(node: ExplanationGraphNode): ExplanationGroup {
+  const ids = node.global_ids ?? [];
+  return {
+    key: node.id,
+    label: node.label,
+    exact_count: node.entity_count ?? ids.length,
+    shown_count: ids.length,
+    truncated: Boolean(node.global_ids_truncated),
+    global_ids: ids,
+  };
+}
+
+/**
+ * Every subgroup the current payload offers: authoritative class groups, plus
+ * the selectable grouped graph nodes.
+ *
+ * Graph-node identity sets may overlap, so this list is explicitly not a
+ * partition of the result and must never be summed (task29 §5.2).
+ */
+export function selectableSubgroups(
+  explanation: AnswerExplanation | null,
+): ExplanationGroup[] {
+  if (!explanation) return [];
+  const nodes = (explanation.graph?.nodes ?? [])
+    .filter((n) => n.selectable)
+    .map(graphNodeAsGroup);
+  return [...(explanation.groups ?? []), ...nodes];
+}
 
 /** The subgroup currently applied to the viewer, or `null` for the full result. */
 export function activeGroup(
@@ -12,7 +55,22 @@ export function activeGroup(
   key: string | null,
 ): ExplanationGroup | null {
   if (!explanation || key === null) return null;
-  return (explanation.groups ?? []).find((g) => g.key === key) ?? null;
+  return selectableSubgroups(explanation).find((g) => g.key === key) ?? null;
+}
+
+/**
+ * Whether the active selection is a graph node rather than a class group.
+ *
+ * Class groups partition the highlighted set; graph nodes do not. The panel says
+ * so when a node is selected, so nothing implies the remaining nodes form a
+ * disjoint remainder (task29 §5.4).
+ */
+export function isGraphNodeSelection(
+  explanation: AnswerExplanation | null,
+  key: string | null,
+): boolean {
+  if (!explanation || key === null) return false;
+  return (explanation.graph?.nodes ?? []).some((n) => n.id === key);
 }
 
 /**
@@ -133,9 +191,14 @@ export function coverageLine(explanation: AnswerExplanation): string | null {
   )} matching objects that record this value.`;
 }
 
-/** Largest bucket count, for proportional bar widths. Never below 1. */
+/** What a bar's length represents: the existing value, else the bucket count. */
+export function barMagnitude(bucket: { count?: number; value?: number | null }): number {
+  return bucket.value ?? bucket.count ?? 0;
+}
+
+/** Largest bar magnitude, for proportional widths. Never below 1. */
 export function maxBucketCount(explanation: AnswerExplanation): number {
-  const counts = (explanation.distribution ?? []).map((b) => b.count ?? 0);
+  const counts = (explanation.distribution ?? []).map(barMagnitude);
   return Math.max(1, ...counts);
 }
 
@@ -143,4 +206,15 @@ export function maxBucketCount(explanation: AnswerExplanation): number {
 export function maxGroupCount(explanation: AnswerExplanation): number {
   const counts = (explanation.groups ?? []).map((g) => g.exact_count ?? g.shown_count ?? 0);
   return Math.max(1, ...counts);
+}
+
+/** A bar's exact value with its unit, or its exact count when it has no value. */
+export function barValueLabel(
+  bucket: { count?: number; value?: number | null },
+  unit: string | null | undefined,
+): string {
+  if (bucket.value === null || bucket.value === undefined) {
+    return formatCount(bucket.count ?? 0);
+  }
+  return unit ? `${bucket.value.toLocaleString()} ${unit}` : bucket.value.toLocaleString();
 }

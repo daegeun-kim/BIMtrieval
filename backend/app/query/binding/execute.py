@@ -597,3 +597,8 @@ def _execute_relationship(
     result.graph_path_count = execution.path_count
     result.exact_total = len(execution.endpoints)
     result.examples = execution.endpoints[:3]
+    # Presentation-only transport (task29 §5.1). Copied from the traversal that
+    # already ran; it changes no status, total, endpoint, example or fact above.
+    result.graph_seed_entity_ids = execution.seed_entity_ids
+    result.graph_topology_hops = execution.topology_hops
+    result.graph_topology_truncated = execution.topology_truncated

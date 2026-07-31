@@ -1,7 +1,7 @@
 # model_assets/
 
 Prepared viewer artifacts (That Open Fragments) served by the backend at
-`GET /api/models/{source_model_id}/viewer-asset` (spec_v006 §9).
+`GET /api/models/{source_model_id}/viewer-asset` (spec_v008 §2.3).
 
 Layout:
 

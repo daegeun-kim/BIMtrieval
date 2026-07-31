@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from app.query.graph.schemas import TraversalHop
+
 __all__ = [
     "ResultStatus",
     "RetrievalMode",
@@ -129,6 +131,16 @@ class AnswerPartResult:
     #: Bounded relationship endpoints for a graph answer.
     graph_endpoints: list[ResultExample] = field(default_factory=list)
     graph_path_count: int | None = None
+
+    #: Presentation-only transport for the explanation panel (task29 §5.1): the
+    #: seeds traversal started from and a bounded copy of the hops it already
+    #: returned between those seeds and the accepted endpoints. Nothing in the
+    #: answer, the packet, the evidence, the status or the viewer identities
+    #: reads these — they exist so a diagram can restate the recorded topology
+    #: without another traversal.
+    graph_seed_entity_ids: tuple[int, ...] = ()
+    graph_topology_hops: list[TraversalHop] = field(default_factory=list)
+    graph_topology_truncated: bool = False
 
     #: One concise reason for a zero/unavailable/partial/ambiguous result.
     limitation: str | None = None
