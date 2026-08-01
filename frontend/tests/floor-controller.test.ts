@@ -34,6 +34,7 @@ const viewerStub = vi.hoisted(() => ({
   ),
   enterPlanMode: vi.fn(async (): Promise<{ ok: boolean; reason?: string }> => ({ ok: true })),
   exitPlanMode: vi.fn(async () => {}),
+  setVisualizationMode: vi.fn(async () => {}),
   dispose: vi.fn(),
 }));
 

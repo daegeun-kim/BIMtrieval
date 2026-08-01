@@ -23,6 +23,7 @@ const viewerStub = vi.hoisted(() => ({
   setFloorContract: vi.fn(async () => []),
   enterPlanMode: vi.fn(async () => ({ ok: true })),
   exitPlanMode: vi.fn(async () => {}),
+  setVisualizationMode: vi.fn(async () => {}),
   clearManualSelection: vi.fn(),
   removeManualSelection: vi.fn(),
   setSelectionEnabled: vi.fn(),

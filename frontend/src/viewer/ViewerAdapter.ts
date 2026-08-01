@@ -27,17 +27,24 @@ import {
   type SceneBand,
 } from "./floorPlan";
 import { type Profile, detectProfile } from "./profileDetection";
-import { ProjectedSizePolicy, asPolicyModel } from "./ProjectedSizePolicy";
+import { ProjectedSizePolicy, asPolicyModel, projectedSizeThresholds } from "./ProjectedSizePolicy";
+import {
+  DEFAULT_VISUALIZATION_MODE,
+  EDGES,
+  VIEWER_NAVIGATION,
+  VISUALIZATION_MODES,
+  type VisualizationMode,
+} from "./viewerCustomization";
 import {
   BASE_MATERIALS,
   DIM_MATERIAL,
-  EDGES,
   MANUAL_MATERIAL,
   PLAN,
   PLAN_CUT_COLOR,
   PLAN_CUT_OPACITY,
   PLAN_FILL_COLOR,
   PLAN_FILL_OPACITY,
+  PLAN_WALL_CUT_COLOR,
   PLANE_COLOR,
   PLANE_OPACITY,
   PRIMARY_MATERIAL,
@@ -162,6 +169,23 @@ export class ViewerAdapter {
   private sizePolicy = new ProjectedSizePolicy();
   private sizePolicyActive = false;
 
+  /**
+   * User-selected visualization quality (task31 §2). Session-level, never
+   * persisted, and deliberately NOT reset by a model switch or unload — only
+   * Reset App returns it to Standard, which the controller does explicitly.
+   *
+   * It changes exactly two things: the projected-size hysteresis pair handed to
+   * `sizePolicy`, and the feature-edge angle the edge overlay is extracted with.
+   * Every other rendering mechanism is identical in all three modes.
+   */
+  private visualizationMode: VisualizationMode = DEFAULT_VISUALIZATION_MODE;
+  /** Every renderable local id of the loaded model, resolved once at load and
+   *  reused by an edge rebuild and the plan wall layer — never re-fetched. */
+  private allLocalIds: number[] = [];
+  /** Monotonic token so a superseded edge-overlay build can never mount
+   *  (task31 §2.3): another mode change, a model switch, unload, or dispose. */
+  private edgeToken = 0;
+
   // -------------------------------------------------------------------------
   // Floor-plan mode (task28). Every mutable object here is imperative viewer
   // state — cameras, clipping planes, section meshes — so none of it belongs in
@@ -192,6 +216,7 @@ export class ViewerAdapter {
 
   constructor(maxSelection = 5) {
     this.maxSelection = maxSelection;
+    this.sizePolicy.setThresholds(projectedSizeThresholds(this.visualizationMode));
   }
 
   setCallbacks(cb: ViewerCallbacks): void {
@@ -298,6 +323,14 @@ export class ViewerAdapter {
    * zeroes the rotate speeds and maps left-drag to truck; this makes the middle
    * and right buttons pan too, so the desktop mapping stays consistent with 3D
    * mode instead of leaving a dead button.
+   *
+   * It also re-asserts the accepted wheel-zoom speed (task31 §5.2). Assigning a
+   * world to a `View` sets `dollySpeed = 6` on that view's own camera, which is
+   * abrupt enough to overshoot a floor on a single notch; this runs AFTER the
+   * plan camera and mode exist, so the library default cannot win. The installed
+   * camera-controls build drives both its dolly and its zoom action from
+   * `dollySpeed`, so this one assignment is the plan wheel speed. The
+   * perspective camera's controls are a different instance and are untouched.
    */
   private configurePlanControls(camera: OBC.OrthoPerspectiveCamera): void {
     const controls = camera.controls;
@@ -307,9 +340,112 @@ export class ViewerAdapter {
       controls.mouseButtons.middle = ACTION.TRUCK;
       controls.mouseButtons.right = ACTION.TRUCK;
       controls.mouseButtons.wheel = ACTION.ZOOM; // orthographic zoom, not dolly
+      controls.dollySpeed = VIEWER_NAVIGATION.planWheelZoomSpeed;
     } catch {
       // controls shape can differ across versions; never fail plan mode over it
     }
+  }
+
+  /** The plan camera's current wheel-zoom speed, for tests (task31 §5.2). */
+  getPlanZoomSpeed(): number | null {
+    return this.planView?.camera.controls?.dollySpeed ?? null;
+  }
+
+  /** The perspective camera's zoom speed, which plan mode must never change. */
+  getPerspectiveZoomSpeed(): number | null {
+    return this.world?.camera.controls?.dollySpeed ?? null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Visualization modes (task31 §2)
+  // -------------------------------------------------------------------------
+
+  getVisualizationMode(): VisualizationMode {
+    return this.visualizationMode;
+  }
+
+  /**
+   * Apply a visualization mode to the CURRENTLY loaded model — no download, no
+   * reconversion, no page reload (task31 §2.3).
+   *
+   * Two effects, both bounded:
+   *
+   *   1. the projected-size hysteresis pair is swapped and the policy is
+   *      re-evaluated against the cached classification/bounding volumes, then
+   *      Fragments is refreshed once through the established update path;
+   *   2. if the applicable feature-edge angle changed, the edge overlay is
+   *      regenerated asynchronously — the angle is baked in when `EdgesGeometry`
+   *      extracts the edges, so it cannot be recolored into place.
+   *
+   * Nothing here touches query/manual identities, the camera pose, the active
+   * floor, or any panel state.
+   */
+  async setVisualizationMode(mode: VisualizationMode): Promise<void> {
+    if (mode === this.visualizationMode) return;
+    this.visualizationMode = mode;
+
+    this.sizePolicy.setThresholds(projectedSizeThresholds(mode));
+    await this.applyProjectedSizePolicy();
+    await this.updateFragments();
+
+    // Compared against the angle the LIVE overlay was extracted with (including
+    // one still building), not against the outgoing mode's nominal angle, so a
+    // profile upgrade between the two can never skip a needed rebuild.
+    const current = this.edgeOverlay?.getThresholdDeg() ?? null;
+    if (current !== null && current !== this.edgeAngleDeg()) this.rebuildEdgeOverlay();
+  }
+
+  /**
+   * The feature-edge angle in force: the selected mode's value for the model's
+   * DETECTED balanced/large-model signal (task31 §2.2). That signal still
+   * chooses which of the mode's two angles applies; it never chooses the mode.
+   */
+  private edgeAngleDeg(): number {
+    const thresholds = VISUALIZATION_MODES[this.visualizationMode];
+    return this.lastDetectedProfile === "large-model"
+      ? thresholds.edgeAngleLargeModelDeg
+      : thresholds.edgeAngleBalancedDeg;
+  }
+
+  /** The angle the active overlay was actually extracted with, for tests. */
+  getEdgeThresholdDeg(): number | null {
+    return this.edgeOverlay?.getThresholdDeg() ?? null;
+  }
+
+  /**
+   * Discard the current entity-edge overlay and extract a new one at the
+   * in-force angle, in the same yielded batches the initial build uses so
+   * interaction stays usable (task31 §2.3).
+   *
+   * The old overlay is disposed FIRST, so a rebuild can never leave two
+   * overlays in the scene or an undisposed buffer behind; the model is briefly
+   * without edges while the new one extracts. The token retires a build whose
+   * mode, model, or adapter changed underneath it — such a build mounts
+   * nothing and disposes itself.
+   */
+  private rebuildEdgeOverlay(): void {
+    if (!EDGES.enabled) return;
+    const model = this.model;
+    if (!model) return;
+
+    const token = ++this.edgeToken;
+    this.edgeOverlay?.dispose();
+    this.edgeOverlay = null;
+
+    const overlay = new EdgeOverlay();
+    this.edgeOverlay = overlay;
+    const thresholdDeg = this.edgeAngleDeg();
+    void overlay
+      .build(model, model.object, { thresholdDeg, localIds: this.allLocalIds })
+      .then((built) => {
+        if (token !== this.edgeToken || this.edgeOverlay !== overlay) {
+          // Superseded mid-build: drop whatever it mounted rather than leaving
+          // a stale-angle overlay beside the current one.
+          overlay.dispose();
+          return;
+        }
+        if (built) this.recolorEdges();
+      });
   }
 
   /**
@@ -391,13 +527,109 @@ export class ViewerAdapter {
     if (!cam.setViewOffset || !cam.clearViewOffset) return;
     const canvasW = dom.clientWidth || 1;
     const canvasH = dom.clientHeight || 1;
-    const minLeftWidth = canvasW * VIEWER_CAMERA.minEffectiveWidthFraction;
-    const leftWidth = Math.max(canvasW - this.rightObstructionPx, minLeftWidth);
-    if (leftWidth >= canvasW - 0.5) {
+    const effectiveWidth = this.effectiveViewportWidth(canvasW);
+    // The orthographic frustum must be reshaped BEFORE the offset is written:
+    // `fitToBox` reads `right - left` synchronously to size an orthographic fit.
+    this.applyOrthoScale(cam, effectiveWidth, canvasH);
+    if (effectiveWidth >= canvasW - 0.5) {
       cam.clearViewOffset();
       return;
     }
-    cam.setViewOffset(leftWidth, canvasH, 0, 0, canvasW, canvasH);
+    cam.setViewOffset(effectiveWidth, canvasH, 0, 0, canvasW, canvasH);
+  }
+
+  /** The unobstructed viewer region's width in CSS px, floored by the guard. */
+  private effectiveViewportWidth(canvasW: number): number {
+    const minLeftWidth = canvasW * VIEWER_CAMERA.minEffectiveWidthFraction;
+    return Math.min(canvasW, Math.max(canvasW - this.rightObstructionPx, minLeftWidth));
+  }
+
+  /**
+   * Equal scale on both plan axes (task31 §5.3).
+   *
+   * One scene unit horizontally must occupy the same number of CSS pixels as one
+   * scene unit vertically, so a square reads square and perpendicular geometry
+   * stays perpendicular in every model's floor plan.
+   *
+   * With the view offset above applied, three.js renders the frustum's vertical
+   * span `(top - bottom) / zoom` across `canvasH` px, and its horizontal span
+   * `(right - left) / zoom * canvasW / effectiveWidth` across `canvasW` px. So:
+   *
+   *     px per unit horizontally = effectiveWidth * zoom / (right - left)
+   *     px per unit vertically   = canvasH       * zoom / (top - bottom)
+   *
+   * and the two are equal exactly when
+   *
+   *     (right - left) / (top - bottom) === effectiveWidth / canvasH.
+   *
+   * The installed library never establishes that: `OrthoPerspectiveCamera`
+   * builds its orthographic frustum from `window.innerWidth / window.innerHeight`
+   * — the WINDOW aspect, not the canvas's — and its resize handler leaves a
+   * View's own camera untouched because that camera never saw a world creation
+   * event, so nothing corrects it afterwards either. The result is a horizontally
+   * compressed plan in every model, worsened by the panel obstruction.
+   *
+   * This rewrites only the HORIZONTAL half-extent, symmetric about the frustum's
+   * existing centre, and leaves `top`/`bottom` (and `zoom`) alone: the vertical
+   * mapping is the authoritative one, exactly as a fixed vertical FOV is for the
+   * perspective camera. Because the resulting px-per-unit is
+   * `canvasH * zoom / (top - bottom)` — independent of `effectiveWidth` — a
+   * panel opening, closing or resizing narrows the visible region without
+   * rescaling the drawing at all. No model is scaled or transformed, no section
+   * geometry is touched, no package is patched, and no per-model factor exists.
+   * Perspective cameras are returned untouched, so 3D projection and
+   * pixel-correct picking are unaffected.
+   */
+  private applyOrthoScale(
+    cam: THREE.Camera & Partial<THREE.OrthographicCamera>,
+    effectiveWidth: number,
+    canvasH: number,
+  ): void {
+    if (!cam.isOrthographicCamera) return;
+    const { left, right, top, bottom } = cam;
+    if (
+      left === undefined ||
+      right === undefined ||
+      top === undefined ||
+      bottom === undefined
+    ) {
+      return;
+    }
+    const verticalSpan = top - bottom;
+    if (!Number.isFinite(verticalSpan) || verticalSpan <= 0) return;
+    if (!Number.isFinite(effectiveWidth) || effectiveWidth <= 0 || canvasH <= 0) return;
+
+    const halfWidth = (verticalSpan * (effectiveWidth / canvasH)) / 2;
+    if (!Number.isFinite(halfWidth) || halfWidth <= 0) return;
+    const centerX = (right + left) / 2;
+    if (Math.abs(right - left - halfWidth * 2) < 1e-9) return; // already correct
+    cam.left = centerX - halfWidth;
+    cam.right = centerX + halfWidth;
+    cam.updateProjectionMatrix?.();
+  }
+
+  /**
+   * CSS px per scene unit on each axis under the active camera — exposed so the
+   * equal-scale guarantee (task31 §5.3) is measurable rather than asserted.
+   * `null` outside orthographic (plan) mode.
+   */
+  getPlanPixelScale(): { horizontal: number; vertical: number } | null {
+    const cam = this.world?.camera.three as
+      | (THREE.Camera & Partial<THREE.OrthographicCamera>)
+      | undefined;
+    const dom = this.rendererDom();
+    if (!cam?.isOrthographicCamera || !dom) return null;
+    const { left, right, top, bottom, zoom } = cam;
+    if (left === undefined || right === undefined || top === undefined || bottom === undefined) {
+      return null;
+    }
+    const canvasW = dom.clientWidth || 1;
+    const canvasH = dom.clientHeight || 1;
+    const scale = zoom ?? 1;
+    return {
+      horizontal: (this.effectiveViewportWidth(canvasW) * scale) / (right - left),
+      vertical: (canvasH * scale) / (top - bottom),
+    };
   }
 
   /**
@@ -725,6 +957,7 @@ export class ViewerAdapter {
     } catch {
       // profile detection is best-effort; an empty list just yields "balanced"
     }
+    this.allLocalIds = localIds;
     let profile: Profile = detectProfile({ artifactBytes: bytes.byteLength, itemCount: localIds.length }, null);
     this.applyDetectedProfile(profile);
 
@@ -744,13 +977,21 @@ export class ViewerAdapter {
     // is ready and usable, in yielded batches, so it never delays load or
     // blocks input. When it finishes it paints itself from the current roles.
     if (EDGES.enabled) {
+      const token = ++this.edgeToken;
       const overlay = new EdgeOverlay();
       this.edgeOverlay = overlay;
-      const thresholdDeg =
-        profile === "large-model" ? EDGES.thresholdAngleDeg.largeModel : EDGES.thresholdAngleDeg.balanced;
+      // The angle comes from the SELECTED visualization mode's entry for this
+      // model's detected profile (task31 §2.2), so a mode chosen before the load
+      // applies from the first extraction rather than triggering a rebuild.
+      const thresholdDeg = this.edgeAngleDeg();
       void overlay.build(model, model.object, { thresholdDeg, localIds }).then((built) => {
-        // Ignore a build that finished after the model changed underneath it.
-        if (built && this.edgeOverlay === overlay) {
+        // Ignore a build that finished after the model or the mode changed
+        // underneath it — and release whatever it managed to mount.
+        if (token !== this.edgeToken || this.edgeOverlay !== overlay) {
+          overlay.dispose();
+          return;
+        }
+        if (built) {
           this.recolorEdges();
           // Final profile (task18 §11): adds edge vertex count, the last of
           // the three signals. A single controlled upgrade from provisional —
@@ -873,8 +1114,12 @@ export class ViewerAdapter {
     this.queryPrimarySet = new Set();
     this.rolesActive = false;
     this.classification = { roof: [], wall: [] };
+    this.allLocalIds = [];
     this.sizePolicy.reset();
     this.sizePolicyActive = false;
+    // Retires any in-flight edge build for the outgoing model (task31 §2.3).
+    // The visualization MODE itself deliberately survives a model switch.
+    this.edgeToken++;
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
     this.removeBasePlane();
@@ -1302,10 +1547,13 @@ export class ViewerAdapter {
    * scale bars — only the intersection of the plane with geometry the prepared
    * artifact actually contains.
    *
-   * Two layers when a query highlight is active, so the established semantic
-   * roles survive into the plan (task28 §4.2, §5): the base cut in plan ink,
-   * then the query-primary cut in the existing blueprint blue drawn over it.
-   * With no highlight it is a single base layer and a single worker call.
+   * Up to three disjoint layers, so the established semantic roles survive into
+   * the plan (task28 §4.2, §5; task31 §5.1): non-wall geometry in plan ink,
+   * then wall cuts in black, then the query-primary cut in the existing
+   * blueprint blue drawn over both. The three id sets do not overlap — a
+   * query-primary wall is in the blue layer and in neither other layer — so
+   * black can never cover or tint a blue result, and no layer restates another
+   * at partial alpha.
    *
    * The plane is transformed into the model object's local space before the
    * call (and the results mounted UNDER that object) because `getSection`
@@ -1324,7 +1572,14 @@ export class ViewerAdapter {
       // stipple the contour away (see PLAN.cutInsetM).
       group.position.y = -PLAN.cutInsetM;
 
-      const base = await this.sectionLayer(localPlane, undefined, {
+      // Wall cuts are drawn as their own black layer (task31 §5.1), so the
+      // walls are withheld from the base layer rather than being over-painted:
+      // an over-paint would blend the base poché through the black at the
+      // established fill alpha, which is not the accepted colour. With no wall
+      // classification (or no resolvable id universe) the split degrades to the
+      // previous single base layer — truthful, just without black walls.
+      const split = this.planWallSplit();
+      const base = await this.sectionLayer(localPlane, split?.others, {
         color: PLAN_CUT_COLOR,
         contourOpacity: PLAN_CUT_OPACITY,
         fillColor: PLAN_FILL_COLOR,
@@ -1337,6 +1592,26 @@ export class ViewerAdapter {
         return false;
       }
       base.forEach((object) => group.add(object));
+
+      if (split && split.walls.length > 0) {
+        const walls = await this.sectionLayer(localPlane, split.walls, {
+          // Same colour for fill and contour — the poché convention for cut
+          // masonry. The fill keeps the established plan-fill alpha; only the
+          // colour changed.
+          color: PLAN_WALL_CUT_COLOR,
+          contourOpacity: PLAN_CUT_OPACITY,
+          fillColor: PLAN_WALL_CUT_COLOR,
+          fillOpacity: PLAN_FILL_OPACITY,
+          fillRenderOrder: PLAN.wallFillRenderOrder,
+          contourRenderOrder: PLAN.wallContourRenderOrder,
+        });
+        if (token !== this.planToken) {
+          base.forEach(disposeDrawable);
+          walls.forEach(disposeDrawable);
+          return false;
+        }
+        walls.forEach((object) => group.add(object));
+      }
 
       if (this.rolesActive && this.queryPrimary.length > 0) {
         const primary = await this.sectionLayer(localPlane, this.queryPrimary, {
@@ -1368,6 +1643,36 @@ export class ViewerAdapter {
       // orthographic view remains, and no other floor's contours are shown.
       return false;
     }
+  }
+
+  /**
+   * The plan cut's disjoint id sets: walls to draw black, everything else to
+   * draw in the existing plan ink (task31 §5.1).
+   *
+   * Membership is the `classifyGeometry` wall set already computed at load,
+   * which is exactly the viewer's one wall-class definition (`geometryRole`
+   * over `IfcWall`/`IfcWallStandardCase`/`IfcWallElementedCase`, also exposed
+   * as `isWallClass`) — no IFC re-read, no new query, no change to wall
+   * membership itself. Query-primary objects are withheld from
+   * BOTH sets: they are drawn by the blue primary layer, which must not be
+   * blended with black underneath it.
+   *
+   * Returns `null` when the model's id universe or its wall classification is
+   * unavailable, in which case the caller keeps the previous single
+   * everything-in-plan-ink layer rather than guessing a split.
+   */
+  private planWallSplit(): { walls: number[]; others: number[] } | null {
+    if (this.allLocalIds.length === 0 || this.classification.wall.length === 0) return null;
+    const wallIds = new Set(this.classification.wall);
+    const primaries = this.rolesActive ? this.queryPrimarySet : new Set<number>();
+    const walls: number[] = [];
+    const others: number[] = [];
+    for (const id of this.allLocalIds) {
+      if (primaries.has(id)) continue;
+      if (wallIds.has(id)) walls.push(id);
+      else others.push(id);
+    }
+    return { walls, others };
   }
 
   /** One `getSection` call turned into a contour + fill pair, or an empty list. */
@@ -1849,8 +2154,10 @@ export class ViewerAdapter {
     this.savedPose = null;
     this.sizePolicySuspended = false;
     this.views = null;
+    this.edgeToken++;
     this.edgeOverlay?.dispose();
     this.edgeOverlay = null;
+    this.allLocalIds = [];
     this.removeBasePlane();
     try {
       this.components?.dispose();

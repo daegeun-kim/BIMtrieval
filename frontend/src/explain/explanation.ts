@@ -11,6 +11,7 @@ import type {
   AnswerExplanation,
   ExplanationGraphNode,
   ExplanationGroup,
+  ExplanationRow,
 } from "../api/types";
 
 /**
@@ -206,6 +207,126 @@ export function maxBucketCount(explanation: AnswerExplanation): number {
 export function maxGroupCount(explanation: AnswerExplanation): number {
   const counts = (explanation.groups ?? []).map((g) => g.exact_count ?? g.shown_count ?? 0);
   return Math.max(1, ...counts);
+}
+
+// ---------------------------------------------------------------------------
+// Object-table progressive display and sorting (tasks/task31.md §4)
+// ---------------------------------------------------------------------------
+
+/** Rows rendered initially, and appended per end-of-scroll (task31 §4.2). */
+export const ROW_PAGE_SIZE = 50;
+
+export type RowSortColumn = "object" | "class" | "storey";
+export type RowSortDirection = "desc" | "asc";
+
+/** `null` means the original deterministic backend/entity order. */
+export interface RowSort {
+  column: RowSortColumn;
+  direction: RowSortDirection;
+}
+
+/**
+ * The exact three-state click cycle (task31 §4.3):
+ *
+ *     first click  -> descending
+ *     second click -> ascending
+ *     third click  -> cancel sorting, restore the original backend order
+ *
+ * Only one column is active at a time, and activating a different column starts
+ * that column at descending — so the previous column's state is discarded, never
+ * carried over.
+ */
+export function nextRowSort(current: RowSort | null, column: RowSortColumn): RowSort | null {
+  if (!current || current.column !== column) return { column, direction: "desc" };
+  if (current.direction === "desc") return { column, direction: "asc" };
+  return null;
+}
+
+/** The `aria-sort` value for one header, from the active sort state. */
+export function ariaSortFor(
+  current: RowSort | null,
+  column: RowSortColumn,
+): "ascending" | "descending" | "none" {
+  if (!current || current.column !== column) return "none";
+  return current.direction === "asc" ? "ascending" : "descending";
+}
+
+/**
+ * The sortable text of one row for one column, or `null` when the value is
+ * genuinely absent.
+ *
+ * The Object column sorts on what it DISPLAYS: the name when the accepted result
+ * carried one, otherwise the GlobalId fallback. So a row is never sorted by a
+ * value the reader cannot see, and a missing name does not make the row
+ * valueless — only a truly empty column does.
+ */
+export function rowSortValue(row: ExplanationRow, column: RowSortColumn): string | null {
+  const raw =
+    column === "object"
+      ? (row.name ?? row.global_id)
+      : column === "class"
+        ? row.ifc_class
+        : row.storey_name;
+  const text = (raw ?? "").trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * Sort the COMPLETE available row set — not just the rows currently mounted.
+ *
+ * Pure and total: the input array is never mutated, missing values stay last in
+ * BOTH directions (they are absent, not extreme), ties keep their original
+ * relative order via an explicit index tiebreaker rather than relying on sort
+ * stability, and a `null` sort returns the original order exactly. Comparison is
+ * locale-aware and numeric-aware so "Wall 10" follows "Wall 9".
+ */
+export function sortRows(rows: ExplanationRow[], sort: RowSort | null): ExplanationRow[] {
+  if (!sort) return rows;
+  const sign = sort.direction === "asc" ? 1 : -1;
+  return rows
+    .map((row, index) => ({ row, index, value: rowSortValue(row, sort.column) }))
+    .sort((a, b) => {
+      if (a.value === null || b.value === null) {
+        // Missing last regardless of direction; two missing keep original order.
+        if (a.value === b.value) return a.index - b.index;
+        return a.value === null ? 1 : -1;
+      }
+      const cmp = a.value.localeCompare(b.value, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      return cmp === 0 ? a.index - b.index : cmp * sign;
+    })
+    .map((entry) => entry.row);
+}
+
+/**
+ * The table caption, distinguishing all three quantities whenever they differ
+ * (task31 §4.2):
+ *
+ *   `displayed` — rows currently mounted
+ *   `available` — rows the response's identity set makes listable
+ *   `trueTotal` — the real result total, which the identity cap never reduces
+ *
+ * The capped branches always name the true total, so an available count can
+ * never read as the complete result.
+ */
+export function rowTableCaption(
+  displayed: number,
+  available: number,
+  trueTotal: number,
+): string {
+  const capped = available < trueTotal;
+  if (!capped) {
+    return displayed < available
+      ? `Showing ${formatCount(displayed)} of ${formatCount(available)} results`
+      : `${formatCount(available)} results`;
+  }
+  return displayed < available
+    ? `Showing ${formatCount(displayed)} of ${formatCount(available)} listed objects; ` +
+        `${formatCount(trueTotal)} results in total`
+    : `Showing all ${formatCount(available)} listed objects; ` +
+        `${formatCount(trueTotal)} results in total`;
 }
 
 /** A bar's exact value with its unit, or its exact count when it has no value. */

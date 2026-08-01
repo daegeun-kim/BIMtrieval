@@ -159,7 +159,8 @@ Two regions, always: the visualization at the left and a persistent plain-langua
 at the right. A chart or table never appears alone.
 
 The information region states what question part the card represents, what the backend interpreted,
-what is currently highlighted, shown-versus-true counts where truncation exists, operation/result
+what is currently highlighted, shown-versus-true counts where truncation exists (independently of, and
+in addition to, the table caption of §7.1), operation/result
 status and answer basis, and any limitation, coverage note, known/unknown split, or graph fallback
 reason. Selecting a group changes it to distinguish the subgroup from the full answer
 (`Showing: IfcDoor` / `5 of 9 query-result objects` / `Full result: 9 · external doors on floor 3`).
@@ -173,13 +174,68 @@ React/CSS/SVG — no charting dependency.
 ## 7. Tables
 
 One bounded scrollable table family serves result, group, comparison, and relationship-fallback
-tables, at the existing 50-row ceiling.
+tables.
 
-Count and list tables show the exact/true total, the number of identities represented, an explicit
-`Showing N of total` disclosure when capped, IFC class, any already-available name/storey, and
-GlobalId as the final identity fallback. **Count rows are built from the identities the viewer was
-already hydrated with**, merged with existing example metadata by GlobalId; both lists are ordered by
-entity id, and no query is issued to fill a missing name.
+**Row-based OBJECT tables** — result tables and the relationship endpoint fallback table — have no
+terminal row ceiling. The payload carries every authoritative row already represented by the response's
+hydrated identities, and §7.1 displays them progressively. The naturally bounded contents of one-bucket
+group tables and comparison tables are unchanged: those are not object tables and neither paginate nor
+sort.
+
+Count and list tables show the exact/true total, the number of identities represented, IFC class, any
+already-available name/storey, and GlobalId as the final identity fallback. **Count rows are built from
+the identities the viewer was already hydrated with**, merged with existing example metadata by
+GlobalId; both lists are ordered by entity id, and no query is issued to fill a missing name.
+
+### 7.1 Bounded availability and progressive display
+
+The row list is bounded by **viewer hydration**, not by a display quantum: `MAX_EXPLANATION_ROWS`
+mirrors `Settings.max_viewer_match_ids` (**2,000**), a second explicit ceiling so the payload can never
+become an unbounded result transport even if that setting were raised. The 2,000-identity viewer cap
+itself is unchanged: it bounds a single response and the viewer highlight, and it never changes the
+exact result total.
+
+The presentation builder keeps its structural isolation from the database, execution, and LLM layers.
+Filling the larger list issues no additional database query and no LLM call — a row with no name is a
+GlobalId plus IFC class, which is a sufficient row.
+
+The frontend renders the first **50** rows and appends the next **50** each time the user reaches the
+end of the table's own bounded scroll area, until every available row is displayed. There is no
+`Load more` button, the explanation panel itself never grows, and scrolling is pure in-memory work: no
+pagination endpoint and no network request on scroll or sort.
+
+The caption distinguishes all three quantities whenever they differ — **rows currently displayed**,
+**rows available under the viewer-identity cap**, and the **true result total**. It may never let an
+available count read as the complete result:
+
+```text
+Showing 50 of 2,000 listed objects; 5,000 results in total
+Showing all 2,000 listed objects; 5,000 results in total
+Showing 50 of 120 results
+120 results
+```
+
+### 7.2 Three-state column sorting
+
+Every object-table column header — `Object`, `Class`, `Storey` — is an accessible sort button with this
+exact cycle:
+
+```text
+first click  -> descending
+second click -> ascending
+third click  -> cancel sorting and restore the original backend order
+```
+
+Only one column is active at a time; activating another column starts that column at descending and
+clears the prior column's state. Sorting covers the **complete available row set**, not only the rows
+currently mounted. Any sort-state change returns the display to the first 50 rows and scrolls the table
+to the top. Missing values stay last in both directions (they are absent, not extreme), ties keep the
+original relative order via an explicit index tiebreaker, and cancelling restores the deterministic
+backend/entity order exactly. The `Object` column sorts on what it displays — the name, else the
+GlobalId fallback.
+
+The active direction is exposed visually and through `aria-sort`, and the headers are operable from the
+keyboard. No spreadsheet component or table dependency is added.
 
 A one-bucket distribution uses a table because one bar carries no comparison. A structured comparison
 uses a table only when its values already exist. If the rows a truthful table needs do not exist, the

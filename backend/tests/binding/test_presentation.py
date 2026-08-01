@@ -18,6 +18,7 @@ import inspect
 import pytest
 
 from app.api.schemas.response import ExplanationPresentation
+from app.config.settings import Settings
 from app.query.binding import presentation as presentation_module
 from app.query.binding import topology as topology_module
 from app.query.binding.evidence import (
@@ -176,12 +177,46 @@ def test_count_rows_come_from_the_already_hydrated_viewer_identities():
     assert (bare.ifc_class, bare.name) == ("IfcDoor", None)
 
 
-def test_count_rows_stay_capped_at_fifty():
+def test_every_hydrated_identity_becomes_a_row(monkeypatch):
+    """task31 §4.1: the former 50-row terminal ceiling is gone.
+
+    Every authoritative row the response's hydrated identities represent is made
+    available to the frontend, which displays them 50 at a time. The order is the
+    hydration order — the "original backend order" the frontend's sort cycle
+    restores.
+    """
     pairs = tuple(("IfcDoor", f"G{i}") for i in range(200))
     explanation = _build(_result(total=200), _hydration(pairs))
     assert explanation is not None
-    assert len(explanation.rows) == presentation_module.MAX_EXPLANATION_ROWS
+    assert len(explanation.rows) == 200
+    assert [r.global_id for r in explanation.rows[:3]] == ["G0", "G1", "G2"]
+
+
+def test_rows_remain_bounded_by_the_viewer_identity_cap(monkeypatch):
+    """task31 §4.1: bounded by hydration, never an unbounded result transport."""
+    assert presentation_module.MAX_EXPLANATION_ROWS == 2000
+    assert presentation_module.MAX_EXPLANATION_ROWS == Settings().max_viewer_match_ids
+
+    monkeypatch.setattr(presentation_module, "MAX_EXPLANATION_ROWS", 5)
+    pairs = tuple(("IfcDoor", f"G{i}") for i in range(20))
+    explanation = _build(_result(total=20), _hydration(pairs))
+    assert explanation is not None
+    assert len(explanation.rows) == 5
     assert explanation.rows[0].global_id == "G0"
+
+
+def test_the_true_total_stays_independent_of_the_row_list():
+    """task31 §4.1: a capped identity set never reduces the reported result."""
+    pairs = tuple(("IfcDoor", f"G{i}") for i in range(30))
+    hydration = _hydration(pairs)
+    hydration.viewer_matches_total = 7431
+    hydration.viewer_matches_truncated = True
+    explanation = _build(_result(total=7431), hydration)
+    assert explanation is not None
+    assert len(explanation.rows) == 30
+    assert explanation.shown_identity_count == 30
+    assert explanation.true_result_count == 7431
+    assert explanation.identities_truncated is True
 
 
 def test_a_count_without_authoritative_displayed_identities_stays_in_chat():

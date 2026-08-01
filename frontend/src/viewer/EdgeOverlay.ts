@@ -38,7 +38,17 @@
 import * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 
-import { EDGE_RESTORE_DELAY_MS, EDGES, VIEWER_COLORS } from "./viewerTheme";
+import {
+  DEFAULT_VISUALIZATION_MODE,
+  EDGES,
+  VIEWER_COLORS,
+  VISUALIZATION_MODES,
+} from "./viewerCustomization";
+import { EDGE_RESTORE_DELAY_MS } from "./viewerTheme";
+
+/** Angle used when the caller supplies none — the default mode's balanced value. */
+const DEFAULT_THRESHOLD_DEG =
+  VISUALIZATION_MODES[DEFAULT_VISUALIZATION_MODE].edgeAngleBalancedDeg;
 
 export type EdgeRole = keyof typeof EDGES.alpha;
 
@@ -166,6 +176,16 @@ function clampInt(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, Math.floor(v)));
 }
 
+/** Detach and release a set of mounted chunks (shared by dispose and abort). */
+function releaseChunks(chunks: Chunk[]): void {
+  for (const chunk of chunks) {
+    chunk.lines.removeFromParent();
+    chunk.lines.geometry.dispose();
+    (chunk.lines.material as THREE.Material).dispose();
+  }
+  chunks.length = 0;
+}
+
 export class EdgeOverlay {
   private chunks: Chunk[] = [];
   private ranges = new Map<number, VertexRange>();
@@ -181,7 +201,7 @@ export class EdgeOverlay {
   /** Same object every chunk (and the highlight overlay) is mounted under. */
   private parentObj: THREE.Object3D | null = null;
   private highlight: HighlightOverlay | null = null;
-  private thresholdDeg: number = EDGES.thresholdAngleDeg.balanced;
+  private thresholdDeg: number = DEFAULT_THRESHOLD_DEG;
 
   isBuilt(): boolean {
     return this.chunks.length > 0 && !this.disposed;
@@ -190,6 +210,11 @@ export class EdgeOverlay {
   /** Wall-clock build duration in ms once built — for the task15 §2 gate. */
   getBuildMs(): number | null {
     return this.buildMs;
+  }
+
+  /** Feature-edge angle this overlay was extracted with (task31 §2.3). */
+  getThresholdDeg(): number {
+    return this.thresholdDeg;
   }
 
   /** Total model item count seen during the last build (tasks/task18.md §1 instrumentation). */
@@ -256,7 +281,7 @@ export class EdgeOverlay {
     if (this.disposed || this.building || this.chunks.length > 0) return this.isBuilt();
     this.building = true;
     this.parentObj = parent;
-    this.thresholdDeg = options?.thresholdDeg ?? EDGES.thresholdAngleDeg.balanced;
+    this.thresholdDeg = options?.thresholdDeg ?? DEFAULT_THRESHOLD_DEG;
     const started = performance.now();
     try {
       // All local ids, plain numbers on every model flavor. (The worker's
@@ -351,7 +376,13 @@ export class EdgeOverlay {
       const chunks: Chunk[] = [];
       const ranges = new Map<number, VertexRange>();
       for (const build of chunkBuilds.values()) {
-        if (this.disposed) return false;
+        // Abandoned mid-finalize (model switch, or a task31 §2.3 mode rebuild
+        // superseding this one): detach and release the chunks already mounted,
+        // or they would stay in the scene with nothing tracking them.
+        if (this.disposed) {
+          releaseChunks(chunks);
+          return false;
+        }
         const positions = new Float32Array(build.vertexCount * 3);
         let cursor = 0;
         for (const v of build.verts) {
@@ -689,12 +720,7 @@ export class EdgeOverlay {
       clearTimeout(this.restoreTimer);
       this.restoreTimer = null;
     }
-    for (const chunk of this.chunks) {
-      chunk.lines.removeFromParent();
-      chunk.lines.geometry.dispose();
-      (chunk.lines.material as THREE.Material).dispose();
-    }
-    this.chunks = [];
+    releaseChunks(this.chunks);
     this.ranges.clear();
     this.lastRole.clear();
     this.gridDimsCache = null;

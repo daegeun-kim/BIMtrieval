@@ -22,15 +22,37 @@
 import * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 
+import {
+  DEFAULT_VISUALIZATION_MODE,
+  VISUALIZATION_MODES,
+  type VisualizationMode,
+} from "./viewerCustomization";
 import { geometryRole } from "./viewerTheme";
 
 /** Enter/leave thresholds in CSS px (task23 issue 2). */
-export const PROJECTED_SIZE = {
+export interface ProjectedSizeThresholds {
   /** Below this projected diameter a non-fundamental object is hidden. */
-  enterPx: 20,
+  enterPx: number;
   /** It must grow past this before it is restored. */
-  exitPx: 24,
-} as const;
+  exitPx: number;
+}
+
+/**
+ * The pair this visualization mode uses (task31 §2.2). The hysteresis MEANING is
+ * identical in every mode — only the two numbers move — and the mode is chosen
+ * by the user, never derived here from model size or measured performance.
+ */
+export function projectedSizeThresholds(mode: VisualizationMode): ProjectedSizeThresholds {
+  const thresholds = VISUALIZATION_MODES[mode];
+  return {
+    enterPx: thresholds.projectedSizeHidePx,
+    exitPx: thresholds.projectedSizeRestorePx,
+  };
+}
+
+/** The default (Standard) pair, for callers that never set a mode. */
+export const PROJECTED_SIZE: ProjectedSizeThresholds =
+  projectedSizeThresholds(DEFAULT_VISUALIZATION_MODE);
 
 /**
  * Categories retained at ANY projected size.
@@ -152,9 +174,29 @@ export class ProjectedSizePolicy {
   private indexOf = new Map<number, number>();
   private ready = false;
   private retainedCount = 0;
+  /**
+   * Active enter/leave pair (task31 §2.2). Survives `reset()` and therefore a
+   * model switch: the visualization mode is a session-level user choice, not a
+   * per-model one.
+   */
+  private thresholds: ProjectedSizeThresholds = { ...PROJECTED_SIZE };
 
   isReady(): boolean {
     return this.ready;
+  }
+
+  /**
+   * Swap in another mode's thresholds. Pure state: the caller re-runs
+   * `evaluate()` afterwards, and the existing hysteresis rule then derives the
+   * new visibility from the SAME cached classification and bounding volumes —
+   * no reclassification, no geometry work, no model reload.
+   */
+  setThresholds(thresholds: ProjectedSizeThresholds): void {
+    this.thresholds = { ...thresholds };
+  }
+
+  getThresholds(): ProjectedSizeThresholds {
+    return { ...this.thresholds };
   }
 
   /** Objects retained at any size (for tests/diagnostics). */
@@ -339,10 +381,10 @@ export class ProjectedSizePolicy {
       }
 
       // Hysteresis: between the thresholds an object keeps its previous state.
-      if (!wasHidden && px < PROJECTED_SIZE.enterPx) {
+      if (!wasHidden && px < this.thresholds.enterPx) {
         this.hiddenState[i] = 1;
         delta.hide.push(id);
-      } else if (wasHidden && px > PROJECTED_SIZE.exitPx) {
+      } else if (wasHidden && px > this.thresholds.exitPx) {
         this.hiddenState[i] = 0;
         delta.show.push(id);
       }

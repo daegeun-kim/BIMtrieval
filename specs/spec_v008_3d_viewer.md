@@ -162,8 +162,9 @@ The obstruction value has exactly one source, shared with the layout CSS variabl
 (`spec_v006` §7.3). No second set of hard-coded panel measurements may exist.
 
 Orthographic cameras use the same method: `OrthographicCamera.updateProjectionMatrix` widens the
-horizontal frustum by exactly `width / fullWidth`, so a box fitted against the full canvas fills the
-unobstructed region precisely, centered, never clipped and never stretched.
+horizontal frustum by exactly `width / fullWidth`, so a box fitted against the visible region fills it
+precisely, centered, never clipped. The frustum itself is first normalized for equal axis scale — see
+§8.9, which is what makes "never stretched" true rather than assumed.
 
 ### 4.5 Base plane
 
@@ -243,10 +244,24 @@ Count, aggregate, list, RAG, graph, and hybrid results all highlight their full 
 to the 2,000-identity viewer cap; above it the deterministic set is applied with a truncation notice
 and the exact total stays distinct from the highlighted count (`spec_v006` §9.4).
 
-### 6.2 Centralized theme
+### 6.2 Centralized customization
 
-`frontend/src/viewer/viewerTheme.ts` is the single place any viewer color, opacity, or camera constant
-may live. No inline colors elsewhere in the viewer.
+`frontend/src/viewer/viewerCustomization.ts` is the single place any viewer color, opacity, line
+appearance, visualization-mode threshold, or navigation/framing constant may live. No inline colors or
+duplicate threshold literals elsewhere in the viewer.
+
+That file is **constants only**: no functions, derived materials, class-mapping logic, state, event
+handling, API behavior, or rendering algorithms. It is organized as colors → opacity → line appearance
+→ visualization-mode thresholds → navigation values → other user-visible values, each with its unit
+and visual effect stated.
+
+`frontend/src/viewer/viewerTheme.ts` imports every one of those values (holding no duplicate literal of
+its own) and owns only what a constants file must not contain: derived Three.js/Fragments materials,
+`geometryRole`/`isWallClass`, `verticalFovDeg`, and the operational plan-section constants.
+
+Operational/internal values are deliberately **out** of the customization file: batching sizes, worker
+timing, cache limits, API/result limits, plan render-order safety, clipping ULP tolerance, the coplanar
+cut inset, stale-token guards, and the component preview's profile-driven fps/pixel-ratio budget.
 
 Organizing rule: **base model geometry is achromatic; every semantic role is chromatic.** Role
 membership reads as *presence of color* rather than hue discrimination, which survives color-vision
@@ -254,8 +269,9 @@ deficiency and the varied grey/beige materials typical of BIM models.
 
 ```text
 roof #67737f · wall #bcc6d0 · other #dce2e8
-primary #1f6feb · manual #0fb5c9 · context (muted, uncolored gray)
-dim #c7ced6 (0.35) · plane #c4cdd6 (0.30) · background #e9edf1
+primary #1f6feb · manual #1f6feb · context #c7ced6 (0.10)
+dim #c7ced6 (0.20) · plane #c4cdd6 (0.30) · background #e9edf1
+planCut #1c232b (1.0) · planFill #96a2af (0.55) · planWallCut #000000
 ```
 
 Wall = `IfcWall` + `IfcWallStandardCase` (+ `IfcWallElementedCase`); roof = `IfcRoof`, plus `IfcSlab`
@@ -268,8 +284,19 @@ truthful result, not a defect. A future model carrying explicit roof data colors
 
 ### 6.3 Non-result transparency (accepted decision)
 
-Non-result geometry uses `VIEWER_OPACITY.dim = 0.35` with non-result edges fully disabled
-(`EDGES.alpha.dim = 0`).
+Non-result geometry uses `VIEWER_OPACITY.dim = 0.20` with non-result edges fully disabled
+(`EDGES.alpha.dim = 0`). Relationship context uses `VIEWER_OPACITY.context = 0.10`.
+
+The translucent `primaryUnfocused` role has **no 3D entity-edge overlay** (`EDGES.alpha.primaryUnfocused
+= 0`). Its blue face stays visible at `VIEWER_OPACITY.primaryUnfocused`, so the role survives; only its
+outline is removed, so unfocused matches stop competing as line weight with the focused ones. This
+applies to the 3D entity-edge overlay only — plan-mode blue cut contours are a separate layer and are
+retained, because they must override the black wall cut (§8.4).
+
+Preserved alongside it: opaque focused-primary and manual-selection blue edges, the already-disabled
+dim non-result edges, the base grey geometry edges, and every semantic role identity and picking
+behavior. The grey roles are never made more opaque, and the base model's opaque grey materials are
+unchanged.
 
 Fully opaque non-result geometry is **rejected** and must not be reintroduced: with it, interior
 query-primary results (partition walls, MEP, doors) are occluded from every external camera angle,
@@ -288,11 +315,18 @@ a `localId -> {chunkIndex, start, count}` index.
   bounding sphere/box and `frustumCulled = true` (target: roughly 50–150 populated chunks). A single
   whole-model non-culled object is not acceptable.
 - **Color follows role.** Edge color always follows the entity's current face role (base roof/wall/
-  other and every highlight role), darkened ×0.72; transparent faces get more-opaque edges. All values
-  live in `viewerTheme.ts` (`EDGES`).
-- **Threshold angle** `EDGES.thresholdAngleDeg = { balanced: 25, largeModel: 40 }`, chosen from the
-  model's provisional profile before the build starts so a large model builds at the coarser angle on
-  its first pass, never a rebuild.
+  other and every highlight role), darkened ×0.72; a transparent face normally gets a more-opaque edge,
+  except where the role's edge is switched off outright (`dim`, `primaryUnfocused`; §6.3). All values
+  live in `viewerCustomization.ts` (`EDGES`).
+- **Line width is not customizable.** Every line is a `LineBasicMaterial` + `LineSegments`, and the
+  WebGL renderer ignores `linewidth` — the core profile only guarantees 1-px lines. No thickness
+  constant is exposed, because it would be a knob that silently does nothing; a wide-line library
+  (Line2/LineMaterial) or a patched Three.js is out of scope. Line presence, color, and alpha are
+  honored exactly.
+- **Threshold angle** comes from the selected visualization mode (§7.5), applied at extraction time.
+  The deterministic balanced/large-model signal selects which of the mode's two angles applies; it
+  never selects the mode. At load the angle is chosen from the provisional profile before the build
+  starts, so a large model builds at the coarser angle on its first pass.
 - **Bounded recoloring.** `recolor()` rewrites only changed entities and uploads only the touched span
   of each touched chunk, never a global envelope.
 - **Hidden faces leave no floating wireframe:** a `hidden` edge role with alpha 0 exists for
@@ -347,7 +381,8 @@ perspective camera:
 px = (2 * radius * viewportHeightPx) / (2 * distance * tan(fov / 2))
 ```
 
-An object enters the reduced state below **20 px** and leaves it only above **24 px**; between the two
+An object enters the reduced state below the selected visualization mode's **hide** threshold and
+leaves it only above that mode's **restore** threshold (§7.5; Standard = 32/38 px); between the two
 it keeps its previous state. The decision depends ONLY on projected size — never on absolute camera
 distance and never on whether the camera is moving. A camera inside an object's bounding sphere yields
 `Infinity`, so an enclosing object is never hidden. The horizontal view offset (§4.4) passes
@@ -368,8 +403,8 @@ refresh the caller already performs.
 - doors and windows with explicit IFC `IsExternal = true`;
 - columns with explicit IFC `LoadBearing = true`.
 
-Everything else non-highlighted is hidden below 20 px and restored above 24 px through the existing
-rendering and material path, without reloading the model.
+Everything else non-highlighted is hidden below the mode's hide threshold and restored above its
+restore threshold, through the existing rendering and material path, without reloading the model.
 
 Exterior/load-bearing status is NEVER guessed from names, geometry, position, material, proximity, or
 an LLM. Only an explicit IFC boolean qualifies; a missing, null, string, or otherwise ambiguous value
@@ -386,7 +421,8 @@ reapplies its current size/category state. The policy never drops or broadens th
 pipeline returned. Detail level for highlighted objects is handled by Fragments' own mesh LOD and the
 edge overlay's dedicated highlight thresholds; no new per-object detail control exists for them.
 
-**Guarantees.** Filtered objects remain loaded and restore deterministically above 24 px; they cannot
+**Guarantees.** Filtered objects remain loaded and restore deterministically above the restore
+threshold; they cannot
 be picked (§5.2); the isolated component preview is unaffected because the policy is driven by the main
 camera only; classification and bounding volumes are cached once at load, and camera updates never
 re-read IFC data, rebuild geometry, regenerate artifacts, or call the backend/database/embedding
@@ -424,10 +460,59 @@ Do not reintroduce without new real-hardware evidence:
 The accepted trade-off is higher idle GPU usage in exchange for zero interaction-time scheduling
 overhead.
 
-`detectProfile()` (`src/viewer/profileDetection.ts`) is retained **solely** to size the component
-preview's frame-rate cap and pixel ratio (`spec_v011` §5). It classifies from artifact byte size, item
-count, and edge vertex count only — never model name, id, category, discipline, or storey — and it
-influences no main-viewer rendering decision.
+`detectProfile()` (`src/viewer/profileDetection.ts`) is retained to size the component preview's
+frame-rate cap and pixel ratio (`spec_v011` §5), and to select which of a visualization mode's two
+feature-edge angles applies (§7.5). It classifies from artifact byte size, item count, and edge vertex
+count only — never model name, id, category, discipline, or storey — and it chooses no rendering mode
+on the user's behalf.
+
+### 7.5 Fine / Standard / Fast visualization modes
+
+A user-selectable **visualization-quality** choice. One compact, accessible three-option radio group
+sits in the bottom-left viewer readout beside **Fit**:
+
+```text
+Fine | Standard | Fast
+```
+
+**Standard is the default.** The selection takes effect on the currently loaded model without a model
+download or page reload, survives model switches for the session, and is **not** persisted to local
+storage or IndexedDB. **Reset App returns it to Standard**; Clear Chat does not.
+
+The mode is held in the typed frontend state/controller boundary: React requests the change, and all
+imperative scene work stays inside `ViewerAdapter`.
+
+The modes change **only** these four threshold values:
+
+| Mode | Projected-size hide | Projected-size restore | Edge angle, balanced model | Edge angle, large model |
+| --- | ---: | ---: | ---: | ---: |
+| Fine | 20 px | 24 px | 25 deg | 40 deg |
+| Standard | 32 px | 38 px | 40 deg | 55 deg |
+| Fast | 48 px | 58 px | 55 deg | 70 deg |
+
+Fine reproduces the pre-Task-31 thresholds exactly. The projected-size pair keeps the §7.3 hysteresis
+meaning unchanged in every mode.
+
+**Application.** Changing mode swaps the hysteresis pair, re-evaluates the current model's
+projected-size state against the SAME cached classification and bounding volumes, and refreshes
+Fragments once through the established bounded update path. Because the feature-edge angle is baked in
+when `EdgesGeometry` extracts the edges, an angle change regenerates the active edge overlay
+asynchronously in the existing yielded batches, so interaction stays usable. The model is never
+reloaded or reconverted. A rebuild superseded by another mode change, a model switch, an unload, or
+Reset App is retired by a monotonic token and releases whatever it mounted, so there are never
+duplicate overlays or undisposed geometry/materials. A mode change never alters query/manual
+identities, camera pose, active floor, or panel state.
+
+**Unchanged by the modes:** Fragments' supported mesh LOD/visibility and update cadence; continuous
+rendering (§7.2); projected-size category eligibility and cached bounding volumes; the always-retained
+categories of §7.3; highlight/manual exemption; plan-mode suspension of the policy; chunked
+frustum-culled edge overlays; base-model frustum culling and mesh simplification; selection,
+pick-through-transparency, fit, highlight, clear, load/unload, and disposal; and the isolated preview's
+independent profile behavior.
+
+This control is **not** the removed Task 18 automatic/manual performance-profile control (§7.4). It
+measures nothing, switches nothing automatically, and offers no "automatic" option. None of the §7.4
+rejected machinery may return with it.
 
 ## 8. Floor-plan mode
 
@@ -507,6 +592,13 @@ below the cut, which is exactly the required lower boundary, so no second clippi
 Every drag pans and the wheel zooms; nothing orbits. `model.useCamera()` repoints Fragments' own
 LOD/culling at whichever camera is rendering.
 
+**Wheel-zoom speed is `VIEWER_NAVIGATION.planWheelZoomSpeed = 2`.** Assigning a world to a `View` sets
+`dollySpeed = 6` on that view's own camera, which overshoots a floor on a single notch; the adapter
+re-asserts the accepted value *after* the plan camera and mode exist, so the library default cannot
+win. The installed camera-controls build drives both its dolly and its zoom action from `dollySpeed`,
+so this single value is the plan wheel speed. Perspective 3D zoom speed, pan speed, fit framing, zoom
+bounds, and mouse-button mapping are a separate controls instance and are untouched.
+
 No installed package is patched, no private field read, no second world created; the `ViewerAdapter`
 boundary is intact — React only requests typed viewer actions.
 
@@ -523,16 +615,34 @@ and the results mounted under `model.object`, because `getSection` both consumes
 in that space. Output is copied out of the worker's fixed scratch buffer so only the used vertices are
 retained.
 
-With a query highlight active, a second layer is requested for exactly the primary local ids and drawn
-over the base cut in the primary highlight color, so established roles survive into the plan and
-highlighted cut geometry stays legible over the base contour. Layers are nudged `PLAN.cutInsetM`
-(2 mm) off the plane that produced them, because exactly-coplanar geometry makes the GPU clip test a
-coin flip.
+**Up to three disjoint layers**, drawn in this order:
 
-**Visual hierarchy.** `VIEWER_COLORS.planCut` is the darkest ink in the viewer (asserted against every
-base gray and against the darkened edge colors), fully opaque, with a restrained translucent
-`planFill`. All cut layers render above the base edge chunks and the highlight overlay. The decorative
-base grid is hidden in plan mode and restored on return.
+1. **non-wall cut** — `planCut` contour over a restrained translucent `planFill`;
+2. **wall cut** — `VIEWER_COLORS.planWallCut = #000000` for **both** the fill and the contour, the
+   poché convention for cut masonry. The fill keeps the established plan-fill alpha: this changes the
+   wall cut's color, not its opacity;
+3. **query-primary cut** — the established blueprint blue, requested for exactly the primary local ids.
+
+The id sets are disjoint, not over-painted. Walls are withheld from the non-wall layer (otherwise the
+base poché would blend through the black at the fill alpha, which is not the accepted color), and
+query-primary objects are withheld from both earlier layers. **Blue semantic graphics therefore always
+override black**: a query-primary wall appears only in the blue layer, which also renders last, so
+black can neither cover nor tint it.
+
+Wall membership is the viewer's one wall-class definition (`IfcWall`, `IfcWallStandardCase`,
+`IfcWallElementedCase`), taken from the classification already computed at load. No IFC data, query
+class, wall membership, section range, clipping plane, or cut height is changed to achieve the styling,
+and normal 3D wall faces and 3D wall edges are never black. A model whose wall classification or id
+universe is unavailable degrades to the previous single plan-ink layer rather than guessing a split.
+
+Layers are nudged `PLAN.cutInsetM` (2 mm) off the plane that produced them, because exactly-coplanar
+geometry makes the GPU clip test a coin flip.
+
+**Visual hierarchy.** `VIEWER_COLORS.planCut` is the darkest ink among the *projected* layers (asserted
+against every base gray and against the darkened edge colors), fully opaque, with a restrained
+translucent `planFill`; the wall cut is darker still, as true cut material should be. All cut layers
+render above the base edge chunks and the highlight overlay. The decorative base grid is hidden in plan
+mode and restored on return.
 
 **Nothing is fabricated:** no door swings, symbols, room tags, dimensions, annotations, north arrows,
 or scale bars. Source geometry remains the only graphic authority. This is a clean model-derived plan
@@ -573,6 +683,44 @@ response for a superseded model or load is ignored; a section-generation failure
 clipped orthographic view and reports a concise non-blocking limitation; **3D** stays available after
 any plan-rendering failure.
 
+### 8.9 Equal scale on both plan axes
+
+In the final orthographic projection, **one scene unit horizontally occupies the same number of CSS
+pixels as one scene unit vertically**. Equal-length horizontal and vertical elements therefore display
+at equal lengths, and perpendicular geometry displays as perpendicular.
+
+With the §4.4 view offset applied, three.js renders the frustum's vertical span `(top - bottom) / zoom`
+across `canvasHeight` px and its horizontal span `(right - left) / zoom × canvasWidth / effectiveWidth`
+across `canvasWidth` px, so:
+
+```text
+px per unit horizontally = effectiveWidth × zoom / (right - left)
+px per unit vertically   = canvasHeight   × zoom / (top - bottom)
+```
+
+which are equal exactly when `(right - left) / (top - bottom) === effectiveWidth / canvasHeight`.
+
+The installed library never establishes that. `OrthoPerspectiveCamera` builds its orthographic frustum
+from `window.innerWidth / window.innerHeight` — the *window* aspect, not the canvas's — and its resize
+handler leaves a View's own camera untouched, because that camera never saw a world-creation event.
+Every model's plan was therefore horizontally compressed, worsened by the panel obstruction.
+
+The adapter corrects the frustum wherever it applies the view offset — init, obstruction change,
+resize, and every fit, so the guarantee holds with no right-side panel, with the explanation/chat
+obstruction active, after the obstruction width changes, after canvas/window resize, after switching
+floors, and after returning to 3D and entering a plan again. It rewrites **only** the horizontal
+half-extent, symmetric about the frustum's existing centre, leaving `top`/`bottom` and `zoom` alone:
+the vertical mapping is authoritative, exactly as the fixed vertical FOV is for the perspective camera.
+Because the resulting px-per-unit is `canvasHeight × zoom / (top - bottom)` — independent of
+`effectiveWidth` — a panel opening, closing, or resizing narrows the visible region without rescaling
+the drawing at all.
+
+The frustum is corrected **before** the offset is written, because `CameraControls.fitToBox` reads
+`right - left` synchronously to size an orthographic fit; fitted content therefore still centers in the
+unobstructed region without clipping (§4.4). No model is scaled or transformed, no section geometry is
+touched, no installed package is patched, and no per-model compensation factor exists. Perspective
+cameras are returned untouched, so 3D projection and pixel-correct picking are unaffected.
+
 ## 9. Viewer failure behavior
 
 Provide explicit, recoverable states for: asset missing/stale, artifact download failure, IndexedDB
@@ -591,3 +739,11 @@ measurement and a Playwright run against the tracked fixture artifact. Real-mode
 raw-storey-versus-logical-floor counts, per-floor inspection, cut-versus-projected legibility,
 bleed-through, highlight colors in plan, and repeated-switch resource growth — remain owner-run on
 real hardware, consistent with §7.1.
+
+The same gap applies to Task 31's visual work. The Fine/Standard/Fast thresholds and edge-rebuild
+lifecycle (§7.5), the lowered dim/context opacities and removed unfocused-primary edge (§6.3), the
+black wall cut (§8.4), the plan wheel-zoom *feel* (§8.3), and the equal-axis plan proportions (§8.9)
+are covered by automated tests over the real code paths — including a measured px-per-scene-unit
+assertion on both axes — but no real-model GPU session has confirmed how they look. Whether Standard
+actually feels better than Fine on the owner's RTX 5080, and whether a wheel speed of 2 feels right at
+real plan zoom levels, are perceptual judgements that only an owner-run session can settle.

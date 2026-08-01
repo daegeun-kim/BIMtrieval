@@ -94,8 +94,13 @@ describe("table presentations (§3)", () => {
   });
 
   it("discloses shown-versus-true totals whenever the table is capped", () => {
+    // Both listable rows are displayed, but the real result is larger — the
+    // caption must name the true total so the list cannot read as exhaustive
+    // (task31 §4.2).
     mount({ true_result_count: 9 });
-    expect(screen.getByText(/showing 2 of 9 results/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/showing all 2 listed objects; 9 results in total/i),
+    ).toBeInTheDocument();
   });
 
   it("never implies a capped table is exhaustive", () => {

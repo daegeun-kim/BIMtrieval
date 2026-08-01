@@ -285,30 +285,27 @@ describe("focused query-result appearance", () => {
 // ---------------------------------------------------------------------------
 
 describe("edge overlay", () => {
-  it("declares every color/alpha centrally in viewerTheme", () => {
+  it("declares every color/alpha centrally in viewerCustomization", () => {
     expect(EDGES.enabled).toBe(true);
     expect(EDGES.darken).toBeGreaterThan(0);
     expect(EDGES.darken).toBeLessThanOrEqual(1);
-    // dim is the one deliberate exception (task18 §9 candidate 3 — non-result
-    // edges disabled to reduce visual line density); every other role keeps a
-    // positive edge alpha.
-    for (const role of [
-      "roof",
-      "wall",
-      "other",
-      "primary",
-      "primaryUnfocused",
-      "context",
-      "manual",
-    ] as const) {
+    // `dim` (task18 §9) and `primaryUnfocused` (task31 §3) are the two
+    // deliberate exceptions — their edges are switched off; every other role
+    // keeps a positive edge alpha.
+    for (const role of ["roof", "wall", "other", "primary", "context", "manual"] as const) {
       expect(EDGES.alpha[role]).toBeGreaterThan(0);
     }
     expect(EDGES.alpha.dim).toBe(0);
+    expect(EDGES.alpha.primaryUnfocused).toBe(0);
   });
 
-  it("edges on transparent faces are more opaque than the face (except dim, disabled by task18 §9)", () => {
+  it("keeps a legible outline on transparent faces except where it is switched off", () => {
+    // Disabled outright: non-results (task18 §9) and translucent unfocused
+    // primaries (task31 §3), whose blue face carries the role on its own.
     expect(EDGES.alpha.dim).toBe(0);
-    expect(EDGES.alpha.primaryUnfocused).toBeGreaterThan(VIEWER_OPACITY.primaryUnfocused);
+    expect(EDGES.alpha.primaryUnfocused).toBe(0);
+    expect(VIEWER_OPACITY.primaryUnfocused).toBeGreaterThan(0);
+    // Relationship context still outlines more opaquely than its face.
     expect(EDGES.alpha.context).toBeGreaterThanOrEqual(VIEWER_OPACITY.context);
   });
 

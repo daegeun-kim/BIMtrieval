@@ -1,12 +1,21 @@
+import { useMemo, useRef, useState } from "react";
+
 import type { AnswerExplanation, ExplanationGroup } from "../api/types";
 import RelationshipGraph from "./RelationshipGraph";
 import {
+  ROW_PAGE_SIZE,
+  ariaSortFor,
   barMagnitude,
   barValueLabel,
   formatCount,
   isSelectable,
   maxBucketCount,
   maxGroupCount,
+  nextRowSort,
+  rowTableCaption,
+  sortRows,
+  type RowSort,
+  type RowSortColumn,
 } from "./explanation";
 
 // The visualization half of the explanation card (tasks/task29.md §3, §4, §5).
@@ -106,34 +115,98 @@ function BarChart({ explanation }: { explanation: AnswerExplanation }) {
   );
 }
 
+const ROW_COLUMNS: { key: RowSortColumn; label: string }[] = [
+  { key: "object", label: "Object" },
+  { key: "class", label: "Class" },
+  { key: "storey", label: "Storey" },
+];
+
+/** How close to the bottom, in px, counts as "reached the end" (task31 §4.2). */
+const SCROLL_END_SLACK_PX = 24;
+
 /**
- * Bounded, scrollable rows of objects the answer already retrieved (task29 §3.1).
+ * Progressive, sortable rows of objects the answer already retrieved
+ * (task29 §3.1; task31 §4).
  *
- * The caption is an explicit `showing N of total` disclosure whenever the table
- * is capped, so a capped table can never imply it is exhaustive. GlobalId is the
- * final identity fallback when no name was already available.
+ * Every row the response's hydrated identities represent is already in
+ * `explanation.rows` — the backend bounds that list by the viewer identity cap,
+ * not by a display quantum. This component shows the first 50 and appends the
+ * next 50 each time the user scrolls to the end of the table's own scroll area.
+ * Scrolling and sorting are pure in-memory work: no pagination endpoint, no
+ * network request, no LLM call.
+ *
+ * The caption distinguishes rows displayed, rows available, and the true result
+ * total whenever those differ, so an available count can never imply the answer
+ * is exhaustive. GlobalId is the truthful identity fallback when no name was
+ * already available.
  */
 function RowTable({ explanation }: { explanation: AnswerExplanation }) {
-  const rows = explanation.rows ?? [];
-  if (rows.length === 0) return null;
+  // Memoized so the empty-payload fallback is a stable reference and the sort
+  // below is not recomputed on every render.
+  const rows = useMemo(() => explanation.rows ?? [], [explanation]);
   const total = explanation.true_result_count ?? 0;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [sort, setSort] = useState<RowSort | null>(null);
+  const [displayed, setDisplayed] = useState(ROW_PAGE_SIZE);
+  // A newer answer replaces the payload outright, so its table must start over:
+  // first page, original backend order. Adjusting state during render is React's
+  // documented way to derive from a changed prop without an extra commit.
+  const [seen, setSeen] = useState(explanation);
+  if (seen !== explanation) {
+    setSeen(explanation);
+    setSort(null);
+    setDisplayed(ROW_PAGE_SIZE);
+  }
+
+  // Sorting covers the COMPLETE available set, not only the mounted rows, and
+  // is recomputed only when the payload or the sort state actually changes.
+  const ordered = useMemo(() => sortRows(rows, sort), [rows, sort]);
+  const visible = ordered.slice(0, displayed);
+
+  if (rows.length === 0) return null;
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollTop + el.clientHeight < el.scrollHeight - SCROLL_END_SLACK_PX) return;
+    setDisplayed((n) => (n >= ordered.length ? n : Math.min(n + ROW_PAGE_SIZE, ordered.length)));
+  };
+
+  // Any sort-state change returns the table to the first page and scrolls it
+  // back to the top, so the newly ordered rows are read from their beginning.
+  const onSort = (column: RowSortColumn) => {
+    setSort((current) => nextRowSort(current, column));
+    setDisplayed(ROW_PAGE_SIZE);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  };
+
   return (
-    <div className="ex-table-wrap">
+    <div className="ex-table-wrap" ref={scrollRef} onScroll={onScroll} data-testid="ex-table-scroll">
       <table className="ex-table">
         <caption className="ex-table-cap">
-          {rows.length < total
-            ? `Showing ${formatCount(rows.length)} of ${formatCount(total)} results`
-            : `${formatCount(rows.length)} results`}
+          {rowTableCaption(visible.length, rows.length, total)}
         </caption>
         <thead>
           <tr>
-            <th scope="col">Object</th>
-            <th scope="col">Class</th>
-            <th scope="col">Storey</th>
+            {ROW_COLUMNS.map((column) => (
+              <th key={column.key} scope="col" aria-sort={ariaSortFor(sort, column.key)}>
+                <button
+                  type="button"
+                  className="ex-sort"
+                  onClick={() => onSort(column.key)}
+                  title={`Sort by ${column.label}`}
+                >
+                  {column.label}
+                  <span className="ex-sort-mark" aria-hidden="true">
+                    {sort?.column === column.key ? (sort.direction === "asc" ? "▲" : "▼") : ""}
+                  </span>
+                </button>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {visible.map((r) => (
             <tr key={r.global_id}>
               <td title={r.global_id}>{r.name ?? r.global_id}</td>
               <td>{r.ifc_class}</td>

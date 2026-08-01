@@ -45,6 +45,8 @@ interface Harness {
 class FakeControls {
   mouseButtons = { left: 1, middle: 16, right: 2, wheel: 16 };
   maxDistance = Infinity;
+  /** camera-controls drives BOTH its dolly and its zoom action from this. */
+  dollySpeed = 1;
   enabled = true;
   private position = new THREE.Vector3(20, 30, 60);
   private target = new THREE.Vector3(15, 4, 20);
@@ -587,6 +589,165 @@ describe("cut geometry (task28 §4.2, §4.3)", () => {
     // Still a plan: no silent return to perspective.
     expect(h.adapter.isPlanMode()).toBe(true);
     expect((h.world.camera.three as THREE.OrthographicCamera).isOrthographicCamera).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Black wall cuts + plan wheel-zoom speed (tasks/task31.md §5.1, §5.2)
+// ---------------------------------------------------------------------------
+
+describe("black wall cuts (task31 §5.1)", () => {
+  /** Ids 1-3 are walls, 4-6 are not — the classification a real load produces. */
+  const WALL_IDS = [1, 2, 3];
+  const OTHER_IDS = [4, 5, 6];
+
+  async function classifiedHarness() {
+    const h = makeHarness();
+    Object.assign(h.adapter as unknown as Record<string, unknown>, {
+      classification: { roof: [], wall: [...WALL_IDS] },
+      allLocalIds: [...WALL_IDS, ...OTHER_IDS],
+    });
+    await h.adapter.setFloorContract(CONTRACT);
+    return h;
+  }
+
+  /** The ids each `getSection` call asked for, in call order. */
+  function sectionIdCalls(h: Harness): (number[] | undefined)[] {
+    return h.getSection.mock.calls.map((c) => c[1] as number[] | undefined);
+  }
+
+  it("sections walls as their own layer, disjoint from the non-wall layer", async () => {
+    const h = await classifiedHarness();
+    await h.adapter.enterPlanMode(1);
+    const calls = sectionIdCalls(h);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(OTHER_IDS); // base layer: no walls in it
+    expect(calls[1]).toEqual(WALL_IDS);
+  });
+
+  it("uses #000000 for BOTH the wall cut fill and its contour", async () => {
+    const h = await classifiedHarness();
+    await h.adapter.enterPlanMode(1);
+    const group = h.modelObject.children[0] as THREE.Group;
+    const black = new THREE.Color("#000000");
+    const wallLayer = group.children.filter((c) => c.renderOrder >= PLAN.wallFillRenderOrder);
+    expect(wallLayer).toHaveLength(2);
+    for (const object of wallLayer) {
+      const material = (object as THREE.Mesh).material as THREE.Material & {
+        color: THREE.Color;
+      };
+      expect(material.color.getHex()).toBe(black.getHex());
+    }
+  });
+
+  it("keeps the non-wall cut at its existing colours and opacity", async () => {
+    const h = await classifiedHarness();
+    await h.adapter.enterPlanMode(1);
+    const group = h.modelObject.children[0] as THREE.Group;
+    const base = group.children.filter((c) => c.renderOrder < PLAN.wallFillRenderOrder);
+    expect(base).toHaveLength(2);
+    const contour = base.find((c) => c.type === "LineSegments") as THREE.LineSegments;
+    const fill = base.find((c) => c.type === "Mesh") as THREE.Mesh;
+    expect((contour.material as THREE.LineBasicMaterial).color.getHex()).not.toBe(0x000000);
+    expect((fill.material as THREE.MeshBasicMaterial).color.getHex()).not.toBe(0x000000);
+    expect((contour.material as THREE.LineBasicMaterial).opacity).toBe(1);
+    expect((fill.material as THREE.MeshBasicMaterial).opacity).toBeLessThan(1);
+  });
+
+  it("keeps the black wall layer's alpha the same as the existing plan fill", async () => {
+    const h = await classifiedHarness();
+    await h.adapter.enterPlanMode(1);
+    const group = h.modelObject.children[0] as THREE.Group;
+    const baseFill = group.children.find(
+      (c) => c.renderOrder === PLAN.baseFillRenderOrder,
+    ) as THREE.Mesh;
+    const wallFill = group.children.find(
+      (c) => c.renderOrder === PLAN.wallFillRenderOrder,
+    ) as THREE.Mesh;
+    expect((wallFill.material as THREE.MeshBasicMaterial).opacity).toBe(
+      (baseFill.material as THREE.MeshBasicMaterial).opacity,
+    );
+  });
+
+  it("gives a query-primary wall the blue layer, above black and excluded from it", async () => {
+    const h = await classifiedHarness();
+    const model = (h.adapter as unknown as {
+      model: { getLocalIdsByGuids: (g: string[]) => Promise<number[]> };
+    }).model;
+    // G-1 resolves to local id 1 — a wall that is also a query result.
+    model.getLocalIdsByGuids = async () => [1];
+    await h.adapter.enterPlanMode(1);
+    h.getSection.mockClear();
+    await h.adapter.applyQueryRoles(["G-1"], []);
+
+    const calls = sectionIdCalls(h);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual(OTHER_IDS); // non-wall base, primary withheld
+    expect(calls[1]).toEqual([2, 3]); // black walls, WITHOUT the primary wall
+    expect(calls[2]).toEqual([1]); // the blue primary layer
+
+    const group = h.modelObject.children[0] as THREE.Group;
+    const blue = group.children.filter((c) => c.renderOrder >= PLAN.primaryFillRenderOrder);
+    const black = group.children.filter(
+      (c) =>
+        c.renderOrder >= PLAN.wallFillRenderOrder &&
+        c.renderOrder < PLAN.primaryFillRenderOrder,
+    );
+    expect(blue).toHaveLength(2);
+    expect(black).toHaveLength(2);
+    // Blue draws after black, so it can never be covered by it.
+    for (const b of blue) {
+      for (const k of black) expect(b.renderOrder).toBeGreaterThan(k.renderOrder);
+    }
+  });
+
+  it("falls back to one plan-ink layer when the model has no wall classification", async () => {
+    const h = makeHarness(); // classification/allLocalIds left empty
+    await h.adapter.setFloorContract(CONTRACT);
+    await h.adapter.enterPlanMode(1);
+    expect(sectionIdCalls(h)).toEqual([undefined]);
+    const group = h.modelObject.children[0] as THREE.Group;
+    expect(group.children).toHaveLength(2);
+  });
+
+  it("never blackens ordinary 3D wall faces or 3D wall edges", async () => {
+    const h = await classifiedHarness();
+    await h.adapter.enterPlanMode(1);
+    // The 3D wall material and its edge role are the same before and after: the
+    // black layer is plan-only section geometry mounted under the model object.
+    const { BASE_MATERIALS, VIEWER_COLORS } = await import("../src/viewer/viewerTheme");
+    expect((BASE_MATERIALS.wall.color as THREE.Color).getHex()).toBe(
+      new THREE.Color(VIEWER_COLORS.wall).getHex(),
+    );
+    expect(VIEWER_COLORS.wall).not.toBe("#000000");
+    expect(h.adapter.edgeRoleOf(1)).toBe("wall");
+  });
+});
+
+describe("plan wheel-zoom speed (task31 §5.2)", () => {
+  it("re-asserts the accepted speed of 2 after the plan camera exists", async () => {
+    const h = makeHarness();
+    await h.adapter.setFloorContract(CONTRACT);
+    // Reproduce the library assigning its abrupt default when a View is given
+    // a world: the adapter's configuration runs afterwards and must win.
+    const original = h.views.createFromPlane.bind(h.views);
+    h.views.createFromPlane = ((plane: THREE.Plane, config?: { id?: string }) => {
+      const view = original(plane, config);
+      view.camera.controls.dollySpeed = 6;
+      return view;
+    }) as typeof h.views.createFromPlane;
+
+    await h.adapter.enterPlanMode(1);
+    expect(h.adapter.getPlanZoomSpeed()).toBe(2);
+  });
+
+  it("leaves the perspective camera's zoom speed untouched", async () => {
+    const h = makeHarness();
+    await h.adapter.setFloorContract(CONTRACT);
+    const before = h.adapter.getPerspectiveZoomSpeed();
+    await h.adapter.enterPlanMode(1);
+    await h.adapter.exitPlanMode();
+    expect(h.adapter.getPerspectiveZoomSpeed()).toBe(before);
   });
 });
 

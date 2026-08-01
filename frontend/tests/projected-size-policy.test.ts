@@ -7,8 +7,13 @@ import {
   type PolicyModel,
   ProjectedSizePolicy,
   projectedDiameterPx,
+  projectedSizeThresholds,
   readExplicitBoolean,
 } from "../src/viewer/ProjectedSizePolicy";
+import {
+  DEFAULT_VISUALIZATION_MODE,
+  VISUALIZATION_MODES,
+} from "../src/viewer/viewerCustomization";
 
 function camera(z = 0): THREE.PerspectiveCamera {
   const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
@@ -240,12 +245,22 @@ describe("category eligibility", () => {
 // Threshold + hysteresis
 // ---------------------------------------------------------------------------
 
-describe("threshold and hysteresis", () => {
+// Pinned to the Fine pair (20/24 px), which reproduces the pre-Task-31
+// thresholds exactly, so the hysteresis MEANING is asserted against fixed
+// numbers rather than against whichever mode happens to be the default. The
+// per-mode matrix is asserted separately below.
+describe("threshold and hysteresis (Fine: 20/24 px)", () => {
+  function finePolicy(): ProjectedSizePolicy {
+    const policy = new ProjectedSizePolicy();
+    policy.setThresholds(projectedSizeThresholds("fine"));
+    return policy;
+  }
+
   async function policyFor(px: number) {
     const model = fakeModel([
       { id: 1, category: "IFCFURNISHINGELEMENT", center: centerForPx(1, px), radius: 1 },
     ]);
-    const policy = new ProjectedSizePolicy();
+    const policy = finePolicy();
     await policy.prepare(model, [1]);
     return { policy, model };
   }
@@ -272,7 +287,7 @@ describe("threshold and hysteresis", () => {
     const model = fakeModel([
       { id: 1, category: "IFCFURNISHINGELEMENT", center: centerForPx(1, 10), radius: 1 },
     ]);
-    const policy = new ProjectedSizePolicy();
+    const policy = finePolicy();
     await policy.prepare(model, [1]);
 
     // Hidden at 10 px.
@@ -289,9 +304,8 @@ describe("threshold and hysteresis", () => {
     expect(policy.isHidden(1)).toBe(false);
   });
 
-  it("thresholds are 20/24 px as specified", () => {
-    expect(PROJECTED_SIZE.enterPx).toBe(20);
-    expect(PROJECTED_SIZE.exitPx).toBe(24);
+  it("Fine reproduces the original 20/24 px pair", () => {
+    expect(projectedSizeThresholds("fine")).toEqual({ enterPx: 20, exitPx: 24 });
   });
 
   it("depends on projected size, not raw distance", async () => {
@@ -312,6 +326,100 @@ describe("threshold and hysteresis", () => {
     const second = policy.evaluate(camera(), HEIGHT, () => false);
     expect(second.hide).toEqual([]);
     expect(second.show).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Visualization modes (tasks/task31.md §2.2)
+// ---------------------------------------------------------------------------
+
+describe("Fine / Standard / Fast thresholds", () => {
+  it("declares exactly the accepted matrix", () => {
+    expect(VISUALIZATION_MODES.fine).toEqual({
+      projectedSizeHidePx: 20,
+      projectedSizeRestorePx: 24,
+      edgeAngleBalancedDeg: 25,
+      edgeAngleLargeModelDeg: 40,
+    });
+    expect(VISUALIZATION_MODES.standard).toEqual({
+      projectedSizeHidePx: 32,
+      projectedSizeRestorePx: 38,
+      edgeAngleBalancedDeg: 40,
+      edgeAngleLargeModelDeg: 55,
+    });
+    expect(VISUALIZATION_MODES.fast).toEqual({
+      projectedSizeHidePx: 48,
+      projectedSizeRestorePx: 58,
+      edgeAngleBalancedDeg: 55,
+      edgeAngleLargeModelDeg: 70,
+    });
+  });
+
+  it("defaults to Standard, and the policy's default pair matches it", () => {
+    expect(DEFAULT_VISUALIZATION_MODE).toBe("standard");
+    expect(PROJECTED_SIZE).toEqual({ enterPx: 32, exitPx: 38 });
+    expect(new ProjectedSizePolicy().getThresholds()).toEqual({ enterPx: 32, exitPx: 38 });
+  });
+
+  it("enters the reduced state earlier and restores later as the mode coarsens", () => {
+    const fine = projectedSizeThresholds("fine");
+    const standard = projectedSizeThresholds("standard");
+    const fast = projectedSizeThresholds("fast");
+    expect(fine.enterPx).toBeLessThan(standard.enterPx);
+    expect(standard.enterPx).toBeLessThan(fast.enterPx);
+    // The hysteresis band is preserved in every mode: restore is always above
+    // hide, so a borderline object can never flicker.
+    for (const pair of [fine, standard, fast]) {
+      expect(pair.exitPx).toBeGreaterThan(pair.enterPx);
+    }
+  });
+
+  it("keeps a mode's own hysteresis band, and retained categories, intact", async () => {
+    for (const mode of ["fine", "standard", "fast"] as const) {
+      const pair = projectedSizeThresholds(mode);
+      const inBand = (pair.enterPx + pair.exitPx) / 2;
+      const model = fakeModel([
+        { id: 1, category: "IFCFURNISHINGELEMENT", center: centerForPx(1, inBand), radius: 1 },
+        // An always-retained architectural element, far below every threshold.
+        { id: 2, category: "IFCWALL", center: centerForPx(1, 2), radius: 1 },
+      ]);
+      const policy = new ProjectedSizePolicy();
+      policy.setThresholds(pair);
+      await policy.prepare(model, [1, 2]);
+      // Mid-band from a visible start -> stays visible; the wall is not even a
+      // candidate, in any mode.
+      expect(policy.evaluate(camera(), HEIGHT, () => false).hide).toEqual([]);
+      expect(policy.getRetainedCount()).toBe(1);
+    }
+  });
+
+  it("re-evaluates an already-prepared model when the thresholds change", async () => {
+    // 26 px: visible under Fine (>24), hidden under Standard (<32). The swap
+    // must not require reclassification or another prepare().
+    const model = fakeModel([
+      { id: 1, category: "IFCFURNISHINGELEMENT", center: centerForPx(1, 26), radius: 1 },
+    ]);
+    const policy = new ProjectedSizePolicy();
+    policy.setThresholds(projectedSizeThresholds("fine"));
+    await policy.prepare(model, [1]);
+    expect(policy.evaluate(camera(), HEIGHT, () => false).hide).toEqual([]);
+
+    policy.setThresholds(projectedSizeThresholds("standard"));
+    expect(policy.evaluate(camera(), HEIGHT, () => false).hide).toEqual([1]);
+
+    // And back: 26 px is above Fine's 24 px restore threshold.
+    policy.setThresholds(projectedSizeThresholds("fine"));
+    expect(policy.evaluate(camera(), HEIGHT, () => false).show).toEqual([1]);
+  });
+
+  it("keeps highlighted objects exempt in every mode", async () => {
+    const model = fakeModel([
+      { id: 1, category: "IFCFURNISHINGELEMENT", center: centerForPx(1, 2), radius: 1 },
+    ]);
+    const policy = new ProjectedSizePolicy();
+    policy.setThresholds(projectedSizeThresholds("fast"));
+    await policy.prepare(model, [1]);
+    expect(policy.evaluate(camera(), HEIGHT, (id) => id === 1).hide).toEqual([]);
   });
 });
 

@@ -164,17 +164,18 @@ describe("the same centering applies to the floor-plan camera (task28 §4.3)", (
     expect(camera.view!.height).toBe(900);
   });
 
-  it("widens the orthographic frustum so fitted content is framed, never clipped", async () => {
-    const { adapter, camera } = makeOrtho(1400, 900);
-    camera.updateProjectionMatrix();
-    const before = camera.projectionMatrix.elements[0]!; // 2/(right-left)
+  it("sizes the orthographic frustum against the unobstructed region, so a fit is framed rather than clipped", async () => {
+    const { adapter, camera, controls } = makeOrtho(1400, 900);
     adapter.setViewportObstruction(400);
-    camera.updateProjectionMatrix();
-    const after = camera.projectionMatrix.elements[0]!;
-    // A wider frustum means a smaller horizontal scale: content shrinks into the
-    // visible region rather than being cropped by it.
-    expect(Math.abs(after)).toBeLessThan(Math.abs(before));
-    expect(Math.abs(before / after)).toBeCloseTo(1400 / 1000, 5);
+    await adapter.fitAll();
+    // `CameraControls.fitToBox` reads `right - left` / `top - bottom`
+    // synchronously to size an orthographic fit, so the corrected frustum must
+    // already describe the 1000x900 visible region when it is called.
+    expect(controls.fitToBox).toHaveBeenCalled();
+    expect((camera.right - camera.left) / (camera.top - camera.bottom)).toBeCloseTo(
+      1000 / 900,
+      6,
+    );
   });
 
   it("clears the offset when nothing obstructs the viewport", async () => {
@@ -192,6 +193,115 @@ describe("the same centering applies to the floor-plan camera (task28 §4.3)", (
     adapter.resize();
     expect(camera.view!.fullWidth).toBeCloseTo(1400, 5);
     expect(camera.view!.width).toBe(1800);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Equal scale on both plan axes (tasks/task31.md §5.3)
+// ---------------------------------------------------------------------------
+
+describe("orthographic plan keeps equal scale on both axes (task31 §5.3)", () => {
+  /**
+   * A real orthographic camera whose starting frustum is deliberately WRONG for
+   * the canvas — 100 x 64 units on a 1400 x 900 canvas — reproducing what the
+   * installed `OrthoPerspectiveCamera` actually builds (it sizes the frustum
+   * from `window.innerWidth / window.innerHeight`, not the canvas). Without a
+   * correction that renders every plan horizontally compressed.
+   */
+  function makeOrtho(canvasW: number, canvasH: number) {
+    const { adapter, controls, canvas } = makeAdapter(canvasW, canvasH);
+    const camera = new THREE.OrthographicCamera(-50, 50, 32, -32, 0.1, 1000);
+    const world = (adapter as unknown as { world: { camera: Record<string, unknown> } }).world;
+    world.camera.three = camera;
+    return { adapter, camera, controls, canvas };
+  }
+
+  /** CSS px per scene unit on each axis; the two must be equal. */
+  function scale(adapter: ViewerAdapter) {
+    const s = adapter.getPlanPixelScale();
+    expect(s).not.toBeNull();
+    return s!;
+  }
+
+  it("makes one scene unit the same pixel length horizontally and vertically, with no panel", () => {
+    const { adapter } = makeOrtho(1400, 900);
+    adapter.resize(); // no obstruction; the frustum alone must already be square
+    const s = scale(adapter);
+    expect(s.horizontal).toBeCloseTo(s.vertical, 9);
+  });
+
+  it("holds with the explanation/chat obstruction active", () => {
+    const { adapter } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(560); // a 40vw explanation column + margin
+    const s = scale(adapter);
+    expect(s.horizontal).toBeCloseTo(s.vertical, 9);
+  });
+
+  it("holds after the obstruction width changes, and does not rescale the drawing", () => {
+    const { adapter } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    const before = scale(adapter);
+    adapter.setViewportObstruction(732);
+    const after = scale(adapter);
+    expect(after.horizontal).toBeCloseTo(after.vertical, 9);
+    // Narrowing the visible region must not zoom the plan: the vertical mapping
+    // is authoritative and unchanged, so both axes keep their previous scale.
+    expect(after.vertical).toBeCloseTo(before.vertical, 9);
+    expect(after.horizontal).toBeCloseTo(before.horizontal, 9);
+  });
+
+  it("holds after a canvas/window resize", () => {
+    const { adapter, canvas } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    Object.defineProperty(canvas, "clientWidth", { value: 1800, configurable: true });
+    Object.defineProperty(canvas, "clientHeight", { value: 700, configurable: true });
+    adapter.resize();
+    const s = scale(adapter);
+    expect(s.horizontal).toBeCloseTo(s.vertical, 9);
+  });
+
+  it("holds for any canvas shape, including portrait", () => {
+    for (const [w, h] of [
+      [1920, 1080],
+      [1024, 1024],
+      [800, 1200],
+      [2560, 1440],
+    ] as const) {
+      const { adapter } = makeOrtho(w, h);
+      adapter.setViewportObstruction(Math.round(w * 0.4));
+      const s = scale(adapter);
+      expect(s.horizontal).toBeCloseTo(s.vertical, 9);
+    }
+  });
+
+  it("renders an equal orthogonal reference at equal pixel lengths", () => {
+    // A 10x10 scene-unit square: its horizontal and vertical extents must map to
+    // the same number of CSS pixels, so perpendicular geometry stays square.
+    const { adapter } = makeOrtho(1400, 900);
+    adapter.setViewportObstruction(400);
+    const s = scale(adapter);
+    expect(10 * s.horizontal).toBeCloseTo(10 * s.vertical, 6);
+  });
+
+  it("only ever touches the horizontal half-extent, never the vertical or the zoom", () => {
+    const { adapter, camera } = makeOrtho(1400, 900);
+    camera.zoom = 2.5;
+    adapter.setViewportObstruction(400);
+    expect(camera.top).toBe(32);
+    expect(camera.bottom).toBe(-32);
+    expect(camera.zoom).toBe(2.5);
+    // Symmetric about the frustum's original centre (0).
+    expect(camera.right + camera.left).toBeCloseTo(0, 9);
+  });
+
+  it("leaves a perspective camera's projection alone", () => {
+    const { adapter, camera } = makeAdapter(1400, 900);
+    const before = { fov: camera.fov, zoom: camera.zoom, aspect: camera.aspect };
+    adapter.setViewportObstruction(400);
+    expect(camera.fov).toBe(before.fov);
+    expect(camera.zoom).toBe(before.zoom);
+    // getPlanPixelScale is orthographic-only, so 3D reports nothing.
+    expect(adapter.getPlanPixelScale()).toBeNull();
   });
 });
 

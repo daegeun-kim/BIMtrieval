@@ -5,6 +5,10 @@
 // persist to sessionStorage; chat history is never written to localStorage.
 import { create } from "zustand";
 
+import {
+  DEFAULT_VISUALIZATION_MODE,
+  type VisualizationMode,
+} from "../viewer/viewerCustomization";
 import type {
   AnswerExplanation,
   EntityCitation,
@@ -229,6 +233,16 @@ export interface AppState {
   /** `null` means the full result is highlighted. */
   explanationGroupKey: string | null;
 
+  /**
+   * Selected visualization quality (task31 §2.1). Session-level and
+   * deliberately NOT persisted to sessionStorage/localStorage/IndexedDB:
+   * reopening the app starts at Standard. It survives model switches, and only
+   * Reset App returns it to Standard. This is the serializable half of the
+   * typed state/controller boundary — the imperative scene work that applies it
+   * stays inside `ViewerAdapter`.
+   */
+  visualizationMode: VisualizationMode;
+
   // Floor-plan mode (task28 §6). Current-session only, never persisted.
   floorMode: FloorMode;
   /** The model the floor contract belongs to, so a stale response is ignorable. */
@@ -280,6 +294,8 @@ export interface AppState {
   ) => void;
   setExplanationGroup: (key: string | null) => void;
   closeExplanation: () => void;
+
+  setVisualizationMode: (mode: VisualizationMode) => void;
 
   setFloorsLoading: (modelId: number) => void;
   setFloorOptions: (
@@ -338,6 +354,8 @@ export const useStore = create<AppState>((set, get) => ({
   explanationPrimaryGuids: [],
   explanationContextGuids: [],
   explanationGroupKey: null,
+
+  visualizationMode: DEFAULT_VISUALIZATION_MODE,
 
   ...FLOOR_DEFAULTS,
 
@@ -422,6 +440,8 @@ export const useStore = create<AppState>((set, get) => ({
       explanationContextGuids: [],
       explanationGroupKey: null,
     }),
+
+  setVisualizationMode: (visualizationMode) => set({ visualizationMode }),
 
   // A new model's floor contract replaces the previous one outright, so a floor
   // button from the outgoing model can never survive into the new one.

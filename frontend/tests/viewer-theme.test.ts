@@ -93,15 +93,31 @@ describe("semantic color roles", () => {
     expect(VIEWER_COLORS.context).toBe(VIEWER_COLORS.dim);
   });
 
-  it("dims non-results to a moderately translucent gray (task18 §9 candidate 3)", () => {
-    // Benchmarked on model 2: candidate 3 (0.3-0.4 translucent, non-result
-    // edges disabled) — not the original 0.16, and not fully opaque
-    // candidate 2, which occluded interior/hidden query-primary results.
-    expect(VIEWER_OPACITY.dim).toBeGreaterThanOrEqual(0.3);
-    expect(VIEWER_OPACITY.dim).toBeLessThanOrEqual(0.4);
+  it("dims non-results to the accepted transparency (task31 §3)", () => {
+    // Task 31 §3 lowered the task18 §9 value from 0.35 to 0.20, and the
+    // relationship-context face from 0.16 to 0.10, so interior matches read
+    // more clearly through the surrounding building. Still translucent, never
+    // opaque: an opaque non-result occluded every interior query-primary result
+    // when that was benchmarked (task18 §9 candidate 2).
+    expect(VIEWER_OPACITY.dim).toBe(0.2);
+    expect(VIEWER_OPACITY.context).toBe(0.1);
     expect(DIM_MATERIAL.transparent).toBe(true);
     expect(chroma(VIEWER_COLORS.dim)).toBeLessThan(0.15);
     expect(EDGES.alpha.dim).toBe(0); // non-result edges disabled, task18 §9
+  });
+
+  it("removes only the translucent unfocused-primary 3D entity edge (task31 §3)", () => {
+    // The blue face survives at the established face opacity; only its edge
+    // overlay is gone.
+    expect(EDGES.alpha.primaryUnfocused).toBe(0);
+    expect(VIEWER_OPACITY.primaryUnfocused).toBeGreaterThan(0);
+    // Opaque focused-primary and manual-selection blue edges are untouched.
+    expect(EDGES.alpha.primary).toBe(1);
+    expect(EDGES.alpha.manual).toBe(1);
+    // Base grey geometry keeps its edges.
+    for (const role of ["roof", "wall", "other"] as const) {
+      expect(EDGES.alpha[role]).toBeGreaterThan(0);
+    }
   });
 
   it("keeps the base plane quiet enough not to obscure underground geometry", () => {

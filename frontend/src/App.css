@@ -53,9 +53,14 @@
 .readout-err {
   color: var(--err);
 }
-.readout-fit {
-  align-self: flex-start;
+.readout-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
   margin-top: 4px;
+}
+.readout-fit {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -68,6 +73,41 @@
 }
 .readout-fit:hover {
   border-color: var(--line-2);
+}
+
+/* Fine | Standard | Fast segmented control (task31 §2.1) */
+.vis-modes {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  overflow: hidden;
+  background: var(--surface);
+}
+.vis-mode {
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--line);
+}
+.vis-mode:first-child {
+  border-left: 0;
+}
+.vis-mode:hover {
+  color: var(--ink-2);
+  background: var(--surface-3);
+}
+.vis-mode-on {
+  color: var(--blue);
+  background: var(--blue-wash);
+}
+.vis-mode:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
 }
 .sdot {
   width: 8px;
@@ -1482,9 +1522,14 @@ button.ex-bar:disabled {
   color: var(--ink);
 }
 
-/* Bounded result table */
+/* Bounded result table.
+   The wrap is the table's OWN bounded scroll area (task31 §4.2): it flexes to
+   whatever height the visualization region has left and scrolls internally, so
+   appending rows never grows the explanation panel. */
 .ex-table-wrap {
-  overflow-x: auto;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .ex-table {
   width: 100%;
@@ -1501,6 +1546,24 @@ button.ex-bar:disabled {
   text-align: left;
 }
 .ex-table th {
+  padding: 0;
+  text-align: left;
+  border-bottom: 1px solid var(--line-2);
+  /* The header stays put while the body scrolls beneath it, so the sort
+     controls remain reachable in a long list. */
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+/* Three-state sort control (task31 §4.3) — a real button, so it is focusable
+   and operable from the keyboard without any extra handler. */
+.ex-sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
   padding: 4px 6px;
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -1509,7 +1572,19 @@ button.ex-bar:disabled {
   text-transform: uppercase;
   color: var(--ink-3);
   text-align: left;
-  border-bottom: 1px solid var(--line-2);
+  background: transparent;
+  border: 0;
+}
+.ex-sort:hover {
+  color: var(--ink-2);
+}
+.ex-table th[aria-sort="ascending"] .ex-sort,
+.ex-table th[aria-sort="descending"] .ex-sort {
+  color: var(--ink);
+}
+.ex-sort-mark {
+  font-size: 8px;
+  line-height: 1;
 }
 .ex-table td {
   padding: 4px 6px;

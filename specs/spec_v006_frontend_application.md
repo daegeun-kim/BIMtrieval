@@ -219,9 +219,10 @@ contrast, visible focus states, and colors that remain distinguishable over vari
   (`.right-stack-collapsed`). No new layout mode, no overlap, accessibly restorable.
 - **Component panel** — a 320 px card docked immediately left of the right-side column with the same
   12 px gap. Behavior: `spec_v011`.
-- **Viewer overlay controls** — Reset app at the top-left, the Fit control at the bottom-left, and the
-  floor button stack under Reset app (`spec_v008` §8). Clear Chat stays inside the chat panel. These
-  actions are never adjacent to one another.
+- **Viewer overlay controls** — Reset app at the top-left; the Fit control and the Fine/Standard/Fast
+  visualization-quality control together at the bottom-left (`spec_v008` §7.5); and the floor button
+  stack under Reset app (`spec_v008` §8). Clear Chat stays inside the chat panel. Reset app, Fit, and
+  Clear Chat are never adjacent to one another.
 
 Resizing or collapsing any panel must trigger the viewer/renderer resize path without stretching or
 clipping the canvas.
@@ -432,6 +433,8 @@ Reset App must:
 - clear messages, LLM history, evidence, manual selections, result roles, the explanation panel, and
   the component panel;
 - clear the active/pending model and leave floor-plan mode;
+- return the viewer's visualization mode to **Standard** (`spec_v008` §7.5) — it is the only control
+  that does; Clear Chat and a model switch both keep the user's selection;
 - dispose/unload scene geometry, previews, and viewer resources;
 - return to the initial model-selection state;
 - establish a fresh session identity;

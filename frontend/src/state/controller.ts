@@ -18,6 +18,10 @@ import { selectableSubgroups } from "../explain/explanation";
 import { getCachedArtifact, putCachedArtifact } from "../storage/artifactCache";
 import { ViewerAdapter } from "../viewer/ViewerAdapter";
 import {
+  DEFAULT_VISUALIZATION_MODE,
+  type VisualizationMode,
+} from "../viewer/viewerCustomization";
+import {
   makeMessageId,
   useStore,
   type ChatMessage,
@@ -600,6 +604,24 @@ export class AppController {
     await this.viewer.fitAll();
   }
 
+  // ---- visualization quality (task31 §2) ---------------------------------
+
+  /**
+   * Apply Fine / Standard / Fast to the currently loaded model.
+   *
+   * React requests the change; every imperative scene consequence — the
+   * projected-size re-evaluation, the bounded Fragments refresh and the
+   * asynchronous edge-overlay regeneration — stays inside `ViewerAdapter`.
+   * Deterministic and local: no backend request, no LLM call, no model
+   * download, and no change to query/manual identities, camera pose, active
+   * floor or panel state.
+   */
+  async setVisualizationMode(mode: VisualizationMode): Promise<void> {
+    if (this.s.visualizationMode === mode) return;
+    this.s.setVisualizationMode(mode);
+    await this.viewer.setVisualizationMode(mode);
+  }
+
   // ---- Clear Chat / Reset App -------------------------------------------
 
   async clearChat(): Promise<void> {
@@ -638,6 +660,10 @@ export class AppController {
     this.viewer.clearManualSelection();
     await this.viewer.clearQueryRoles();
     await this.viewer.unloadModel();
+    // Reset App — and only Reset App — returns visualization quality to
+    // Standard (task31 §2.1). Clear Chat and a model switch both keep it.
+    this.s.setVisualizationMode(DEFAULT_VISUALIZATION_MODE);
+    await this.viewer.setVisualizationMode(DEFAULT_VISUALIZATION_MODE);
 
     this.s.setActiveModel(null);
     this.s.setPendingConfirm(null);

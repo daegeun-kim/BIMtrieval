@@ -1,5 +1,6 @@
 import { useStore, type LoadPhase } from "../state/store";
 import { HomeIcon } from "./icons";
+import VisualizationModeControl from "./VisualizationModeControl";
 import { controller } from "../state/controller";
 
 // CAD-style technical readout, bottom-left of the viewer (spec_v006 §7.3). Model
@@ -45,11 +46,13 @@ export default function StatusReadout() {
         )}
       </div>
       {model && phase === "ready" && (
-        <>
+        // Fit and the visualization-quality control share one row (task31 §2.1).
+        <div className="readout-actions">
           <button className="readout-fit" onClick={() => void controller.fitAll()} title="Fit model">
             <HomeIcon size={14} /> Fit
           </button>
-        </>
+          <VisualizationModeControl />
+        </div>
       )}
     </div>
   );

@@ -61,7 +61,16 @@ __all__ = ["build_answer_explanation", "select_visual_result"]
 #: Bounds for the presentation payload. The row/bucket sources are already
 #: bounded upstream; these are a second, explicit ceiling so the panel's payload
 #: cannot grow with a future change to those limits.
-MAX_EXPLANATION_ROWS = 50
+#:
+#: Task 31 §4.1 replaced the former terminal 50-row ceiling: every authoritative
+#: row the response's hydrated identities already represent is made available to
+#: the frontend, which displays them 50 at a time. The row list is therefore
+#: bounded by VIEWER HYDRATION, not by a display quantum — but it is still
+#: bounded, and this constant mirrors `Settings.max_viewer_match_ids` (2000) so
+#: the payload can never become an unbounded result transport even if that
+#: setting were raised. `true_result_count` and `identities_truncated` stay
+#: independent of it, so a capped list can never read as the complete result.
+MAX_EXPLANATION_ROWS = 2000
 MAX_EXPLANATION_BUCKETS = 24
 MAX_EXPLANATION_GROUPS = 24
 
@@ -239,9 +248,15 @@ def _identity_rows(result: AnswerPartResult, hydration: ViewerHydration) -> list
 
     The IFC class comes from the class each identity was hydrated with, and any
     name/storey already fetched as an example is merged in by GlobalId. Both
-    lists are ordered by entity id, so the merge is positional-free and stable.
+    lists are ordered by entity id, so the merge is positional-free and stable —
+    and that order is the "original backend order" the frontend's sort cycle
+    restores on its third click (task31 §4.3).
+
     No query is issued to fill a missing name: GlobalId plus IFC class is a
-    sufficient row, and GlobalId is the final identity fallback.
+    sufficient row, and GlobalId is the final identity fallback. That stays true
+    now that every hydrated identity becomes a row (task31 §4.1) — the larger
+    list is a projection of identities already in hand, never a reason to fetch
+    metadata for the rows that lack it.
 
     Without hydrated class information there are no authoritative displayed
     identities, so this returns nothing and the result stays in chat.
