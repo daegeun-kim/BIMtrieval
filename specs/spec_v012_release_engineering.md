@@ -583,6 +583,36 @@ Local only. No host database was touched, no full IFC used, and the user's
 Offline gates after the change: backend **866 passed**, ingestion **298
 passed**, ruff clean in both.
 
+### 4.11 Acceptance run
+
+One clean, secret-free integration pass on a disposable stack, with the full
+command list and results recorded in `docs/container-boundaries.md`
+("Task 35 acceptance run"). Isolation was structural rather than promised:
+`--env-file` pointed Compose at a throwaway file so the user's `.env` was never
+read, `-p bimtrieval_verify` gave the run its own volumes, `OPENAI_API_KEY` was
+explicitly empty, and the 1.6 KB `smoke-wall.ifc` fixture stood in for a model.
+The host database was not touched.
+
+Every acceptance criterion passed:
+
+- backend connects as **`bim_rag_query_ro`**, with no writer DSN in its
+  environment at all;
+- `SELECT` succeeds; `CREATE`, `INSERT`, `UPDATE` and `DELETE` are each denied;
+- a query with no key returns HTTP 200 and actionable setup guidance rather than
+  crashing, while the catalog still answers normally;
+- both loopback origins pass CORS preflight and a real Chromium session
+  completes `200 /api/models` from each with no CORS errors; an unlisted origin
+  is refused;
+- records persist identically across `down` / `up`, with the read-only role
+  still enforced afterwards;
+- `down -v --remove-orphans` leaves 0 volumes, 0 containers, 0 networks;
+- backend **866** / ingestion **298** offline, backend **235** / ingestion
+  **76** live, ruff clean in both.
+
+Noted rather than buried: `docker compose down -v` does not stop containers
+created by `docker compose run`, so an import still running at teardown keeps
+its volume alive. Standard Docker behaviour, documented for whoever hits it.
+
 Task 35 is now complete.
 
 ---

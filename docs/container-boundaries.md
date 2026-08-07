@@ -188,6 +188,69 @@ an hour of CPU embedding to prove exactly what the fixture proves in seconds,
 and committing one to make the check convenient would put a licensed building
 back in version control — the mistake this repository already made once.
 
+## Task 35 acceptance run
+
+One clean, secret-free integration pass on a disposable stack. Reproducible
+verbatim — nothing below reads the user's `.env`, uses a real API key, touches
+the host database, or needs a real building model.
+
+### Isolation
+
+```bash
+# A throwaway env file. Every value is disposable; the key is empty on purpose.
+cat > /tmp/verify.env <<'EOF'
+POSTGRES_USER=bimtrieval
+POSTGRES_PASSWORD=verify_only_not_a_secret
+POSTGRES_DB=bimtrieval
+POSTGRES_RO_PASSWORD=verify_only_ro_not_a_secret
+OPENAI_API_KEY=
+VITE_API_BASE_URL=http://localhost:8000
+EOF
+
+# --env-file replaces the default `.env`, so the user's is never read.
+# -p gives the run its own project and therefore its own disposable volumes.
+DC="docker compose --env-file /tmp/verify.env -p bimtrieval_verify"
+$DC config | grep OPENAI_API_KEY        # -> OPENAI_API_KEY: ""
+```
+
+### The run
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | `$DC up -d --build` | `db`, `backend`, `frontend` all **healthy**; `setup` exited 0 |
+| 2 | `$DC logs setup` | `1 applied: ['0001_…']`; role created, `SELECT` granted on all 7 tables; `Password taken from BIM_RAG_READONLY_PASSWORD; no .env was read or written`; `Verified: bim_rag_query_ro can SELECT, INSERT is rejected` |
+| 3 | `$DC exec backend python -c "select current_user"` | **`bim_rag_query_ro`**; writer DSN present in backend env: **False** |
+| 4 | `SELECT count(*) FROM ifc_entities` as backend | **OK** |
+| 5 | `CREATE` / `INSERT` / `UPDATE` / `DELETE` as backend | **all four DENIED** (`permission denied`) |
+| 6 | `$DC exec backend sh -c 'echo ${#OPENAI_API_KEY}'` | **`0`** — empty, value never printed |
+| 7 | `$DC run --rm import smoke-wall.ifc` (1.6 KB fixture) | 5 entities, 9 documents, all embedded |
+| 8 | `POST /api/query` with a model, no key | HTTP 200, `status: error`, *"No OpenAI API key is configured… Set OPENAI_API_KEY in the .env file… Browsing models, the 3D viewer and floor plans work without a key."* — **no crash** |
+| 9 | `POST /api/query` catalog question, no key | `status: success`, *"There is 1 model available: smoke-wall.ifc (id 1) — IFC4"* |
+| 10 | CORS preflight, `http://localhost:5173` | `access-control-allow-origin: http://localhost:5173` |
+| 11 | CORS preflight, `http://127.0.0.1:5173` | `access-control-allow-origin: http://127.0.0.1:5173` |
+| 12 | CORS preflight, `http://evil.example` | **no** `Access-Control-Allow-Origin` — refused |
+| 13 | Real Chromium at both origins | `200 /api/models`, **no CORS errors**, no "backend offline" |
+| 14 | `$DC down` then `$DC up -d` | `models=1 entities=5 docs=9` before **and** after; role still enforced |
+| 15 | `$DC down -v --remove-orphans` | 0 volumes, 0 containers, 0 networks remaining |
+
+### Suites
+
+| Suite | Result |
+| --- | --- |
+| Backend offline (`poetry run pytest`) | **866 passed**, 239 deselected |
+| Backend live (`pytest -m live`) | **235 passed**, 4 skipped |
+| Ingestion offline (`pytest`) | **298 passed** |
+| Ingestion live (`pytest tests_live`) | **76 passed**, 6 skipped |
+| Ruff check + format, both projects | clean |
+
+### One thing worth knowing
+
+`docker compose down -v` does **not** stop containers started by `docker compose
+run`. During this pass a leftover import container kept `hfcache` mounted, so
+the volume survived the teardown until it was removed. That is documented Docker
+behaviour rather than a defect here, but if an import is still running when you
+tear down, use `down -v --remove-orphans` or stop it first.
+
 ## Full-cycle checks
 
 ```bash
