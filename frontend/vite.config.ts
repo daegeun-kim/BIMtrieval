@@ -9,6 +9,25 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["@thatopen/components", "@thatopen/fragments", "web-ifc"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the BIM engine out of the application chunk. Three.js and the
+        // That Open packages are the overwhelming majority of the bundle and
+        // change only when a dependency is upgraded, so a UI edit no longer
+        // invalidates megabytes of cached vendor code on every deploy.
+        //
+        // This is a CACHING improvement, not a size reduction: the viewer is on
+        // the first screen, so every chunk is still fetched on a cold load.
+        // Genuinely deferring the engine would mean lazy-loading the viewer,
+        // which changes startup behaviour and is not attempted here.
+        manualChunks: {
+          three: ["three"],
+          bim: ["@thatopen/components", "@thatopen/fragments"],
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

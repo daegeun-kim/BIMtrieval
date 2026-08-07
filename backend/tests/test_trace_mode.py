@@ -391,3 +391,22 @@ def test_empty_and_null_fields_are_omitted_rather_than_printed_as_noise(traced):
     assert "nothing" not in out
     assert "empty" not in out
     assert "blank" not in out
+
+
+def test_the_dev_binding_endpoint_reports_no_permanently_empty_diagnostic():
+    """Task 37: a diagnostic that can only ever be empty is worse than none.
+
+    `/dev/binding` used to return `dropped_modifiers` from
+    `BindingValidation.silently_dropped_modifiers`. Task 25 moved that contract
+    to the constraint ledger and `validate_binding` stopped populating the field
+    entirely — so the endpoint reported an empty list on every request, which
+    reads as "nothing was dropped" rather than "this is no longer measured here".
+    """
+    import inspect
+
+    from app.api.routes import dev
+    from app.query.binding.validate import BindingValidation
+
+    source = inspect.getsource(dev)
+    assert "dropped_modifiers" not in source
+    assert not hasattr(BindingValidation(plan=None), "silently_dropped_modifiers")

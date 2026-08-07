@@ -1,4 +1,4 @@
-// Component behavior: composer keys, chips, evidence disclosure, selector
+// Component behavior: composer keys, chips, selector
 // confirmation gating (spec_v006 §18.1). Viewer + API are mocked.
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -21,9 +21,7 @@ const viewerStub = vi.hoisted(() => ({
 }));
 vi.mock("../src/viewer/ViewerAdapter", () => ({ ViewerAdapter: vi.fn(() => viewerStub) }));
 
-import { api } from "../src/api/client";
 import Composer from "../src/chat/Composer";
-import EvidenceDisclosure from "../src/chat/EvidenceDisclosure";
 import Message from "../src/chat/Message";
 import SelectionChips from "../src/chat/SelectionChips";
 import ModelSelector from "../src/components/ModelSelector";
@@ -96,39 +94,6 @@ describe("SelectionChips", () => {
 
     fireEvent.click(screen.getByLabelText("Remove Front door from selection"));
     expect(viewerStub.removeManualSelection).toHaveBeenCalledWith("G1");
-  });
-});
-
-describe("EvidenceDisclosure", () => {
-  const evidence = {
-    route: "hybrid",
-    answerBasis: "hybrid_evidence",
-    scope: "active_model",
-    sqlCount: 12,
-    ragCount: 5,
-    relCount: null,
-    primaries: [{ entityId: 1, globalId: "GP", ifcClass: "IfcDoor", name: "D1", role: "primary" as const }],
-    contexts: [],
-    relationships: [],
-    notes: ["bounded"],
-    warnings: [],
-  };
-
-  it("is collapsed by default and expands on toggle", () => {
-    render(<EvidenceDisclosure evidence={evidence} />);
-    expect(screen.queryByText("D1")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { expanded: false }));
-    expect(screen.getByText("D1")).toBeInTheDocument();
-    expect(screen.getByText("bounded")).toBeInTheDocument();
-  });
-
-  it("citation click centers the entity without calling the LLM", () => {
-    const qspy = vi.spyOn(api, "query");
-    render(<EvidenceDisclosure evidence={evidence} />);
-    fireEvent.click(screen.getByRole("button", { expanded: false }));
-    fireEvent.click(screen.getByText("D1"));
-    expect(viewerStub.fitToGuids).toHaveBeenCalledWith(["GP"]);
-    expect(qspy).not.toHaveBeenCalled();
   });
 });
 

@@ -24,7 +24,6 @@ from app.llm.schemas import AnswerPart, BindingPlan, BoundCondition, BoundOperat
 from app.query.binding.closure import SubjectClosure, resolve_closure
 from app.query.binding.lexical import normalize_text
 from app.query.binding.schemas import CandidateSlate, FieldCandidate, SpatialCandidate
-from app.query.binding.spans import ModifierSpan, material_spans
 from app.query.semantic.units import decide_unit
 
 __all__ = [
@@ -117,8 +116,6 @@ class BindingValidation:
     plan: BindingPlan
     parts: list[PartValidation] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
-    #: Material modifiers neither bound nor declared unresolved (§2.4).
-    silently_dropped_modifiers: list[str] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
@@ -563,313 +560,21 @@ def _validate_visual_primacy(plan: BindingPlan, result: BindingValidation) -> No
         )
 
 
-def _validate_modifier_coverage(
-    plan: BindingPlan, slate: CandidateSlate, result: BindingValidation
-) -> None:
-    """Every material modifier must be bound or explicitly declared unresolved.
-
-    §2.4: "A required modifier may never be silently dropped so a broader query
-    can execute." A dropped modifier is recorded rather than raised, so the
-    caller can degrade to a clarification while still reporting exactly what was
-    lost.
-    """
-    required = material_spans(slate.detected_modifier_spans)
-    if not required:
-        return
-
-    bound_text = " ".join(
-        normalize_text(c.source_span or "") for part in plan.answer_parts for c in part.conditions
-    )
-    declared = {normalize_text(m) for m in plan.unresolved_modifiers}
-    # A floor reference is also satisfied by binding a spatial scope candidate.
-    spatial_scoped = any(
-        part.scope_kind is ScopeKind.SPATIAL_CANDIDATE for part in plan.answer_parts
-    )
-    # Previous-result and selection references are satisfied by the scope kind.
-    scope_kinds = {part.scope_kind for part in plan.answer_parts}
-
-    for span in required:
-        if _span_is_covered(span, bound_text, declared, spatial_scoped, scope_kinds):
-            continue
-        result.silently_dropped_modifiers.append(span.text)
-
-    if result.silently_dropped_modifiers:
-        result.issues.append(
-            ValidationIssue(
-                "modifier_silently_dropped",
-                "the binding did not account for "
-                + ", ".join(repr(m) for m in result.silently_dropped_modifiers)
-                + ", and answering without it would describe a different set of objects",
-            )
-        )
-
-
-#: Words that describe what to DO with a result, or are ordinary interrogative
-#: English, rather than naming something the model must contain.
-#:
-#: The distinction is the safeguard: a word here is exempt from needing a
-#: candidate to explain it, so the set may contain only operation verbs and
-#: generic English. Adding a DOMAIN noun ("parking", "external", "fire") would
-#: silently exempt exactly the qualifiers this check exists to catch, and is a
-#: query-specific rule of the kind §Non-negotiable rule forbids.
-_UNREMARKABLE_TOKENS = frozenset(
-    {
-        # quantity / retrieval requests
-        "many",
-        "much",
-        "count",
-        "number",
-        "total",
-        "list",
-        "show",
-        "give",
-        "tell",
-        "find",
-        "get",
-        "please",
-        "any",
-        "all",
-        "each",
-        "every",
-        "some",
-        "there",
-        "have",
-        "has",
-        "had",
-        "do",
-        "does",
-        "did",
-        "is",
-        "are",
-        "was",
-        "were",
-        "made",
-        "used",
-        "available",
-        "present",
-        "exist",
-        "exists",
-        "far",
-        "long",
-        # operation names — what to produce, not what to look for
-        "describe",
-        "description",
-        "summary",
-        "summarize",
-        "summarise",
-        "overview",
-        "explain",
-        "compare",
-        "comparison",
-        "breakdown",
-        "distribution",
-        "average",
-        "mean",
-        "sum",
-        "detail",
-        "details",
-        "sample",
-        "example",
-        "largest",
-        "smallest",
-        "biggest",
-        "highest",
-        "lowest",
-        "most",
-        "least",
-        "kind",
-        "kinds",
-        "sort",
-        "different",
-        "various",
-    }
-)
-
-
-def _validate_question_coverage(
-    plan: BindingPlan, slate: CandidateSlate, result: BindingValidation
-) -> None:
-    """Every meaningful word of the question must be accounted for.
-
-    This is the general form of the pipeline's most damaging recorded failure.
-    "How many parking spaces are there?" lexically matches `IfcSpace` on the word
-    "spaces", and nothing structural objects — "parking" is not a quoted value, a
-    comparison, a unit, a floor reference or a negation, so the modifier-span
-    check above never sees it. The result was a confident "778 parking spaces"
-    for a model containing none.
-
-    So after binding, any CONTENT token of the question that no selected
-    candidate explains is treated as an unresolved qualifier. §Non-negotiable
-    rule: "every executed constraint is grounded in the user's wording" — and its
-    converse matters just as much, that every part of the user's wording is
-    either honoured or declared. Answering the unqualified question instead
-    describes a different, larger set.
-
-    A token counts as explained when it appears in the bound subject's own name,
-    label or match evidence; in a bound field or value; in a scope reference; in
-    a detected modifier span; or when it is ordinary interrogative English.
-    """
-    unaccounted = _qualifying_unaccounted_tokens(plan, slate)
-    if not unaccounted:
-        return
-
-    # Declaring a term unresolved is HONEST, and it improves the message — but it
-    # does not license answering the broader question anyway. §6: "no unavailable
-    # condition may be silently removed to produce a broader exact result." So a
-    # declaration changes the wording, never the outcome.
-    declared = {normalize_text(m) for m in plan.unresolved_modifiers}
-    was_declared = any(any(t in d for d in declared) for t in unaccounted)
-
-    quoted = ", ".join(repr(t) for t in unaccounted[:4])
-    detail = (
-        f"the binding could not apply {quoted} from your question"
-        if was_declared
-        else f"the binding does not account for {quoted} in the question"
-    )
-    result.issues.append(
-        ValidationIssue(
-            "unaccounted_question_terms",
-            f"{detail}, and answering without it would describe a broader set of objects "
-            "than was asked about",
-        )
-    )
-
-
-def _qualifying_unaccounted_tokens(plan: BindingPlan, slate: CandidateSlate) -> list[str]:
-    """Unaccounted tokens that actually QUALIFY the bound subject.
-
-    Narrowed from "any unexplained word" to "an unexplained word immediately
-    preceding a word the bound subject explains" — i.e. a compound-noun
-    modifier: *parking* spaces, *wheelchair* ramps, *curtain* walls.
-
-    That narrowing is what makes the check safe for questions in other
-    languages. A Swedish question ("Hur många fönster finns det i byggnaden?")
-    has many tokens this English-oriented machinery cannot explain, and flagging
-    all of them refused a question the pipeline could otherwise answer correctly.
-    A modifier position is the one place an unexplained word reliably means "you
-    narrowed my request and then ignored the narrowing", so restricting to it
-    keeps the parking case caught and costs no multilingual coverage.
-    """
-    unaccounted = _unaccounted_tokens(plan, slate)
-    if not unaccounted:
-        return []
-
-    from app.query.binding.lexical import (
-        content_tokens,
-        identifier_content_tokens,
-        singularize,
-    )
-
-    explained_by_subject: set[str] = set()
-    for part in plan.answer_parts:
-        for candidate_id in (part.subject_candidate_id, *part.union_subject_candidate_ids):
-            subject = slate.subject(candidate_id)
-            if subject is None:
-                continue
-            # `identifier_content_tokens` splits camelCase: `IfcSpace` -> {space}.
-            # `content_tokens` would yield the single token `ifcspace`, which
-            # matches nothing a user writes.
-            explained_by_subject |= {
-                singularize(t) for t in identifier_content_tokens(subject.ifc_class)
-            }
-            explained_by_subject |= {singularize(t) for t in content_tokens(subject.label)}
-            explained_by_subject |= {singularize(t) for t in content_tokens(subject.match_reason)}
-    if not explained_by_subject:
-        # Nothing was recognized at all, so there is no "narrowing that was
-        # ignored" to detect — only a question this machinery cannot read.
-        return []
-
-    sequence = [singularize(t) for t in content_tokens(slate.question)]
-    flagged: list[str] = []
-    for index, token in enumerate(sequence[:-1]):
-        if token in unaccounted and sequence[index + 1] in explained_by_subject:
-            if token not in flagged:
-                flagged.append(token)
-    return flagged
-
-
-def _unaccounted_tokens(plan: BindingPlan, slate: CandidateSlate) -> set[str]:
-    from app.query.binding.lexical import content_tokens, identifier_tokens, singularize
-
-    question_tokens = {singularize(t) for t in content_tokens(slate.question)}
-    if not question_tokens:
-        return set()
-
-    explained: set[str] = set(_UNREMARKABLE_TOKENS)
-    explained |= {singularize(t) for t in _UNREMARKABLE_TOKENS}
-
-    # Scope references and other detected spans are already accounted for.
-    for span in slate.detected_modifier_spans:
-        explained |= {singularize(t) for t in content_tokens(span.text)}
-
-    for part in plan.answer_parts:
-        for candidate_id in (part.subject_candidate_id, *part.union_subject_candidate_ids):
-            subject = slate.subject(candidate_id)
-            if subject is None:
-                continue
-            explained |= {singularize(t) for t in identifier_tokens(subject.ifc_class)}
-            explained |= {singularize(t) for t in content_tokens(subject.label)}
-            # The evidence that admitted the candidate — e.g. the stored value
-            # "Rooms" that made a "rooms" question resolve to spaces.
-            explained |= {singularize(t) for t in content_tokens(subject.match_reason)}
-
-        endpoint = slate.subject(part.endpoint_subject_candidate_id or "")
-        if endpoint is not None:
-            explained |= {singularize(t) for t in identifier_tokens(endpoint.ifc_class)}
-
-        for candidate_id in part.output_field_candidate_ids:
-            field_candidate = slate.field_candidate(candidate_id)
-            if field_candidate is not None:
-                explained |= {singularize(t) for t in identifier_tokens(field_candidate.field_name)}
-
-        for condition in part.conditions:
-            field_candidate = slate.field_candidate(condition.candidate_id)
-            if field_candidate is not None:
-                explained |= {singularize(t) for t in identifier_tokens(field_candidate.field_name)}
-                explained |= {singularize(t) for t in identifier_tokens(field_candidate.set_name)}
-            spatial = slate.spatial_candidate(condition.candidate_id)
-            if spatial is not None:
-                explained |= {singularize(t) for t in content_tokens(spatial.label)}
-            for value in [condition.value_text, *condition.value_list]:
-                explained |= {singularize(t) for t in content_tokens(value or "")}
-            explained |= {singularize(t) for t in content_tokens(condition.source_span or "")}
-
-        if part.scope_candidate_id:
-            spatial = slate.spatial_candidate(part.scope_candidate_id)
-            if spatial is not None:
-                explained |= {singularize(t) for t in content_tokens(spatial.label)}
-
-    # `request_text` is deliberately NOT a source of explanation: it is the
-    # model's own restatement of the question, so letting it explain tokens
-    # would let any binding excuse itself by echoing the words back.
-    return question_tokens - explained
-
-
-def _span_is_covered(
-    span: ModifierSpan,
-    bound_text: str,
-    declared: set[str],
-    spatial_scoped: bool,
-    scope_kinds: set[ScopeKind],
-) -> bool:
-    from app.query.binding.spans import ModifierKind
-
-    normalized = normalize_text(span.text)
-    if not normalized:
-        return True
-    if normalized in declared or any(normalized in d or d in normalized for d in declared):
-        return True
-    if normalized in bound_text:
-        return True
-    if span.kind is ModifierKind.FLOOR_REFERENCE and spatial_scoped:
-        return True
-    if span.kind is ModifierKind.PREVIOUS_RESULT_REFERENCE and (
-        ScopeKind.PREVIOUS_RESULT in scope_kinds
-    ):
-        return True
-    if span.kind is ModifierKind.SELECTION_REFERENCE and ScopeKind.SELECTED_OBJECTS in scope_kinds:
-        return True
-    return False
+# ---------------------------------------------------------------------------
+# Retired: Task 24 token/modifier coverage
+# ---------------------------------------------------------------------------
+#
+# `_validate_modifier_coverage`, `_validate_question_coverage`,
+# `_qualifying_unaccounted_tokens`, `_unaccounted_tokens`, `_span_is_covered`
+# and the `_UNREMARKABLE_TOKENS` exemption set lived here. Task 25 §3.2 replaced
+# them with the typed constraint ledger, which the pipeline validates separately
+# via `ledger_validation.validate_ledger_coverage`, and `validate_binding` has
+# not called any of them since.
+#
+# Removed in Task 37 rather than left dormant: `silently_dropped_modifiers` was
+# still being reported by the dev diagnostics endpoint, where a permanently
+# empty list reads as "nothing was dropped" instead of "this is no longer
+# measured here". Dead code that reports is worse than dead code that sits.
 
 
 def _span_is_in_question(span: str, question: str) -> bool:

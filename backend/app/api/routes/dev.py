@@ -85,7 +85,6 @@ def bind_only(request: SessionQueryRequest) -> dict:
     return {
         "ok": validation.valid,
         "issues": [{"code": i.code, "detail": i.detail} for i in validation.all_issues()],
-        "dropped_modifiers": validation.silently_dropped_modifiers,
         "binding": result.plan.model_dump(mode="json"),
         "closures": [
             {"part_id": p.part.part_id, "ifc_classes": list(p.closure.ifc_classes)}

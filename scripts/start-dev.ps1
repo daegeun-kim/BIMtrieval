@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $BackendDir   = Join-Path $RepoRoot 'backend'
 $FrontendDir  = Join-Path $RepoRoot 'frontend'
-$BackendUrl   = 'http://localhost:8000'
+$BackendUrl   = 'http://127.0.0.1:8000'
 $FrontendUrl  = 'http://localhost:5173'
 $BackendPort  = 8000
 $FrontendPort = 5173
@@ -226,7 +226,7 @@ $backendStatus = $backendClass
 if ($backendClass -eq 'Absent') {
     Write-Host '  Starting backend terminal...'
     $cmd = "`$host.UI.RawUI.WindowTitle = 'BIM RAG Backend'; `$env:BIMRAG_MARKER = '$BackendMarker'; " +
-           "Set-Location -LiteralPath '$BackendDir'; poetry run uvicorn app.main:app --reload"
+           "Set-Location -LiteralPath '$BackendDir'; poetry run python -m uvicorn app.main:app --reload"
     $proc = Start-Process -FilePath 'powershell.exe' -WorkingDirectory $BackendDir `
         -ArgumentList @('-NoExit', '-NoProfile', '-Command', $cmd) -PassThru
     $services['backend'] = [ordered]@{
