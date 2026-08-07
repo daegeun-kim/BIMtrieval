@@ -242,3 +242,36 @@ def test_the_migrations_are_declared_as_package_data():
         assert any(PurePosixPath(relative).match(pattern) for pattern in patterns), (
             f"{relative} would not be installed"
         )
+
+
+def test_the_container_role_bootstrap_never_touches_a_dotenv():
+    """`.env` belongs to the user; a container must not read or write it.
+
+    In the container the orchestrator supplies the password via
+    BIM_RAG_READONLY_PASSWORD and hands the backend its DSN directly, so there
+    is nothing for the bootstrap to persist. The local workflow, where no
+    password is supplied, still writes DATABASE_URL to .env as before.
+    """
+    import inspect
+
+    from bim_rag.db_admin import bootstrap_readonly_role as mod
+
+    assert mod.PASSWORD_ENV_VAR == "BIM_RAG_READONLY_PASSWORD"
+
+    source = inspect.getsource(mod.main)
+    local_branch, container_branch = source.split("else:", 1)
+    assert "_write_database_url_to_env" in local_branch, "local workflow must still persist it"
+    assert "_write_database_url_to_env" not in container_branch
+    assert "no .env was read or written" in container_branch
+
+
+def test_a_supplied_password_is_reapplied_so_restarts_do_not_drift():
+    """Compose hands the same password to setup and the backend on every `up`;
+    an existing role whose password was never refreshed would lock the backend
+    out after the first restart."""
+    import inspect
+
+    from bim_rag.db_admin import bootstrap_readonly_role as mod
+
+    source = inspect.getsource(mod.bootstrap)
+    assert "ALTER ROLE" in source and "LOGIN PASSWORD" in source

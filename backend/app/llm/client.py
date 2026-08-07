@@ -56,7 +56,18 @@ class LLMError(RuntimeError):
 
 
 class LLMUnavailableError(LLMError):
-    """OPENAI_API_KEY missing/unusable, or the provider could not be reached."""
+    """The provider could not be reached, or the model call failed."""
+
+
+class LLMNotConfiguredError(LLMUnavailableError):
+    """No OPENAI_API_KEY is set.
+
+    A subclass, so every existing handler still catches it, but distinguishable
+    where the distinction matters: "the provider is down, try again" and "you
+    have not configured a key" need opposite advice. Retrying never fixes the
+    second, and telling a first-time user to wait sends them looking for an
+    outage that does not exist.
+    """
 
 
 class LLMRefusalError(LLMError):
@@ -172,7 +183,7 @@ class OpenAIQueryClient:
         if self._client is None:
             api_key = self.settings.openai_api_key
             if api_key is None or not api_key.get_secret_value().strip():
-                raise LLMUnavailableError(
+                raise LLMNotConfiguredError(
                     "OPENAI_API_KEY is not configured; cannot reach the binder/answer model."
                 )
             from openai import OpenAI

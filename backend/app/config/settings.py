@@ -188,7 +188,13 @@ class Settings(BaseSettings):
     # Explicit CORS allowlist for the local Vite frontend (spec_v006 §10.5).
     # No wildcard-with-credentials; overrideable via env (JSON list) without
     # placing any secret in frontend configuration.
-    cors_allow_origins: list[str] = ["http://localhost:5173"]
+    # Both loopback spellings: to a browser these are different origins, and
+    # allowing only one makes the frontend work or fail depending on which URL
+    # the user typed. No wildcard, and no non-loopback origin by default.
+    cors_allow_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     def get_viewer_asset_root(self) -> Path:
         """Resolve the configured viewer-asset root (Task 10 §2).

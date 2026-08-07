@@ -39,6 +39,14 @@ x-db-env: &db-env
 x-db-url: &db-url
   postgresql://${POSTGRES_USER:-bimtrieval}:${POSTGRES_PASSWORD:-bimtrieval_local_dev}@db:5432/${POSTGRES_DB:-bimtrieval}
 
+# The backend's DSN: the dedicated read-only role, created by `setup`. The
+# password is chosen HERE rather than generated inside the container, because
+# the orchestrator has to hand the same value to two services and there is no
+# `.env` for them to agree through — and the user's own `.env` is never read or
+# written by any of this.
+x-readonly-url: &readonly-url
+  postgresql://bim_rag_query_ro:${POSTGRES_RO_PASSWORD:-bimtrieval_ro_local_dev}@db:5432/${POSTGRES_DB:-bimtrieval}
+
 services:
   # -------------------------------------------------------------------------
   # PostgreSQL + pgvector
@@ -75,11 +83,14 @@ services:
       db:
         condition: service_healthy
     environment:
+      # The WRITER connection. Only ingestion-side services ever get this.
       db_url: *db-url
+      BIM_RAG_READONLY_PASSWORD: ${POSTGRES_RO_PASSWORD:-bimtrieval_ro_local_dev}
     # No volumes: schema setup neither reads an IFC file nor writes an artifact.
     # Idempotent — creates the extension and tables, applies pending migrations,
-    # seeds catalog metadata — so it is safe on every `up`.
-    command: ["bim-db-init"]
+    # seeds catalog metadata, then creates/refreshes the read-only role and
+    # verifies it really is read-only — so it is safe on every `up`.
+    command: ["bim-db-init", "--with-readonly-role"]
     restart: "no"
 
   # -------------------------------------------------------------------------
@@ -96,19 +107,21 @@ services:
       setup:
         condition: service_completed_successfully
     environment:
-      # This stack runs a single-role local database, so the backend's
-      # DATABASE_URL is the same DSN. The dedicated read-only role is a
-      # production concern — see Task 38's profile and `bim-db-init
-      # --with-readonly-role`.
-      DATABASE_URL: *db-url
-      db_url: *db-url
+      # The ONLY database credential the backend receives, and it is the
+      # read-only role. `db_url` is deliberately absent: with no writer DSN in
+      # this environment at all, the backend cannot fall back to one even if a
+      # future code path tried to.
+      DATABASE_URL: *readonly-url
       # Absent or empty is a supported, documented state: the app starts, the
       # viewer and catalog work, and question answering reports that no key is
       # configured rather than fabricating an answer.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       VIEWER_ASSET_ROOT: /app/model_assets
       MODEL_SEMANTICS_ROOT: /app/model_semantics
-      CORS_ALLOW_ORIGINS: '["http://localhost:5173"]'
+      # Both loopback spellings. To a browser `localhost:5173` and
+      # `127.0.0.1:5173` are DIFFERENT origins, so allowing only one makes the
+      # app work or fail depending on which URL the user happened to type.
+      CORS_ALLOW_ORIGINS: '["http://localhost:5173","http://127.0.0.1:5173"]'
     volumes:
       - ./model_assets:/app/model_assets:ro
       - ./model_semantics:/app/model_semantics:ro

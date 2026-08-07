@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 
 def test_missing_question_is_rejected(client):
     resp = client.post("/api/query", json={"session_id": "s1"})
@@ -72,3 +74,43 @@ def test_render_timing_accepts_bounded_browser_telemetry(client, caplog):
     assert resp.status_code == 204
     assert "[Query render timing]" in caplog.text
     assert "total_query_to_viewer_ms: 1242.7" in caplog.text
+
+
+def test_a_missing_key_raises_the_not_configured_error_not_a_generic_one():
+    """Task 35: a missing key is a SETUP state, and must be distinguishable.
+
+    "The provider is down, try again" and "you have not configured a key" need
+    opposite advice, and retrying never resolves the second.
+    """
+    from app.config.settings import Settings
+    from app.llm.client import LLMNotConfiguredError, LLMUnavailableError, OpenAIQueryClient
+
+    # A subclass, so every existing handler still catches it.
+    assert issubclass(LLMNotConfiguredError, LLMUnavailableError)
+
+    for key in (None, "", "   "):
+        settings = Settings(_env_file=None, openai_api_key=key)
+        with pytest.raises(LLMNotConfiguredError):
+            OpenAIQueryClient(settings)._get_client()
+
+
+def test_the_service_answers_a_missing_key_with_setup_guidance():
+    """The user-facing half: what the person actually reads."""
+    import inspect
+
+    from app.query import service as service_module
+
+    source = inspect.getsource(service_module)
+    not_configured = source.index("except LLMNotConfiguredError")
+    unavailable = source.index("except LLMUnavailableError")
+    # Python matches in order, so the subclass MUST be caught first or the
+    # specific message is unreachable.
+    assert not_configured < unavailable
+
+    guidance = source[not_configured:unavailable]
+    assert "OPENAI_API_KEY" in guidance
+    assert ".env" in guidance
+    assert "try again" not in guidance.lower(), "retrying never resolves a missing key"
+    # And it says what still works without a key, so the app reads as degraded
+    # rather than broken.
+    assert "viewer" in guidance.lower()

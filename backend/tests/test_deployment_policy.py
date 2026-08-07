@@ -287,3 +287,65 @@ def test_the_container_validation_fixture_is_small_and_ours():
 
     boundaries = (_REPO_ROOT / "docs" / "container-boundaries.md").read_text(encoding="utf-8")
     assert "smoke-wall.ifc" in boundaries
+
+
+# ---------------------------------------------------------------------------
+# Writer / read-only role separation (Task 35, reopened)
+# ---------------------------------------------------------------------------
+
+
+def test_the_backend_receives_only_the_read_only_dsn(base_compose):
+    """The signature defensive decision, and it was absent from the container
+    path: the backend connected as the writer and could create tables.
+
+    `db_url` must be absent entirely — not merely unused — so no code path can
+    fall back to a writer connection that is not there.
+    """
+    env = base_compose["services"]["backend"]["environment"]
+    assert "db_url" not in env and "DB_URL" not in env
+    assert "bim_rag_query_ro" in env["DATABASE_URL"]
+
+
+def test_only_ingestion_side_services_get_the_writer_dsn(base_compose):
+    writers = {
+        name
+        for name, svc in base_compose["services"].items()
+        if "db_url" in (svc.get("environment") or {})
+    }
+    assert writers == {"setup", "import"}
+
+
+def test_setup_creates_the_read_only_role(base_compose):
+    setup = base_compose["services"]["setup"]
+    assert "--with-readonly-role" in setup["command"]
+    # The password is handed in, so nothing has to write a .env inside a container.
+    assert "BIM_RAG_READONLY_PASSWORD" in setup["environment"]
+
+
+# NOTE: the container role-bootstrap behaviour is asserted in
+# ingestion/tests/test_setup_entrypoints.py. It cannot live here: the backend
+# must never import `bim_rag` (Task 09), and a test that did would quietly
+# create the dependency the architecture forbids.
+
+
+def test_production_also_gives_the_backend_only_the_read_only_role(prod_compose):
+    """The overlay used to override DATABASE_URL with the WRITER dsn, silently
+    undoing the boundary in exactly the deployment that needs it most."""
+    env = prod_compose["services"]["backend"]["environment"]
+    assert "db_url" not in env
+    assert "bim_rag_query_ro" in env["DATABASE_URL"]
+    assert "POSTGRES_RO_PASSWORD:?" in env["DATABASE_URL"], "must be required, not defaulted"
+
+
+def test_both_loopback_origins_are_allowed(base_compose):
+    """To a browser `localhost:5173` and `127.0.0.1:5173` are different origins,
+    so allowing one makes the app work or fail depending on what the user typed."""
+    from app.config.settings import Settings
+
+    origins = Settings(_env_file=None).cors_allow_origins
+    assert "http://localhost:5173" in origins
+    assert "http://127.0.0.1:5173" in origins
+    assert "*" not in origins
+
+    compose_origins = base_compose["services"]["backend"]["environment"]["CORS_ALLOW_ORIGINS"]
+    assert "localhost:5173" in compose_origins and "127.0.0.1:5173" in compose_origins

@@ -43,6 +43,7 @@ from app.config.settings import Settings, get_settings
 from app.db.session import session_scope
 from app.llm.client import (
     LLMError,
+    LLMNotConfiguredError,
     LLMUnavailableError,
     OpenAIQueryClient,
     get_llm_client,
@@ -295,6 +296,19 @@ class QueryService:
                 self._finalize_state(state, request, outcome)
                 self._log_event(request, request_id, outcome, client, t0, usage_start)
                 return envelope
+        except LLMNotConfiguredError as exc:
+            # A setup problem, not an outage. Say what to do; do not suggest
+            # waiting, because waiting never resolves it.
+            self._log_failure(request, request_id, "llm_not_configured", str(exc))
+            return _error_envelope(
+                request,
+                "No OpenAI API key is configured, so questions cannot be answered yet. "
+                "Set OPENAI_API_KEY in the .env file at the repository root and restart "
+                "the backend. Browsing models, the 3D viewer and floor plans work without "
+                "a key.",
+                request_id=request_id,
+                scope=scope,
+            )
         except LLMUnavailableError as exc:
             self._log_failure(request, request_id, "llm_unavailable", str(exc))
             return _error_envelope(

@@ -55,6 +55,72 @@ There is no watcher, no auto-import on startup, and no upload endpoint. Parsing
 a 170 MB model is expensive and writes to the corpus; it should happen because
 someone decided it should, against a file they named.
 
+## Two database roles, and the backend only gets one
+
+PostgreSQL, your IFC data and your OpenAI key all stay local and user-owned.
+Inside that local stack, the database is reached through **two separate roles**:
+
+| Role | Held by | Can |
+| --- | --- | --- |
+| `${POSTGRES_USER}` (writer) | `setup`, `import` | Create schema, import models, write embeddings |
+| `bim_rag_query_ro` | `backend` | `SELECT` only |
+
+`setup` creates and grants the read-only role on every `up`, then verifies it
+before exiting. The backend's environment carries **only** `DATABASE_URL`
+pointing at that role — `db_url` is absent entirely, so no code path can fall
+back to a writer connection that is not there.
+
+The password is chosen by Compose (`POSTGRES_RO_PASSWORD`, with a local-only
+default) and handed to both services, because there is no `.env` inside a
+container for them to agree through — and **the user's `.env` is never read or
+written** by any of this. The local, non-container workflow is unchanged: with
+no password supplied, `bim-db-init --with-readonly-role` generates one and
+persists `DATABASE_URL` to `.env` as before.
+
+Proven from inside the running backend container, on a fresh volume:
+
+```
+connected as: bim_rag_query_ro
+READ   select : OK
+WRITE  CREATE : refused (permission denied)
+WRITE  INSERT : refused (permission denied)
+WRITE  UPDATE : refused (permission denied)
+WRITE  DELETE : refused (permission denied)
+```
+
+The production overlay does the same. It previously overrode `DATABASE_URL`
+with the writer DSN, silently undoing the boundary in exactly the deployment
+that needs it most; it now requires `POSTGRES_RO_PASSWORD` rather than
+defaulting it.
+
+## Both loopback origins are allowed
+
+To a browser, `http://localhost:5173` and `http://127.0.0.1:5173` are different
+origins. Allowing only one made the app work or fail depending on which URL the
+user happened to type, which is a confusing failure to debug. Both are in
+`CORS_ALLOW_ORIGINS`; there is no wildcard and no non-loopback origin by
+default.
+
+Verified in a real browser against the running stack — both origins load the
+page and complete `200 /api/models` with no CORS errors — and an unlisted origin
+still receives no `Access-Control-Allow-Origin` header.
+
+## Without an OpenAI key
+
+Tested with an explicitly empty value; no real key is needed to check this.
+
+The stack starts, the catalog and viewer work, and a question returns a normal
+response envelope carrying:
+
+> No OpenAI API key is configured, so questions cannot be answered yet. Set
+> `OPENAI_API_KEY` in the `.env` file at the repository root and restart the
+> backend. Browsing models, the 3D viewer and floor plans work without a key.
+
+A missing key is a distinct error type from a provider outage. They need
+opposite advice: retrying never resolves an unset key, and telling a first-time
+user to "try again shortly" sends them looking for an outage that does not
+exist.
+
 ## Three images, three jobs
 
 | Image | Size | Contains | Runs |
@@ -135,7 +201,10 @@ Last run:
 
 | Check | Result |
 | --- | --- |
-| Fresh start, empty database | `1 applied: ['0001_catalog_metadata_proposal']`, all services healthy |
+| Fresh start, empty database | `1 applied: ['0001_...']`, read-only role created and self-verified, all services healthy |
+| Backend write attempts | `CREATE`/`INSERT`/`UPDATE`/`DELETE` all refused; `db_url` absent from its environment |
+| Browser at both loopback origins | `200 /api/models`, no CORS errors |
+| Empty `OPENAI_API_KEY` | Setup guidance returned, no crash |
 | Fixture import | exit 0, `fully_query_ready: true`, 0 warnings, 5 entities / 9 embedded documents |
 | Persistence across `down`/`up` | 7,585 documents before, 7,585 after; `setup` re-ran idempotently |
 | `down -v` | Both volumes and all containers removed |

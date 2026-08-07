@@ -522,9 +522,68 @@ a licensed building back in version control.
 | `down -v` | Both volumes and all containers removed |
 | Image content audit | No IFC, embeddings, artifacts, manifests or `.env` in any image |
 
-Task 35 is complete. The only unvalidated container path left is the production
-overlay under sustained load, which is a deployment concern rather than a build
-one.
+### 4.8 Reopened: the read-only boundary was not active in containers
+
+Task 35 was marked complete before its "backend read-only access" validation had
+been performed. It had not, and the boundary was absent: the backend connected
+as the writer role and successfully created a table. `SECURITY.md` claimed
+otherwise, so the documentation was asserting a property the shipped path did
+not have — the worst kind of documentation error.
+
+Fixed by giving the stack **two roles**. `setup` (writer) creates and grants
+`bim_rag_query_ro` on every `up` and verifies it before exiting; the backend
+receives **only** `DATABASE_URL` for that role, with `db_url` absent from its
+environment entirely so nothing can fall back to a writer connection that is not
+there. The production overlay had the same defect in a worse place — it
+overrode `DATABASE_URL` with the writer DSN — and now requires
+`POSTGRES_RO_PASSWORD` rather than defaulting it.
+
+`bootstrap_readonly_role` gained a container path: with
+`BIM_RAG_READONLY_PASSWORD` supplied, it uses that password, re-applies it on
+restart so a restarted stack cannot drift, and **never reads or writes a
+`.env`**. The local workflow is unchanged.
+
+Proven from inside the running backend on a fresh volume: connected as
+`bim_rag_query_ro`, `SELECT` works, and `CREATE`, `INSERT`, `UPDATE` and
+`DELETE` are each refused with `permission denied`.
+
+### 4.9 Two further defects this exposed
+
+**The catalog answer path was broken.** `catalog_answer.load_catalog_models`
+selected `display_name`, `version_label`, `is_current` and `status` from
+`ifc_source_models` — all four live on `source_model_catalog_entries` — so
+PostgreSQL raised `UndefinedColumn` and **every question asked without an active
+model failed**. It now LEFT JOINs, as `sql/catalog.py` already did. Unit tests
+could not have caught it: the SQL is only parsed by the server.
+
+**A missing key was reported as an outage.** An unset `OPENAI_API_KEY` produced
+"The language model is currently unavailable. Please try again shortly." —
+advice that never works for that cause, and which sends a first-time user
+looking for an outage that does not exist. `LLMNotConfiguredError` is now a
+distinct subclass, and the message names the variable, the file, and what still
+works without a key.
+
+### 4.10 Reopened-validation results
+
+Local only. No host database was touched, no full IFC used, and the user's
+`.env` was neither read nor modified.
+
+| Check | Result |
+| --- | --- |
+| Fresh `up` on an empty volume | Read-only role created, granted and self-verified; all services healthy |
+| Backend identity | `bim_rag_query_ro`; `db_url` absent from its environment |
+| Backend writes | `CREATE` / `INSERT` / `UPDATE` / `DELETE` all refused |
+| Fixture import (1.6 KB `smoke-wall.ifc`) | exit 0, 5 entities, 9 embedded documents |
+| Empty `OPENAI_API_KEY` (explicit `""`, no real key) | Setup guidance returned; no crash, catalog still answers |
+| CORS preflight, both loopback origins | Both allowed; an unlisted origin gets no `Access-Control-Allow-Origin` |
+| Real browser, both origins | `200 /api/models`, no CORS errors, no "backend offline" |
+| Persistence across `down` / `up` | Counts identical; read-only role still enforced afterwards |
+| `down -v` | Both volumes and all containers removed |
+
+Offline gates after the change: backend **866 passed**, ingestion **298
+passed**, ruff clean in both.
+
+Task 35 is now complete.
 
 ---
 

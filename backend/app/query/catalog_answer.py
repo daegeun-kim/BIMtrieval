@@ -47,8 +47,17 @@ def load_catalog_models(session: Session) -> list[dict[str, Any]]:
     """
     rows = session.execute(
         text(
-            "SELECT id, display_name, version_label, is_current, status, file_name, ifc_schema "
-            "FROM ifc_source_models ORDER BY id LIMIT :cap"
+            # display_name/version_label/is_current/status live on
+            # source_model_catalog_entries, NOT on ifc_source_models. Selecting
+            # them from the latter raised UndefinedColumn, so every question
+            # asked without an active model failed. LEFT JOIN so a model with no
+            # catalog entry still appears, with those fields null — which is what
+            # this function promises: a missing field stays missing.
+            "SELECT sm.id, ce.display_name, ce.version_label, ce.is_current, "
+            "ce.status, sm.file_name, sm.ifc_schema "
+            "FROM ifc_source_models sm "
+            "LEFT JOIN source_model_catalog_entries ce ON ce.source_model_id = sm.id "
+            "ORDER BY sm.id LIMIT :cap"
         ),
         {"cap": _MAX_MODELS},
     ).mappings()

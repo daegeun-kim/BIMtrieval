@@ -136,19 +136,50 @@ def verify_read_only(dsn: str) -> None:
     print(f"[bootstrap_readonly_role] Verified: {ROLE_NAME} can SELECT, INSERT is rejected.")
 
 
-def main() -> None:
-    admin_db_url = get_db_url()
+#: Supplying the password out-of-band is what makes this usable in a container.
+#: Compose has no `.env` to write into and must not touch the user's, so the
+#: orchestrator chooses the secret and both services are handed the DSN they
+#: need — ingestion the writer, the backend only the read-only role.
+PASSWORD_ENV_VAR = "BIM_RAG_READONLY_PASSWORD"
+
+
+def bootstrap(admin_db_url: str, password: str | None = None) -> tuple[str, bool]:
+    """Create or refresh the read-only role and apply its grants.
+
+    `password` supplied  -> used as-is, and re-applied on every run so a restart
+                            cannot drift from what the caller handed out.
+    `password` omitted   -> generated once, only if the role does not exist yet.
+
+    Returns `(dsn, password_is_known)`. When the role already existed and no
+    password was supplied, the DSN cannot be reconstructed and the second
+    element is False.
+    """
     engine = create_engine(admin_db_url)
-    new_password: str | None = None
+    effective = password
+    known = password is not None
     try:
         with Session(engine) as session, session.begin():
             _require_createrole(session)
             if _role_exists(session):
-                print(f"[bootstrap_readonly_role] Role {ROLE_NAME!r} exists; re-applying grants.")
+                if password is not None:
+                    # Idempotent restarts: keep the stored password in step with
+                    # the one the caller is about to hand the backend.
+                    session.execute(
+                        text(f'ALTER ROLE "{ROLE_NAME}" WITH LOGIN PASSWORD :pw'),
+                        {"pw": password},
+                    )
+                    print(
+                        f"[bootstrap_readonly_role] Role {ROLE_NAME!r} exists; password refreshed."
+                    )
+                else:
+                    print(
+                        f"[bootstrap_readonly_role] Role {ROLE_NAME!r} exists; re-applying grants."
+                    )
             else:
-                new_password = secrets.token_urlsafe(32)
+                effective = password or secrets.token_urlsafe(32)
+                known = True
                 session.execute(
-                    text(f'CREATE ROLE "{ROLE_NAME}" WITH LOGIN PASSWORD :pw'), {"pw": new_password}
+                    text(f'CREATE ROLE "{ROLE_NAME}" WITH LOGIN PASSWORD :pw'), {"pw": effective}
                 )
                 print(f"[bootstrap_readonly_role] Created role {ROLE_NAME!r}.")
             _apply_grants(session)
@@ -157,16 +188,38 @@ def main() -> None:
     finally:
         engine.dispose()
 
-    if new_password is not None:
-        dsn = _build_dsn(admin_db_url, new_password)
-        _write_database_url_to_env(dsn)
-        print("[bootstrap_readonly_role] Wrote DATABASE_URL to .env (value not printed or logged).")
-        verify_read_only(dsn)
-    else:
+    dsn = _build_dsn(admin_db_url, effective) if known else ""
+    return dsn, known
+
+
+def main() -> None:
+    import os
+
+    admin_db_url = get_db_url()
+    supplied = os.environ.get(PASSWORD_ENV_VAR) or None
+
+    dsn, known = bootstrap(admin_db_url, supplied)
+
+    if not known:
         print(
             "[bootstrap_readonly_role] Role already existed; password not regenerated. If "
             ".env's DATABASE_URL is missing/stale, drop the role and re-run, or set it manually."
         )
+        return
+
+    if supplied is None:
+        # Local workflow: persist the generated DSN for the backend to pick up.
+        _write_database_url_to_env(dsn)
+        print("[bootstrap_readonly_role] Wrote DATABASE_URL to .env (value not printed or logged).")
+    else:
+        # Container workflow: the orchestrator already knows the password and
+        # passes DATABASE_URL to the backend itself. Never touch a .env here.
+        print(
+            f"[bootstrap_readonly_role] Password taken from {PASSWORD_ENV_VAR}; "
+            "no .env was read or written."
+        )
+
+    verify_read_only(dsn)
 
 
 if __name__ == "__main__":

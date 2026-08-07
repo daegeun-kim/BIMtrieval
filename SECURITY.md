@@ -21,9 +21,12 @@ These are properties of the implementation, not aspirations, and each is covered
 by a test:
 
 - **The backend cannot write BIM data.** It connects through a dedicated
-  read-only PostgreSQL role (`bim_rag_query_ro`), so a malformed or hostile
-  query structurally cannot corrupt the model corpus. Statement and result
-  limits are enforced on top of that.
+  read-only PostgreSQL role (`bim_rag_query_ro`) in both the manual and the
+  container setups, so a malformed or hostile query structurally cannot corrupt
+  the model corpus. Its environment carries no writer DSN at all. Verified from
+  inside the running container: `SELECT` succeeds, and `CREATE`, `INSERT`,
+  `UPDATE` and `DELETE` are each refused. Statement and result limits are
+  enforced on top of that.
 - **Your key never reaches the browser.** No file under `frontend/src` mentions
   `OPENAI_API_KEY` or contacts OpenAI. Only the backend does.
 - **No secret enters an image.** `.dockerignore` excludes `.env`, `ifc/`, and

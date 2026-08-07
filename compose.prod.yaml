@@ -34,20 +34,24 @@ services:
 
   setup:
     environment:
+      # Writer connection — ingestion-side only.
       db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      BIM_RAG_READONLY_PASSWORD: ${POSTGRES_RO_PASSWORD:?set POSTGRES_RO_PASSWORD in .env}
     security_opt:
       - no-new-privileges:true
 
   backend:
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # The read-only role, and nothing else. Overriding this with the writer
+      # DSN would silently undo the boundary the whole design rests on, which
+      # is precisely what this file used to do.
+      DATABASE_URL: postgresql://bim_rag_query_ro:${POSTGRES_RO_PASSWORD:?set POSTGRES_RO_PASSWORD in .env}@db:5432/${POSTGRES_DB}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Developer diagnostics stay off. `/dev/*` exposes binding internals and
       # is not an authenticated surface.
       ENABLE_DEV_ENDPOINTS: "false"
       BIM_RAG_TRACE: "0"
-      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:5173"]}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
     restart: always
     read_only: true
     security_opt:
@@ -83,6 +87,7 @@ services:
 
   import:
     environment:
+      # Writer connection — this is the one service that writes BIM data.
       db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     security_opt:
       - no-new-privileges:true
