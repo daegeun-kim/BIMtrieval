@@ -443,25 +443,38 @@ documented entry point. `scripts/start-dev.ps1` remains as an explicitly
 secondary, optional Windows helper for a developer who has already done the
 manual setup.
 
-### 4.5 Validation status — INCOMPLETE
+### 4.5 Validation — run against Docker 29.6.2 / Compose v5.3.1
 
-Docker is not installed on the development machine, so the runtime half of this
-task's validation has **not** been performed. What was verified:
+| Check | Result |
+| --- | --- |
+| `docker compose build` | All three images built |
+| `docker compose up -d` | `db`, `backend`, `frontend` all **healthy**; `setup` ran once and exited 0 |
+| Schema setup on an empty database | `1 applied: ['0001_catalog_metadata_proposal']` |
+| `GET /health` | `{"status":"ok"}` |
+| `GET /ready` | `{"status":"ok","database":{"ok":true,"error":null}}` |
+| `GET /api/models` on an empty corpus | `{"models":[]}` — a clean empty state, not an error |
+| Frontend | HTTP 200 |
+| Production overlay without credentials | Refuses: *"required variable POSTGRES_USER is missing a value"* |
+| `import` with a missing file | Names both places it looked, exits non-zero |
+| `import` with a real 21 MB model | Structured import 4,705 entities, then CPU embedding |
 
-- `compose.yaml` parses; services, profiles, `depends_on` conditions, volumes,
-  and YAML anchor expansion all resolve as intended.
-- The wheel now contains all four `.sql` files (inspected directly).
-- Every base image is pinned to a specific tag.
-- No secret appears in any Dockerfile, compose file, or ignore file.
+Two findings worth recording.
 
-Still to be run by the owner, and **not claimed as working** until it is:
+**The wheel-packaging fix is confirmed by the container, not just by
+inspection.** `1 applied: ['0001_catalog_metadata_proposal']` was printed by
+`bim-db-init` running from a non-editable install inside the image. Before the
+`package-data` fix that line would have read `0 applied: none pending` against a
+database with no schema.
 
-```bash
-docker compose up --build      # build + first startup + health/readiness
-docker compose run --rm import "IFC Schependomlaan incl planningsdata.ifc"
-docker compose down && docker compose up   # database persistence
-docker compose down -v         # clean teardown
-```
+**A healthcheck defect only a real run could find.** The frontend reported
+`unhealthy` while serving HTTP 200 correctly. nginx listens on IPv4 only, and
+Alpine's resolver tries `::1` first, so `wget --spider http://localhost/` was
+refused on IPv6 against a perfectly healthy container. Both healthchecks now
+probe `127.0.0.1` explicitly. Static validation could not have caught this —
+the config was valid and the service worked; only the probe was wrong.
+
+Remaining owner steps: database persistence across `down`/`up`, and clean
+teardown with `down -v`. The import was still embedding when this was recorded.
 
 ---
 
