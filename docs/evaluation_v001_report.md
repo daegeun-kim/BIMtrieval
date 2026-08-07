@@ -1,12 +1,23 @@
 # BIM RAG Backend Query Prototype — End-to-End Evaluation (Task 08)
 
-> **Note — superseded by Task 09 (three independent applications).**
-> Paths and run commands in this document reflect the pre-split layout
-> (`backend/src`, `api.app:app`, and the `bim_rag` compatibility shim). The
-> authoritative current structure and commands are in [`README.md`](../README.md)
-> and [`workflow.md`](../workflow.md): ingestion lives under `ingestion/`, the
-> backend is a Poetry app run from `backend/` with `poetry run uvicorn app.main:app`,
-> and the backend has no dependency on the ingestion `bim_rag` package.
+> ## Historical document — kept for its original context
+>
+> This is the Task 08 report the benchmark v003 numbers come from. It is
+> preserved as written, including the defects found and fixed during that run,
+> which are the most useful part of it.
+>
+> **The current published benchmark is
+> [`evaluation/benchmark_v003.md`](../evaluation/benchmark_v003.md)**, which
+> states full provenance and the limits of what these numbers claim.
+>
+> Two things here are out of date and are *not* corrected in place, so this
+> document keeps meaning what it meant when it was written:
+>
+> - **Paths and commands** predate the Task 09 split into three applications.
+>   Current ones are in [`README.md`](../README.md).
+> - **The pipeline itself** has since changed. Task 25 replaced the single
+>   planner call with a binder plus a typed constraint ledger, and the model
+>   roster moved off `gpt-5-nano`. These results measure the pipeline as it was.
 
 
 Governed by `specs/spec_v002/003/004/005`. This report validates the complete backend
@@ -16,7 +27,7 @@ planningsdata", IFC2X3) through the real `POST /api/query` pipeline, using real
 
 - Benchmark: `backend/src/evaluation/benchmark_v003_e2e_cases.jsonl` (27 versioned cases).
 - Runner: `backend/src/evaluation/run_benchmark_v003.py` (real `QueryService`, log-correlated).
-- Machine-readable results: `backend/src/evaluation/benchmark_v003_results.json`.
+- Machine-readable results: `evaluation/results/benchmark_v003.json`.
 
 ## Headline result (authoritative run)
 

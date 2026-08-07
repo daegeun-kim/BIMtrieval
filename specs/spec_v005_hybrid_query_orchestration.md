@@ -554,7 +554,7 @@ Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.m
 
 - Benchmark: `backend/app/evaluation/benchmark_v003_e2e_cases.jsonl` (27 versioned cases
   spanning the required matrix); runner `run_benchmark_v003.py`; committed machine-readable
-  results `backend/app/evaluation/benchmark_v003_results.json`.
+  results `evaluation/results/benchmark_v003.json`.
 - Authoritative run through the real `/api/query` pipeline with live `gpt-5-nano`:
   **26/27 cases**, operation 16/16, exact-answer 6/6, viewer-ID 1/1, retrieval 2/2,
   grounding failures **0**, corpus **unchanged** (6989/3473/10462). Latency by stage:
