@@ -1,0 +1,173 @@
+name: CI
+
+# The fast offline gate for all three projects, run on every change to main.
+#
+# Secret-free by construction: no `.env`, no OPENAI_API_KEY, no database, no
+# downloaded embedding model, no network calls to any model provider. Every
+# suite here uses fakes for LLM behaviour, so a full run costs nothing and
+# cannot be rate-limited. The database-backed and live suites are named
+# separately and are deliberately NOT represented in this required gate — see
+# README "Testing".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+
+jobs:
+  ingestion:
+    name: Ingestion (pytest + ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingestion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ingestion/pyproject.toml
+
+      # The local workflow uses the Conda `bim_rag` environment with a CUDA
+      # build of torch. CI installs the CPU wheel instead: `bim_rag.stage2_embed`
+      # imports torch at module scope, so the offline suite needs it importable,
+      # but no test ever loads a model or touches a GPU.
+      - name: Install CPU torch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install ingestion
+        run: pip install -e . ruff pytest
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format)
+        run: ruff format --check .
+
+      - name: Offline test suite
+        run: pytest
+
+  backend:
+    name: Backend (pytest + ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache the Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: backend-venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('backend/poetry.lock') }}
+
+      # The default install deliberately omits the optional `embedding` group:
+      # semantic retrieval needs a multi-gigabyte torch wheel that no offline
+      # test loads. See the comment in backend/pyproject.toml.
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction
+
+      - name: Verify the lock file matches pyproject.toml
+        run: poetry check --lock
+
+      - name: Ruff (lint)
+        run: poetry run ruff check .
+
+      - name: Ruff (format)
+        run: poetry run ruff format --check .
+
+      # `addopts` carries `-m 'not live'`, so this collects no database-backed
+      # test. Nothing here opens a connection or reads a `.env`.
+      - name: Offline test suite
+        run: poetry run pytest
+
+  frontend:
+    name: Frontend (test + typecheck + lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: Critical path (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Browser-level, but still secret-free: the spec stubs every backend
+      # response and loads the small tracked fixture artifact, so this exercises
+      # the real Fragments worker and WebGL without PostgreSQL or OpenAI.
+      - name: Critical-path suite
+        run: npx playwright test
+
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
