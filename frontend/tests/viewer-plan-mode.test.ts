@@ -10,7 +10,14 @@ import * as THREE from "three";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ViewerAdapter, type FloorContractBand } from "../src/viewer/ViewerAdapter";
-import { PLAN } from "../src/viewer/viewerTheme";
+import {
+  PLAN,
+  PLAN_CUT_COLOR,
+  PLAN_CUT_OPACITY,
+  PLAN_FILL_COLOR,
+  PLAN_FILL_OPACITY,
+  PLAN_WALL_CUT_COLOR,
+} from "../src/viewer/viewerTheme";
 
 const MODEL_BOX = new THREE.Box3(new THREE.Vector3(0, -0.4, 0), new THREE.Vector3(30, 9, 40));
 
@@ -641,6 +648,11 @@ describe("black wall cuts (task31 §5.1)", () => {
   });
 
   it("keeps the non-wall cut at its existing colours and opacity", async () => {
+    // The base layer must come through the wall split untouched. Asserted
+    // against the theme constants rather than "not black": task28 §4.2 makes
+    // the non-wall CONTOUR black on purpose (it is the darkest ink among the
+    // projected layers) and only the poché FILL is grey, so a "not 0x000000"
+    // check would contradict the design instead of protecting it.
     const h = await classifiedHarness();
     await h.adapter.enterPlanMode(1);
     const group = h.modelObject.children[0] as THREE.Group;
@@ -648,9 +660,19 @@ describe("black wall cuts (task31 §5.1)", () => {
     expect(base).toHaveLength(2);
     const contour = base.find((c) => c.type === "LineSegments") as THREE.LineSegments;
     const fill = base.find((c) => c.type === "Mesh") as THREE.Mesh;
-    expect((contour.material as THREE.LineBasicMaterial).color.getHex()).not.toBe(0x000000);
-    expect((fill.material as THREE.MeshBasicMaterial).color.getHex()).not.toBe(0x000000);
-    expect((contour.material as THREE.LineBasicMaterial).opacity).toBe(1);
+    expect((contour.material as THREE.LineBasicMaterial).color.getHex()).toBe(
+      PLAN_CUT_COLOR.getHex(),
+    );
+    expect((fill.material as THREE.MeshBasicMaterial).color.getHex()).toBe(
+      PLAN_FILL_COLOR.getHex(),
+    );
+    // The grey poché is what distinguishes the base fill from the black wall
+    // fill, so it must not have been recoloured to the wall layer's black.
+    expect((fill.material as THREE.MeshBasicMaterial).color.getHex()).not.toBe(
+      PLAN_WALL_CUT_COLOR.getHex(),
+    );
+    expect((contour.material as THREE.LineBasicMaterial).opacity).toBe(PLAN_CUT_OPACITY);
+    expect((fill.material as THREE.MeshBasicMaterial).opacity).toBe(PLAN_FILL_OPACITY);
     expect((fill.material as THREE.MeshBasicMaterial).opacity).toBeLessThan(1);
   });
 

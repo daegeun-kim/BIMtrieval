@@ -10,8 +10,6 @@ NEVER silently broaden into a query the user did not ask for.
 
 from __future__ import annotations
 
-import pytest
-
 from app.llm.schemas import (
     AnswerPart,
     BindingPlan,
@@ -431,220 +429,19 @@ def test_an_unknown_relationship_candidate_is_rejected(slate_env):
 
 
 # ---------------------------------------------------------------------------
-# Modifier coverage — §2.4's "never silently dropped"
+# Question/modifier coverage - moved, not dropped
 # ---------------------------------------------------------------------------
-
-
-def test_a_material_modifier_that_is_neither_bound_nor_declared_is_reported(slate_env):
-    """Binding the broad subject while ignoring "on the second floor" would
-    answer a different, larger question."""
-    slate = _slate("how many doors are on the second floor?")
-    plan = _plan(_part(slate, "IfcDoor", scope_kind=ScopeKind.ACTIVE_MODEL))
-    validation = validate_binding(plan, slate)
-    assert "modifier_silently_dropped" in _codes(validation)
-    assert validation.silently_dropped_modifiers
-
-
-def test_declaring_a_modifier_unresolved_is_accepted(slate_env):
-    """Honest declaration is allowed; silent omission is not."""
-    slate = _slate("how many doors are on the second floor?")
-    plan = BindingPlan(
-        answer_parts=[_part(slate, "IfcDoor")],
-        unresolved_modifiers=["the second floor"],
-    )
-    validation = validate_binding(plan, slate)
-    assert "modifier_silently_dropped" not in _codes(validation)
-
-
-def test_binding_a_floor_scope_candidate_satisfies_the_floor_modifier(slate_env):
-    slate = _slate("how many doors are on the second floor?")
-    band = next(c for c in slate.spatial if c.kind.value == "floor_band")
-    plan = _plan(
-        _part(
-            slate,
-            "IfcDoor",
-            scope_kind=ScopeKind.SPATIAL_CANDIDATE,
-            scope_candidate_id=band.candidate_id,
-        )
-    )
-    assert "modifier_silently_dropped" not in _codes(validate_binding(plan, slate))
-
-
-def test_a_scope_reference_needs_no_condition(slate_env):
-    """Scope references are not material, so binding nothing for them is fine."""
-    slate = _slate("how many walls are in this building?")
-    plan = _plan(_part(slate, "IfcWall"))
-    validation = validate_binding(plan, slate)
-    assert validation.valid
-    assert not validation.silently_dropped_modifiers
-
-
-# ---------------------------------------------------------------------------
-# Unaccounted question terms — the general form of the worst recorded failure
-# ---------------------------------------------------------------------------
-
-
-def test_an_unexplained_qualifier_is_rejected(slate_env):
-    """Regression guard for a defect a LIVE smoke run caught.
-
-    "How many parking spaces are there?" lexically matches `IfcSpace` on the
-    word "spaces". "parking" is not a quoted value, comparison, unit, floor
-    reference or negation, so the structural modifier check never sees it — and
-    the pipeline confidently answered with every space in the model. Any content
-    token no selected candidate explains must block the answer.
-    """
-    slate = _slate("how many parking spaces are there?")
-    plan = _plan(_part(slate, "IfcSpace"))
-    validation = validate_binding(plan, slate)
-    assert not validation.valid
-    assert "unaccounted_question_terms" in _codes(validation)
-    assert "parking" in validation.clarification()
-
-
-def test_declaring_the_qualifier_unresolved_still_blocks_the_broader_answer(slate_env):
-    """Declaring is honest, but it does not license the broader query.
-
-    §6: "no unavailable condition may be silently removed to produce a broader
-    exact result." A declaration improves the MESSAGE, never the outcome —
-    otherwise the model could unlock any over-broad answer by admitting to it.
-    """
-    slate = _slate("how many parking spaces are there?")
-    plan = BindingPlan(answer_parts=[_part(slate, "IfcSpace")], unresolved_modifiers=["parking"])
-    validation = validate_binding(plan, slate)
-    assert "unaccounted_question_terms" in _codes(validation)
-    assert "could not apply" in validation.clarification()
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "how many doors are there?",
-        "how many doors are in this building?",
-        "how many walls are in this building?",
-        "how many curtain walls are there?",
-        "show me all the doors on the second floor",
-        "which walls have a fire rating of EI60?",
-    ],
-)
-def test_ordinary_questions_are_fully_accounted_for(slate_env, question):
-    """The check must not fire on normal questions, or it blocks everything.
-
-    Each of these should bind cleanly: the subject explains its noun, a scope
-    reference explains "building", a floor span explains the level, and a bound
-    field/value explains the rest.
-    """
-    slate = _slate(question)
-    subject = slate.subjects[0]
-    conditions = []
-    if "fire rating" in question:
-        conditions = [
-            BoundCondition(
-                condition_id="c1",
-                candidate_id=_field_id(slate, "FireRating"),
-                operator=BoundOperator.EQUALS,
-                value_text="EI60",
-                source_span="EI60",
-            )
-        ]
-    kwargs = {"conditions": conditions}
-    if "second floor" in question:
-        band = next(c for c in slate.spatial if c.kind.value == "floor_band")
-        kwargs["scope_kind"] = ScopeKind.SPATIAL_CANDIDATE
-        kwargs["scope_candidate_id"] = band.candidate_id
-
-    part = AnswerPart(
-        part_id="p1",
-        request_text=question,
-        operation=OutputOperation.COUNT,
-        subject_candidate_id=subject.candidate_id,
-        **kwargs,
-    )
-    codes = _codes(validate_binding(_plan(part), slate))
-    assert "unaccounted_question_terms" not in codes, codes
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "Hur manga fonster finns det i byggnaden?",
-        "Hoeveel deuren zitten er in dit gebouw?",
-        "Combien de portes y a-t-il dans ce batiment?",
-    ],
-)
-def test_a_non_english_question_is_not_flagged_as_unaccounted(slate_env, question):
-    """Regression guard for a defect a LIVE smoke run caught.
-
-    The coverage check is English-oriented, so a Swedish question had almost
-    every token flagged as unaccounted and was refused — losing multilingual
-    support the pipeline previously had. The check only fires on a MODIFIER
-    position now, so a question this machinery cannot read simply produces no
-    flags rather than a false refusal.
-    """
-    slate = _slate(question)
-    if not slate.subjects:
-        return  # nothing recognized at all is itself a non-flagging outcome
-    plan = _plan(_part(slate, slate.subjects[0].ifc_class))
-    assert "unaccounted_question_terms" not in _codes(validate_binding(plan, slate))
-
-
-def test_the_exemption_set_contains_no_domain_nouns(slate_env):
-    """Guards the guard.
-
-    A word in `_UNREMARKABLE_TOKENS` is exempt from needing a candidate to
-    explain it. Adding a BIM noun or adjective there would silently exempt
-    exactly the qualifiers this check exists to catch — "parking" being the
-    motivating case — so the set must stay operation verbs and generic English.
-    """
-    from app.query.binding.validate import _UNREMARKABLE_TOKENS
-
-    domain_words = {
-        "parking",
-        "external",
-        "internal",
-        "fire",
-        "rating",
-        "bearing",
-        "load",
-        "door",
-        "window",
-        "wall",
-        "space",
-        "room",
-        "floor",
-        "storey",
-        "level",
-        "column",
-        "beam",
-        "slab",
-        "roof",
-        "stair",
-        "ramp",
-        "railing",
-        "material",
-        "curtain",
-        "escalator",
-        "toilet",
-        "accessible",
-        "wheelchair",
-        "thermal",
-        "acoustic",
-        "cost",
-        "area",
-        "volume",
-        "width",
-        "height",
-    }
-    assert not (_UNREMARKABLE_TOKENS & domain_words)
-
-
-def test_a_value_identified_subject_explains_its_own_noun(slate_env):
-    """ "rooms" is explained by the stored value that admitted `IfcSpace`, even
-    though no class or field is called "room"."""
-    slate = _slate("how many rooms are in this building?")
-    space = next(c for c in slate.subjects if c.ifc_class == "IfcSpace")
-    plan = _plan(_part(slate, "IfcSpace"))
-    assert "Rooms" in space.match_reason
-    assert "unaccounted_question_terms" not in _codes(validate_binding(plan, slate))
+#
+# Task 25 §3.2 retired the token/modifier heuristics that used to live in
+# `validate_binding` (`_validate_modifier_coverage`, `_validate_question_coverage`)
+# and replaced them with the typed constraint ledger, which the pipeline
+# validates separately via `ledger_validation.validate_ledger_coverage`.
+#
+# The contract those tests protected - a required modifier is never silently
+# dropped so a broader query can execute, and the "parking spaces" fabrication
+# in particular - is asserted in `tests/binding/test_ledger.py`. Keeping copies
+# here that assert the retired issue codes would only prove that retired
+# machinery is retired.
 
 
 # ---------------------------------------------------------------------------

@@ -20,27 +20,29 @@ from app.llm.client import LLMUnavailableError, OpenAIQueryClient, _is_transient
 from app.llm.schemas import BindingPlan
 
 
-class _Msg:
-    def __init__(self, parsed):
-        self.parsed = parsed
-        self.refusal = None
-
-
-class _Choice:
-    def __init__(self, parsed):
-        self.message = _Msg(parsed)
+class _UsageDetails:
+    cached_tokens = 0
+    cache_write_tokens = 0
+    reasoning_tokens = 0
 
 
 class _Usage:
-    prompt_tokens = 10
-    completion_tokens = 20
-    total_tokens = 30
+    """Responses-API usage shape read by `TokenUsage.from_response`."""
+
+    input_tokens = 10
+    output_tokens = 20
+    input_tokens_details = _UsageDetails()
+    output_tokens_details = _UsageDetails()
 
 
-class _Completion:
+class _Response:
+    """Minimal `responses.parse()` return value: what the client actually reads."""
+
     def __init__(self, parsed):
-        self.choices = [_Choice(parsed)]
+        self.output_parsed = parsed
         self.usage = _Usage()
+        self.status = "completed"
+        self.service_tier = "standard"
 
 
 class APITimeoutError(Exception):
@@ -66,12 +68,14 @@ class _FakeParse:
         self.calls += 1
         if self.calls <= self._fail_times:
             raise self._error("provider unavailable")
-        return _Completion(self._parsed)
+        return _Response(self._parsed)
 
 
 class _FakeOpenAI:
+    """Stands in for the SDK client. The pipeline uses the Responses API."""
+
     def __init__(self, parse):
-        self.chat = type("C", (), {"completions": type("D", (), {"parse": parse})()})()
+        self.responses = type("R", (), {"parse": parse})()
 
 
 def _client(parse):
@@ -169,9 +173,7 @@ def test_sdk_internal_retries_are_disabled(monkeypatch):
     class _FakeSDK:
         def __init__(self, **kwargs):
             captured.update(kwargs)
-            self.chat = type(
-                "C", (), {"completions": type("D", (), {"parse": lambda **kw: None})()}
-            )()
+            self.responses = type("R", (), {"parse": lambda **kw: None})()
 
     import app.llm.client as client_module
 

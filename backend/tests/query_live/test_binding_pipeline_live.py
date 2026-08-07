@@ -16,20 +16,73 @@ from __future__ import annotations
 
 import pytest
 
+from app.config.settings import get_settings
 from app.llm.schemas import (
     AnswerPart,
     BindingPlan,
     FactualClaim,
     GroundedAnswer,
+    LedgerDisposition,
+    LedgerDispositionKind,
     OutputOperation,
     ScopeKind,
 )
 from app.query.binding.evidence import ResultStatus
+from app.query.binding.ledger import LedgerRole, build_ledger
 from app.query.binding.pipeline import PipelineRequest, run_pipeline
 from app.query.binding.previous_scope import capture_previous_scope
-from app.query.binding.slate import SlateInputs, build_slate
+from app.query.binding.recommend import RecommendationInputs, build_recommendations
+from app.query.semantic.manifest.loader import get_semantic_manifest
 
 MODEL_IDS = (1, 2)
+
+
+def _pipeline_slate(session, model_id, question):
+    """The slate the PIPELINE actually binds against (task25 §3).
+
+    Task 24's lexical `build_slate` numbers candidates `s1`, `s2`, …; task25
+    replaced it with a universe loaded from the semantic manifest and ranked by
+    `build_recommendations`, which identifies candidates by manifest semantic id
+    (`cls:IfcWall`). A plan is validated against the slate the pipeline built, so
+    citing a lexical id refuses the binding before it can execute.
+
+    Fixtures therefore resolve candidates here, exactly as `run_pipeline` does,
+    rather than from the lexical builder.
+    """
+    manifest = get_semantic_manifest(session, model_id)
+    return build_recommendations(
+        session,
+        RecommendationInputs(question=question, source_model_id=model_id),
+        manifest,
+        build_ledger(question),
+        settings=get_settings(),
+    )
+
+
+def _dispositions(question: str, part_id: str = "p1") -> list[LedgerDisposition]:
+    """Discharge every required constraint-ledger item for a plain subject plan.
+
+    task25 §3.2 made ledger coverage a hard gate: a plan that leaves a required
+    item undisposed is refused before it executes, and never reaches the
+    answering model. These fixtures bind one subject and no filters, so each
+    required item is discharged by that subject (or by the part's scope, for a
+    scope-role item) — which is what the binder would legitimately return here.
+
+    Built from the REAL ledger rather than a hardcoded list, so a change to span
+    detection surfaces as a failure instead of being papered over.
+    """
+    return [
+        LedgerDisposition(
+            item_id=item.item_id,
+            disposition=(
+                LedgerDispositionKind.BOUND_SCOPE
+                if item.role is LedgerRole.SCOPE
+                else LedgerDispositionKind.BOUND_SUBJECT
+            ),
+            part_id=part_id,
+        )
+        for item in build_ledger(question).required_items()
+    ]
 
 
 class _Calls:
@@ -55,11 +108,15 @@ class _Calls:
 
 
 def _subject_id(session, model_id, question, ifc_class):
-    slate = build_slate(session, SlateInputs(question=question, source_model_id=model_id))
+    slate = _pipeline_slate(session, model_id, question)
     return next((c.candidate_id for c in slate.subjects if c.ifc_class == ifc_class), None)
 
 
-def _count_plan(subject_id, request_text="how many walls"):
+#: The question every subject-only fixture in this module runs.
+WALL_QUESTION = "how many walls are in this building?"
+
+
+def _count_plan(subject_id, request_text="how many walls", question=WALL_QUESTION):
     return BindingPlan(
         answer_parts=[
             AnswerPart(
@@ -70,7 +127,8 @@ def _count_plan(subject_id, request_text="how many walls"):
                 scope_kind=ScopeKind.ACTIVE_MODEL,
                 is_primary_visual=True,
             )
-        ]
+        ],
+        ledger_dispositions=_dispositions(question),
     )
 
 
@@ -171,14 +229,13 @@ def test_a_plan_level_issue_blocks_execution_entirely(live_session, model_id):
     valid part executed and returned every space in the model, reproducing the
     worst recorded failure. Plan-level issues must block everything.
     """
-    slate = build_slate(
-        live_session,
-        SlateInputs(question="how many parking spaces are there?", source_model_id=model_id),
-    )
+    slate = _pipeline_slate(live_session, model_id, "how many parking spaces are there?")
     space = next((c for c in slate.subjects if c.ifc_class == "IfcSpace"), None)
     if space is None:
         pytest.skip(f"model {model_id} offers no IfcSpace candidate for this question")
 
+    ledger = build_ledger("how many parking spaces are there?")
+    subject_item = next(i for i in ledger.required_items() if i.role is LedgerRole.SUBJECT)
     plan = BindingPlan(
         answer_parts=[
             AnswerPart(
@@ -187,7 +244,18 @@ def test_a_plan_level_issue_blocks_execution_entirely(live_session, model_id):
                 operation=OutputOperation.COUNT,
                 subject_candidate_id=space.candidate_id,
             )
-        ]
+        ],
+        # Only the subject is discharged. "parking" is deliberately left
+        # undisposed: the PART is perfectly valid and the question-level
+        # qualifier is the sole problem, which is the exact shape of the
+        # recorded failure this test guards.
+        ledger_dispositions=[
+            LedgerDisposition(
+                item_id=subject_item.item_id,
+                disposition=LedgerDispositionKind.BOUND_SUBJECT,
+                part_id="p1",
+            )
+        ],
     )
     calls = _Calls(lambda c: plan, _faithful_answer)
     outcome = run_pipeline(
@@ -210,15 +278,29 @@ def test_a_plan_level_issue_blocks_execution_entirely(live_session, model_id):
 
 @pytest.mark.parametrize("model_id", MODEL_IDS)
 def test_the_binder_never_receives_rows_identities_or_sql(live_session, model_id):
+    """§2.1: the binder sees semantics, never retrieved data.
+
+    The check is about RETRIEVAL output, not about the string "global_id". The
+    semantic manifest legitimately addresses each storey by its GlobalId — that
+    is model structure, known before any query runs, and it is how a floor scope
+    is named at all. What must never appear is a retrieved row, the identity of
+    an object the query selected, executed SQL, or a vector.
+    """
     import json
 
     subject = _subject_id(live_session, model_id, "how many walls are in this building?", "IfcWall")
     if subject is None:
         pytest.skip(f"model {model_id} contains no IfcWall")
-    _, calls = _run(live_session, model_id, lambda c: _count_plan(subject), _faithful_answer)
+    outcome, calls = _run(live_session, model_id, lambda c: _count_plan(subject), _faithful_answer)
     blob = json.dumps(calls.last_binder_context)
-    for forbidden in ("canonical_json", "global_id", "GlobalId", "SELECT ", "embedding"):
+
+    for forbidden in ("canonical_json", "SELECT ", "embedding"):
         assert forbidden not in blob
+
+    # The identities the query actually resolved are the leak that matters.
+    assert outcome.hydration.primary_global_ids, "the viewer should have identities"
+    for global_id in outcome.hydration.primary_global_ids[:50]:
+        assert global_id not in blob
 
 
 @pytest.mark.parametrize("model_id", MODEL_IDS)
@@ -254,10 +336,7 @@ def test_viewer_total_equals_the_answer_total(live_session, model_id):
 @pytest.mark.parametrize("model_id", MODEL_IDS)
 def test_a_zero_result_highlights_nothing(live_session, model_id):
     """§9: exact zero must not fall back to an unrelated highlight set."""
-    slate = build_slate(
-        live_session,
-        SlateInputs(question="how many escalators are in this building?", source_model_id=model_id),
-    )
+    slate = _pipeline_slate(live_session, model_id, "how many escalators are in this building?")
     absent = next((c for c in slate.subjects if not c.present and c.result_kind), None)
     if absent is None:
         pytest.skip(f"model {model_id} offers no absent result-kind concept")
@@ -271,7 +350,8 @@ def test_a_zero_result_highlights_nothing(live_session, model_id):
                 subject_candidate_id=absent.candidate_id,
                 is_primary_visual=True,
             )
-        ]
+        ],
+        ledger_dispositions=_dispositions("how many escalators are in this building?"),
     )
     calls = _Calls(lambda c: plan, _faithful_answer)
     outcome = run_pipeline(
@@ -354,7 +434,9 @@ def test_every_required_stage_is_measured(live_session, model_id):
         pytest.skip(f"model {model_id} contains no IfcWall")
     outcome, _ = _run(live_session, model_id, lambda c: _count_plan(subject), _faithful_answer)
     for stage in (
-        "slate_build_ms",
+        "manifest_load_ms",
+        "ledger_build_ms",
+        "recommendation_ms",
         "binding_llm_ms",
         "binding_validation_ms",
         "execution_ms",

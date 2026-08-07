@@ -5,10 +5,25 @@ from __future__ import annotations
 from app.config.settings import Settings, get_settings
 
 
-def test_defaults_use_gpt5_nano():
+def test_role_models_default_to_the_documented_cost_reduced_roster():
+    """task25 §6: three independently-configurable roles, no silent substitution.
+
+    Asserted through the `get_*_model()` accessors because those are what the
+    client actually calls — an override must be able to change the model without
+    this test needing to know which field won.
+    """
     settings = Settings(_env_file=None)
-    assert settings.planner_model == "gpt-5-nano"
-    assert settings.answer_model == "gpt-5-nano"
+    assert settings.get_binder_model() == "gpt-5.4-nano"
+    assert settings.get_correction_model() == "gpt-5-mini"
+    assert settings.get_answer_model() == "gpt-5.4-mini"
+    # The binder was historically the "planner"; the alias must still resolve.
+    assert settings.get_planner_model() == settings.get_binder_model()
+
+
+def test_a_role_override_replaces_the_default_model():
+    settings = Settings(_env_file=None, binder_model_override="gpt-5-mini")
+    assert settings.get_binder_model() == "gpt-5-mini"
+    assert settings.get_answer_model() == "gpt-5.4-mini"  # unaffected
 
 
 def test_secrets_never_appear_in_repr(monkeypatch):

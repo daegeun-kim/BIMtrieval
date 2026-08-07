@@ -121,3 +121,30 @@ def test_incompatible_embedding_dimension_rejected(live_session, monkeypatch):
 def test_empty_kind_is_not_an_incompatibility_error(live_session):
     """A source model with zero rows for a kind is not an error -- just no candidates."""
     check_compatibility(live_session, 999999, "entity")  # must not raise
+
+
+def test_a_small_top_k_still_returns_the_true_nearest_neighbours(live_session, embedding_service):
+    """Regression guard for a silent-empty-result defect (Task 32).
+
+    `rag_documents` carries ONE global HNSW index across every imported model,
+    while this search always filters to one model + kind + document type. With
+    pgvector's `hnsw.iterative_scan` off, the index scan collected its
+    neighbours GLOBALLY and only then applied that filter, so a small `top_k`
+    returned NOTHING even though thousands of documents matched — while the same
+    query at `top_k=10` was correct, because the planner happened to pick a
+    sequential scan instead. Retrieving zero candidates reads downstream as "the
+    model contains no such objects", which is the worst way for this to fail.
+
+    Asserted against the exact result, not just a row count: a scan that returns
+    three arbitrary rows is no better than returning none.
+    """
+    vec = embedding_service.embed_query("show me all doors")
+    exact = search_kind(live_session, SOURCE_MODEL_ID, "entity", vec, top_k=25, threshold=0.0)
+    assert len(exact) == 25, "the fixture model must hold at least 25 entity documents"
+
+    for top_k in (1, 3, 5):
+        got = search_kind(live_session, SOURCE_MODEL_ID, "entity", vec, top_k=top_k, threshold=0.0)
+        assert len(got) == top_k
+        assert [c.rag_document_id for c in got] == [c.rag_document_id for c in exact[:top_k]], (
+            f"top_k={top_k} did not return the true nearest neighbours"
+        )

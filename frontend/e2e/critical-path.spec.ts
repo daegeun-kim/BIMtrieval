@@ -100,6 +100,7 @@ async function stubBackend(page: Page) {
             primary_global_ids: [WALL_GUID],
           },
           evidence_summary: { basis: "exact_sql", sql_match_count: 1, notes: [] },
+          answer_explanation: explanation(),
         }),
       });
     }
@@ -116,6 +117,42 @@ function noActions() {
     role_groups: [],
     load_model_id: null,
     viewer_source_location: null,
+  };
+}
+
+/**
+ * The evidence surface a user actually sees for an answered query: the Query
+ * Explanation card (task26 §3-§5), driven by `answer_explanation`. It replaced
+ * the inline evidence disclosure this test used to assert.
+ */
+function explanation() {
+  return {
+    part_id: "p1",
+    request_label: "walls in the model",
+    operation: "count",
+    result_status: "exact",
+    presentation: "result_table",
+    answer_basis: "exact_sql",
+    interpretation: "every IfcWall in the active model",
+    retrieval_modes: ["sql"],
+    exact_total: 1,
+    class_breakdown: { IfcWall: 1 },
+    distribution: [],
+    aggregate: null,
+    relationship_endpoint_total: null,
+    graph: null,
+    presentation_fallback_reason: null,
+    chart_unit: null,
+    limitation: null,
+    known_parts: [],
+    unknown_parts: [],
+    shown_identity_count: 1,
+    true_result_count: 1,
+    identities_truncated: false,
+    groups: [],
+    rows: [
+      { global_id: WALL_GUID, ifc_class: "IfcWall", name: "Smoke Wall", storey_name: "Storey" },
+    ],
   };
 }
 
@@ -163,12 +200,13 @@ test("critical path: load, ask, evidence, clear chat, reset app", async ({ page 
   await composer.press("Enter");
   await expect(page.locator(".msg-assistant .md")).toContainText("one wall");
 
-  // evidence collapsed by default, expandable, citation present
-  const toggle = page.locator(".ev-toggle");
-  await expect(toggle).toContainText("sql");
-  await expect(page.locator(".cite-primary")).toHaveCount(0); // collapsed
-  await toggle.click();
-  await expect(page.locator(".cite-primary")).toContainText("Smoke Wall");
+  // evidence: the Query Explanation card appears with the answered result,
+  // naming what was asked and listing the retrieved object
+  const explain = page.locator(".explain-panel");
+  await expect(explain).toBeVisible();
+  await expect(explain).toContainText("Query explanation");
+  await expect(explain).toContainText("walls in the model");
+  await expect(explain).toContainText("Smoke Wall");
 
   // Clear Chat: messages go, model stays
   await page.getByLabel("Clear chat").click();
@@ -217,7 +255,10 @@ test("floor plan mode: enter a floor plan and return to the exact 3D view", asyn
   await expect(threeD).toHaveAttribute("aria-pressed", "false");
   expect(await page.locator("canvas").count()).toBe(canvasCount);
   await expect(page.locator(".msg")).toHaveCount(0);
-  await expect(page.locator(".explanation-panel")).toHaveCount(0);
+  // Entering a floor plan is a pure view change: no chat turn, no query, and so
+  // no explanation card. (`.explain-panel` is the real class — the selector this
+  // line used to carry, `.explanation-panel`, matched nothing and proved nothing.)
+  await expect(page.locator(".explain-panel")).toHaveCount(0);
 
   // Return to 3D.
   await threeD.click();

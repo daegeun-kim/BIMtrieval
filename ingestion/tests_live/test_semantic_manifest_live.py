@@ -1,8 +1,16 @@
 """Manifest generation against the real imported models (task25 §9.1).
 
-Self-skipping: if PostgreSQL is unreachable the whole module skips green, the
-same convention the backend's `query_live` package uses. Nothing here writes to
-the database — every statement is a read.
+This module lives in the separately named `tests_live/` root, NOT in `tests/`,
+because it resolves the imported source models at collection time and therefore
+connects to PostgreSQL as soon as it is imported. The default `pytest` run
+(`testpaths = ["tests"]`) never collects it, so the fast offline gate stays free
+of database access. Run it explicitly:
+
+    pytest tests_live
+
+Self-skipping: if PostgreSQL is unreachable the whole module skips green, so an
+explicit live run without a database is honest rather than red. Nothing here
+writes to the database — every statement is a read.
 
 Assertions are written as INVARIANTS over whatever models happen to be imported,
 not as expectations about a particular file, so they keep their meaning as the

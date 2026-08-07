@@ -24,7 +24,6 @@ import json
 from typing import Any
 
 from app.config.settings import Settings
-from app.llm.serialization import dumps_context
 from app.query.binding.ledger import ConstraintLedger
 from app.query.binding.schemas import CandidateSlate
 from app.query.semantic.manifest import SemanticManifest

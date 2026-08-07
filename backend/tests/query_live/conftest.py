@@ -4,8 +4,16 @@ uses `DATABASE_URL` when set — the dedicated `bim_rag_query_ro` read-only
 role created by the ingestion-owned `bim_rag.db_admin.bootstrap_readonly_role`,
 not the ingestion superuser connection. Every test in this package is read-only.
 
-The whole package skips (not fails) if the database is unreachable, so
-`pytest` stays green in environments without this project's local Postgres.
+Every test in this package carries the `live` marker, which the root pytest
+configuration deselects by default — a database-dependent check must never enter
+the fast offline gate silently. Run this package explicitly:
+
+    poetry run pytest -m live
+
+If the database is unreachable the package skips (not fails), so an explicit
+live run in an environment without this project's local Postgres stays honest
+rather than red. The connectivity probe is a fixture, not a collection hook, so
+a default offline run never opens a connection at all.
 """
 
 from __future__ import annotations
@@ -19,13 +27,17 @@ SOURCE_MODEL_ID = 1  # the single ingested Schependomlaan model
 
 
 def pytest_collection_modifyitems(config, items):
-    ok, _ = check_connectivity()
-    if ok:
-        return
-    skip_marker = pytest.mark.skip(reason="live database not reachable")
+    """Mark the whole package `live` so the default gate deselects it."""
     for item in items:
         if "query_live" in str(item.fspath):
-            item.add_marker(skip_marker)
+            item.add_marker(pytest.mark.live)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _require_live_database():
+    ok, detail = check_connectivity()
+    if not ok:
+        pytest.skip(f"live database not reachable: {detail}")
 
 
 @pytest.fixture(scope="module")

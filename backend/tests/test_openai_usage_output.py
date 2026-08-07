@@ -76,8 +76,17 @@ def test_no_usage_block_when_no_call_was_made(logs):
 
 
 def test_usage_prints_only_the_three_aggregates(logs):
+    """The usage block itself stays the three aggregates and nothing else.
+
+    task25 §6.1 later added a SEPARATE `[OpenAI cost]` record beside it, so this
+    asserts against that one record — sliced to the next log line — rather than
+    the whole captured stream, which would now also contain the cost block.
+    """
     _emit_question_usage([_call("planner", 10, 5)])
-    block = logs.text[logs.text.index("[OpenAI usage]") :]
+
+    records = [r.getMessage() for r in logs.records]
+    block = next(m for m in records if m.startswith("[OpenAI usage]"))
+
     # exactly the three numbers — no per-call breakdown, model names, or cost
     assert "prompt_tokens: 10" in block
     assert "completion_tokens: 5" in block

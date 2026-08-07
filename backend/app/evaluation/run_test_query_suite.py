@@ -519,22 +519,26 @@ def _write_report(
     output: Path = _OUTPUT,
     header: list[str] | None = None,
 ) -> None:
-    lines = list(header) if header is not None else [
-        "# Query & Answer Log — v2 (Task 24 pipeline)",
-        "",
-        "Regenerated from `test_query.md` against the Task 24 model-aware binding pipeline.",
-        "Queries and expected values are identical to v1; answers and measurements are new.",
-        "",
-        "Answers are recorded verbatim as returned to the user. Expected values are DB ground",
-        f"truth. Captured live (`gpt-5-nano` binder + answerer) on {run_date}.",
-        "",
-        "Metrics line: `llm_calls` should be 2 for every answered active-model question;",
-        "`db` is the database statement count; `FALLBACK USED` marks a deterministic answer",
-        "returned because the model's own answer failed grounding validation.",
-        "",
-        "---",
-        "",
-    ]
+    lines = (
+        list(header)
+        if header is not None
+        else [
+            "# Query & Answer Log — v2 (Task 24 pipeline)",
+            "",
+            "Regenerated from `test_query.md` against the Task 24 model-aware binding pipeline.",
+            "Queries and expected values are identical to v1; answers and measurements are new.",
+            "",
+            "Answers are recorded verbatim as returned to the user. Expected values are DB ground",
+            f"truth. Captured live (`gpt-5-nano` binder + answerer) on {run_date}.",
+            "",
+            "Metrics line: `llm_calls` should be 2 for every answered active-model question;",
+            "`db` is the database statement count; `FALLBACK USED` marks a deterministic answer",
+            "returned because the model's own answer failed grounding validation.",
+            "",
+            "---",
+            "",
+        ]
+    )
     by_section: dict[str, list[Outcome]] = {}
     for outcome in outcomes:
         for section in SECTIONS:
@@ -556,8 +560,8 @@ def _write_report(
 
 def _v3_header(run_date: str, planner: str, answerer: str) -> list[str]:
     from app.config.settings import get_settings
-    from app.llm.prompts import BINDER_PROMPT_VERSION, GROUNDED_ANSWERER_PROMPT_VERSION
     from app.llm.pricing import PRICING_REGISTRY_VERSION, PRICING_SOURCE_URL, get_rates
+    from app.llm.prompts import BINDER_PROMPT_VERSION, GROUNDED_ANSWERER_PROMPT_VERSION
 
     settings = get_settings()
 
@@ -584,15 +588,11 @@ def _v3_header(run_date: str, planner: str, answerer: str) -> list[str]:
         "Answers are recorded verbatim as returned to the user. Expected values are DB ground",
         f"truth. Captured live on {run_date} with the cost-reduced roster:",
         "",
-        _rate_line(
-            "binder", settings.get_binder_model(), settings.binder_reasoning_effort
-        ),
+        _rate_line("binder", settings.get_binder_model(), settings.binder_reasoning_effort),
         _rate_line(
             "correction", settings.get_correction_model(), settings.correction_reasoning_effort
         ),
-        _rate_line(
-            "answer", settings.get_answer_model(), settings.answer_reasoning_effort
-        ),
+        _rate_line("answer", settings.get_answer_model(), settings.answer_reasoning_effort),
         f"- prompts: `{BINDER_PROMPT_VERSION}` binder, "
         f"`{GROUNDED_ANSWERER_PROMPT_VERSION}` answerer",
         "",

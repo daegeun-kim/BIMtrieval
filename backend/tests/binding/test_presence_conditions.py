@@ -23,7 +23,7 @@ from app.llm.schemas import (
 from app.query.binding.closure import resolve_closure
 from app.query.binding.compile import compile_predicate
 from app.query.binding.slate import SlateInputs, build_slate
-from app.query.sql.schemas import FilterCondition, FilterGroup, Operator
+from app.query.sql.schemas import FilterCondition, Operator
 
 from .conftest import SYNTHETIC_MODEL_ID
 

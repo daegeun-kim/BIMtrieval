@@ -215,7 +215,7 @@ def test_a_lowest_band_reference_labels_every_band_floor_1_upward(api, monkeypat
 
 
 def test_labels_agree_with_the_natural_language_floor_interpretation(api, monkeypatch):
-    """"the second floor" and the button labelled "Floor 2" are the same band."""
+    """ "the second floor" and the button labelled "Floor 2" are the same band."""
     _storeys(
         monkeypatch,
         ("D1", "kelder", -3.2),

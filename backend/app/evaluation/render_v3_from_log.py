@@ -196,9 +196,7 @@ def _format_case(case, record: dict) -> str:
     per_call = [_call_cost(c) for c in calls]
     request_cost = cost_for_request(per_call) if per_call else None
     cost_str = request_cost.formatted() if request_cost else "$0.000000"
-    role_bits = " · ".join(
-        f"{c.get('role', '?')}={_call_cost(c).formatted()}" for c in calls
-    )
+    role_bits = " · ".join(f"{c.get('role', '?')}={_call_cost(c).formatted()}" for c in calls)
     prompt_tokens = sum(int(c.get("prompt_tokens", 0) or 0) for c in calls)
     completion_tokens = sum(int(c.get("completion_tokens", 0) or 0) for c in calls)
     modes = ",".join(
