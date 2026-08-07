@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from bim_rag.config import IFC_SOURCE_PATH
+from bim_rag.config import resolve_ifc_path
 from bim_rag.pipeline_structured import ifc_to_db
 from bim_rag.reporting import print_report
 
@@ -23,13 +23,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--ifc-path",
-        default=str(IFC_SOURCE_PATH),
-        help="Path to the IFC file (default: project source IFC).",
+        required=True,
+        help="Path to an .ifc file, or a filename inside the repository's ifc/ folder.",
     )
     args = parser.parse_args()
 
     try:
-        report = ifc_to_db(args.ifc_path)
+        report = ifc_to_db(str(resolve_ifc_path(args.ifc_path)))
         print_report(report, label="Stage 1 Structured Import Report")
     except Exception as exc:
         print(f"[Stage 1] FAILED: {exc}", file=sys.stderr)

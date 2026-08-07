@@ -34,8 +34,8 @@ from sqlalchemy.orm import Session
 
 from bim_rag.config import (
     CUDA_BATCH_SIZE,
-    IFC_SOURCE_PATH,
     THREAD_LIMIT,
+    resolve_ifc_path,
     sanitize_db_error,
     validate_batch_size,
 )
@@ -713,8 +713,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--ifc-path",
-        default=str(IFC_SOURCE_PATH),
-        help="Path to the IFC file (default: project source IFC).",
+        required=True,
+        help="Path to an .ifc file, or a filename inside the repository's ifc/ folder.",
     )
     args = parser.parse_args()
 
@@ -722,7 +722,7 @@ def main() -> None:
     from bim_rag.pipeline_structured import ifc_to_db
 
     try:
-        report = ifc_to_db(args.ifc_path)
+        report = ifc_to_db(str(resolve_ifc_path(args.ifc_path)))
         print_report(report, label="Full Pipeline Report (Stage 2 CLI)")
     except Exception as exc:
         print(f"[Stage 2] FAILED: {exc}", file=sys.stderr)

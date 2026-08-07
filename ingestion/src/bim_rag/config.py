@@ -97,4 +97,39 @@ def validate_batch_size(n: int) -> int:
     return n
 
 
-IFC_SOURCE_PATH = _INGESTION_ROOT / "ifc_original" / "IFC Schependomlaan incl planningsdata.ifc"
+def get_ifc_dir() -> Path:
+    """The one documented drop location for local IFC models: `<repo>/ifc/`.
+
+    A bare filename passed to `bim-import` is resolved here, so a user never has
+    to know an internal folder convention — but any absolute or relative path
+    also works, because a 170 MB model should not have to be copied to be
+    ingested. Overridable with `ifc_dir` in `.env` for a models folder that
+    lives outside the repository.
+    """
+    load_dotenv(_ENV_FILE, override=False)
+    configured = os.environ.get("ifc_dir") or os.environ.get("IFC_DIR")
+    if configured:
+        return Path(configured)
+    return _ENV_FILE.parent / "ifc"
+
+
+def resolve_ifc_path(reference: str | Path) -> Path:
+    """Resolve a user-supplied IFC reference to an existing file.
+
+    Accepts a path (absolute or relative to the working directory) or a bare
+    filename located in `<repo>/ifc/`. Raises `FileNotFoundError` naming both
+    places it looked, so the failure tells the user what to do next.
+    """
+    candidate = Path(reference)
+    if candidate.is_file():
+        return candidate
+
+    ifc_dir = get_ifc_dir()
+    in_ifc_dir = ifc_dir / candidate.name
+    if in_ifc_dir.is_file():
+        return in_ifc_dir
+
+    raise FileNotFoundError(
+        f"IFC source not found: {reference!r}. Looked for it as a path, and as "
+        f"{in_ifc_dir}. Put the file in {ifc_dir} or pass its full path."
+    )

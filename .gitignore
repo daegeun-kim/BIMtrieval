@@ -35,6 +35,21 @@ frontend_openapi_snapshot.json
 
 # Local dev launcher runtime record (Task 12) — ephemeral PIDs/ports, no secrets.
 .runtime/
-ingestion/ifc_original/FOJAB_Landsarkivet.ifc
-ingestion/ifc_original/SampleArchitecture.ifc
-ingestion/ifc_original/Wellness_center_Sama.ifc
+
+# User IFC models (Task 34). `ifc/` is the documented drop location for local
+# building models: large (21-170 MB here), usually licensed, and never
+# redistributed by this repository. Only its README is tracked. The tests use
+# the 1.6 KB frontend/tests/fixtures/smoke-wall.ifc fixture instead.
+ifc/*
+!ifc/README.md
+
+# Build artifacts — regenerable, and none belong in version control.
+build/
+dist/
+test-results/
+
+# Frontend build output and incremental typecheck state — regenerable.
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/

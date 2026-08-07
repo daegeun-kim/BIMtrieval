@@ -17,14 +17,33 @@ dependencies = [
 ]
 
 [project.scripts]
+# The two commands a user needs (Task 34).
+bim-db-init = "bim_rag.db_admin.init_db:main"
+bim-import = "bim_rag.cli:main"
+# Lower-level stage entry points, kept for development and debugging.
+# (`bim-pipeline` was removed in Task 34: it imported `run_stage1`/`run_stage2`,
+#  which no longer exist, so it had been a broken entry point. `bim-import`
+#  runs the same complete workflow.)
 bim-stage1 = "bim_rag.stage1_import:main"
 bim-stage2 = "bim_rag.stage2_embed:main"
-bim-pipeline = "bim_rag.pipeline:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The schema DDL and the numbered migrations are RUNTIME data, not documentation:
+# `bim-db-init` reads bim_rag/schema/migrations/*.sql to decide what to apply.
+# Without this, a non-editable install (which is exactly what the container
+# does) ships the package with zero migrations and silently sets up nothing.
+# The local editable install hid this, because it points at the source tree.
+[tool.setuptools.package-data]
+bim_rag = ["schema/*.sql", "schema/migrations/*.sql"]
+
 [tool.pytest.ini_options]
+# The DEFAULT run is the fast offline gate: `tests/` never opens a database
+# connection, loads an embedding model, or calls OpenAI. Live, database-backed
+# checks live in the separately named `tests_live/` root and are only collected
+# when asked for explicitly (`pytest tests_live`), so they can never enter the
+# default path silently.
 testpaths = ["tests"]
 addopts = "-v"
 
