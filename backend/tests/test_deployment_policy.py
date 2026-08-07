@@ -169,3 +169,121 @@ def test_self_hosting_docs_state_the_public_repo_versus_your_instance_boundary()
     assert "There is no hosted demo, and this is a decision rather than an omission" in prose
     assert "BIMtrieval has **no** authentication" in prose or "no authentication" in prose
     assert "your own key" in prose
+
+
+# ---------------------------------------------------------------------------
+# Image boundaries (see docs/container-boundaries.md)
+# ---------------------------------------------------------------------------
+
+
+def test_no_user_data_directory_is_copied_into_any_image():
+    """IFC models, embeddings, artifacts and manifests stay on the user's disk.
+
+    An image is pushed, pulled, cached and shared. A building model baked into
+    one is somebody's property travelling somewhere nobody intended, and a
+    database dump in a layer is a breach with a version tag.
+    """
+    forbidden = ("ifc/", "model_assets", "model_semantics", ".env", "pgdata")
+    for dockerfile in (_REPO_ROOT / "docker").glob("*.Dockerfile"):
+        for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("COPY", "ADD")) and "--from=" not in stripped:
+                for name in forbidden:
+                    assert name not in stripped, f"{dockerfile.name}: {stripped}"
+
+
+def test_the_build_context_excludes_generated_artifacts():
+    entries = {
+        line.strip()
+        for line in (_REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    }
+    for required in ("model_assets/", "model_semantics/", "ifc/", "*.ifc", ".env"):
+        assert required in entries, f".dockerignore is missing {required!r}"
+
+
+def test_ingestion_is_explicit_and_never_starts_with_up(base_compose):
+    """`docker compose up` must not ingest anything. Parsing a 170 MB model is
+    expensive and writes to the corpus; it happens because someone asked."""
+    assert base_compose["services"]["import"]["profiles"] == ["tools"]
+
+
+def test_no_service_watches_a_directory_or_auto_imports(base_compose):
+    for name, service in base_compose["services"].items():
+        command = str(service.get("command", "")) + str(service.get("entrypoint", ""))
+        assert "watch" not in command.lower(), name
+
+
+def test_schema_setup_uses_the_light_image_not_the_ingestion_one(base_compose):
+    """Setup runs on every `up`. On the ingestion image that meant pulling
+    2.3 GB to execute a handful of DDL statements."""
+    setup = base_compose["services"]["setup"]
+    assert setup["build"]["dockerfile"] == "docker/dbinit.Dockerfile"
+    assert base_compose["services"]["import"]["build"]["dockerfile"] == (
+        "docker/ingestion.Dockerfile"
+    )
+    # Schema setup neither reads an IFC nor writes an artifact.
+    assert not setup.get("volumes")
+
+
+def test_the_dbinit_image_cannot_regain_the_heavy_stack():
+    """Installed with --no-deps and an explicit dependency list, so ingestion's
+    dependency list growing cannot silently re-add IfcOpenShell or torch."""
+    text = (_REPO_ROOT / "docker" / "dbinit.Dockerfile").read_text(encoding="utf-8")
+    assert "--no-deps ./ingestion" in text
+    for heavy in ("ifcopenshell", "torch", "sentence-transformers"):
+        assert f"pip install {heavy}" not in text
+
+
+def test_db_init_imports_without_ifcopenshell_torch_or_transformers():
+    """The load-bearing assertion behind the split image.
+
+    If a future edit makes db_admin.init_db reach a heavy dependency, this fails
+    here in the offline gate rather than at `docker compose up`.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys\n"
+        "for m in ('ifcopenshell', 'torch', 'sentence_transformers'):\n"
+        "    sys.modules[m] = None\n"
+        "sys.path.insert(0, r'%s')\n"
+        "import bim_rag.db_admin.init_db\n"
+        "import bim_rag.db_admin.migrations as g\n"
+        "assert g.discover(), 'no migrations found'\n"
+        "print('ok')\n"
+    ) % (_REPO_ROOT / "ingestion" / "src")
+
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert result.returncode == 0, (
+        "db-init's import chain reaches a heavy dependency:\n" + result.stderr[-1500:]
+    )
+
+
+def test_the_backend_image_keeps_the_query_embedding_runtime():
+    """RAG needs it. A smaller backend image that cannot answer semantic
+    questions would be a smaller image and a worse product."""
+    text = (_REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+    assert "torch" in text
+    assert "sentence-transformers" in text
+    # From the CPU index: the container must run without the owner's GPU.
+    assert "download.pytorch.org/whl/cpu" in text
+
+
+def test_model_weights_are_cached_in_a_volume_not_baked_in(base_compose):
+    backend = base_compose["services"]["backend"]
+    assert any("hfcache" in str(v) for v in backend["volumes"])
+    text = (_REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+    # Downloading weights at build time would put them in a layer.
+    assert "snapshot_download" not in text
+    assert "SentenceTransformer(" not in text
+
+
+def test_the_container_validation_fixture_is_small_and_ours():
+    """Validate the container path with this, not a licensed building model."""
+    fixture = _REPO_ROOT / "frontend" / "tests" / "fixtures" / "smoke-wall.ifc"
+    assert fixture.is_file()
+    assert fixture.stat().st_size < 50_000, "the validation fixture must stay tiny"
+
+    boundaries = (_REPO_ROOT / "docs" / "container-boundaries.md").read_text(encoding="utf-8")
+    assert "smoke-wall.ifc" in boundaries

@@ -473,8 +473,58 @@ refused on IPv6 against a perfectly healthy container. Both healthchecks now
 probe `127.0.0.1` explicitly. Static validation could not have caught this —
 the config was valid and the service worked; only the probe was wrong.
 
-Remaining owner steps: database persistence across `down`/`up`, and clean
-teardown with `down -v`. The import was still embedding when this was recorded.
+### 4.6 Data boundaries and the split setup image
+
+Enforced by tests and written up in `docs/container-boundaries.md`.
+
+**Nothing user-owned enters an image.** IFC models, corpus embeddings, viewer
+artifacts, semantic manifests, database contents and `.env` live on disk or in
+volumes. Verified against the *built* images, not just the config: zero hits for
+each in all three. The only `.ifc` files present are IfcOpenShell's own bundled
+schema fixtures -- library data, not building models. Model weights download at
+runtime into the `hfcache` volume rather than being baked into a layer.
+
+**Ingestion stays explicit.** The `import` service sits behind the `tools`
+profile, so `docker compose up` never triggers it, and `./ifc` is mounted `:ro`
+-- a container can read a model and cannot alter it. No watcher, no auto-import,
+no upload endpoint.
+
+**Schema setup was moved off the ingestion image.** It runs on every `up`, and
+it was pulling 2.3 GB to execute a handful of DDL statements. `bim-db-init`
+needs a driver and the models -- not IfcOpenShell to parse geometry or torch to
+embed. `docker/dbinit.Dockerfile` installs four packages explicitly and the
+project with `--no-deps`, so it cannot silently regain the heavy stack when
+ingestion's dependencies grow: **2.3 GB -> 288 MB**. A test imports
+`db_admin.init_db` with `ifcopenshell`, `torch` and `sentence_transformers` made
+unimportable, so a future heavy import fails the offline gate rather than the
+container build.
+
+**The backend keeps its embedding runtime.** 3.88 GB, mostly torch and
+sentence-transformers, and they stay: semantic retrieval must embed the question
+with the same model the corpus used, and a smaller backend that cannot answer
+semantic questions would be a worse product. Only the local `poetry install`
+omits them, for test speed; the container always installs the CPU build.
+
+**Container validation uses the 1.6 KB `smoke-wall.ifc` fixture**, which is
+synthetic and carries no third-party licence. It exercises the same path --
+parse, structure, manifest, embed, catalog -- and reports `fully_query_ready:
+true` in seconds. Validating with a real 21 MB model took over an hour of CPU
+embedding to prove the same thing, and committing one for convenience would put
+a licensed building back in version control.
+
+### 4.7 Full-cycle results
+
+| Check | Result |
+| --- | --- |
+| Fresh `up` on an empty database (65 MB setup image) | `1 applied: ['0001_...']`, all services healthy |
+| Fixture import via `run --rm import` | exit 0, `fully_query_ready: true`, 0 warnings |
+| Persistence across `down` / `up` | 7,585 documents before and after; `setup` re-ran idempotently |
+| `down -v` | Both volumes and all containers removed |
+| Image content audit | No IFC, embeddings, artifacts, manifests or `.env` in any image |
+
+Task 35 is complete. The only unvalidated container path left is the production
+overlay under sustained load, which is a deployment concern rather than a build
+one.
 
 ---
 

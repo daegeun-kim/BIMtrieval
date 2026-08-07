@@ -64,20 +64,21 @@ services:
   # -------------------------------------------------------------------------
   # Schema setup — runs once, then exits
   # -------------------------------------------------------------------------
+  # Schema setup runs on every `up`, so it gets its own SMALL image. Preparing a
+  # schema needs a database driver and the models; it does not need IfcOpenShell
+  # or torch, which is why this is not the ingestion image.
   setup:
     build:
       context: .
-      dockerfile: docker/ingestion.Dockerfile
+      dockerfile: docker/dbinit.Dockerfile
     depends_on:
       db:
         condition: service_healthy
     environment:
       db_url: *db-url
-      model_semantics_root: /app/model_semantics
-    volumes:
-      - ./model_semantics:/app/model_semantics
-    # Idempotent: creates the extension and tables, applies pending migrations,
-    # seeds catalog metadata. Safe on every `up`.
+    # No volumes: schema setup neither reads an IFC file nor writes an artifact.
+    # Idempotent — creates the extension and tables, applies pending migrations,
+    # seeds catalog metadata — so it is safe on every `up`.
     command: ["bim-db-init"]
     restart: "no"
 

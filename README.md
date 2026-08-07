@@ -441,6 +441,7 @@ docker compose down -v
 | [`docs/self-hosting.md`](docs/self-hosting.md) | Running your own instance, security posture, backup, cost |
 | [`specs/`](specs/) | Twelve numbered blueprints — the design record, readable without the code |
 | [`docs/architecture_v004.md`](docs/architecture_v004.md) | RAG path, including the similarity-threshold calibration |
+| [`docs/container-boundaries.md`](docs/container-boundaries.md) | What is and is not in an image, and why ingestion is explicit |
 | [`ifc/README.md`](ifc/README.md) | Where local IFC models go, and why there is no upload button |
 | [`AGENTS.md`](AGENTS.md) | Canonical instructions for AI assistants working in this repository |
 

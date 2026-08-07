@@ -107,6 +107,14 @@ Nothing but the question text and retrieved evidence leaves your machine, and
 that goes to one place: OpenAI's API, called by the backend with your key. The
 frontend never contacts OpenAI, never sees the key, and never asks for one.
 
+## What is never in an image
+
+Your IFC models, the corpus embeddings, viewer artifacts, semantic
+manifests, database contents and `.env` stay on your disk and in volumes —
+never in a layer that could be pushed or shared. Ingestion is an explicit
+command against a read-only mount, so a container can read your models and
+cannot alter them. See [`container-boundaries.md`](container-boundaries.md).
+
 ## Backup
 
 ```bash
