@@ -1,0 +1,164 @@
+# BIMtrieval — one-command local environment.
+#
+#     cp .env.example .env      # once: add your own OPENAI_API_KEY
+#     docker compose up --build
+#
+# Brings up PostgreSQL + pgvector, runs the schema setup, starts the read-only
+# query backend, and serves the viewer at http://localhost:5173.
+#
+# Importing a model is a separate, explicit step against a local file:
+#
+#     docker compose run --rm import "My Building.ifc"
+#
+# ---------------------------------------------------------------------------
+# On secrets
+# ---------------------------------------------------------------------------
+# `.env` is read by Compose at RUNTIME for variable substitution only. No
+# credential is ever baked into an image layer, echoed to a log, or committed.
+# `OPENAI_API_KEY` is yours: it reaches only the backend container, which is the
+# only component that calls OpenAI.
+#
+# The database credentials below are LOCAL-ONLY defaults for a stack whose
+# Postgres port is not published to the host at all. Task 38's production
+# profile requires them to be set explicitly instead.
+
+name: bimtrieval
+
+# ---------------------------------------------------------------------------
+# Shared fragments
+# ---------------------------------------------------------------------------
+x-db-env: &db-env
+  POSTGRES_USER: ${POSTGRES_USER:-bimtrieval}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bimtrieval_local_dev}
+  POSTGRES_DB: ${POSTGRES_DB:-bimtrieval}
+
+# The container-internal DSN. Deliberately NOT taken from the user's `.env`:
+# that file's `db_url` points at their host Postgres (`localhost:5432`), which
+# is not this stack's database. Environment variables take precedence over the
+# `.env` file in both applications' settings loaders, so this always wins.
+x-db-url: &db-url
+  postgresql://${POSTGRES_USER:-bimtrieval}:${POSTGRES_PASSWORD:-bimtrieval_local_dev}@db:5432/${POSTGRES_DB:-bimtrieval}
+
+services:
+  # -------------------------------------------------------------------------
+  # PostgreSQL + pgvector
+  # -------------------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment: *db-env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not published. Nothing outside this network needs it, and an exposed
+    # database with a default password is exactly the mistake this avoids.
+    # Uncomment to inspect with psql from the host:
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bimtrieval} -d ${POSTGRES_DB:-bimtrieval}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # -------------------------------------------------------------------------
+  # Schema setup — runs once, then exits
+  # -------------------------------------------------------------------------
+  setup:
+    build:
+      context: .
+      dockerfile: docker/ingestion.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      db_url: *db-url
+      model_semantics_root: /app/model_semantics
+    volumes:
+      - ./model_semantics:/app/model_semantics
+    # Idempotent: creates the extension and tables, applies pending migrations,
+    # seeds catalog metadata. Safe on every `up`.
+    command: ["bim-db-init"]
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # Read-only query backend
+  # -------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    environment:
+      # This stack runs a single-role local database, so the backend's
+      # DATABASE_URL is the same DSN. The dedicated read-only role is a
+      # production concern — see Task 38's profile and `bim-db-init
+      # --with-readonly-role`.
+      DATABASE_URL: *db-url
+      db_url: *db-url
+      # Absent or empty is a supported, documented state: the app starts, the
+      # viewer and catalog work, and question answering reports that no key is
+      # configured rather than fabricating an answer.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VIEWER_ASSET_ROOT: /app/model_assets
+      MODEL_SEMANTICS_ROOT: /app/model_semantics
+      CORS_ALLOW_ORIGINS: '["http://localhost:5173"]'
+    volumes:
+      - ./model_assets:/app/model_assets:ro
+      - ./model_semantics:/app/model_semantics:ro
+      # Downloaded embedding weights persist across restarts instead of being
+      # re-fetched, and stay out of the image.
+      - hfcache:/app/.cache/huggingface
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # -------------------------------------------------------------------------
+  # Viewer + chat UI
+  # -------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        # The browser resolves this, so it is the published host port.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5173:80"
+
+  # -------------------------------------------------------------------------
+  # On-demand IFC import (tools profile — never starts with `up`)
+  # -------------------------------------------------------------------------
+  #     docker compose run --rm import "My Building.ifc"
+  #
+  # Reads from the host's ifc/ folder, mounted read-only: the import can never
+  # modify the source model.
+  import:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: docker/ingestion.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      db_url: *db-url
+      model_semantics_root: /app/model_semantics
+      ifc_dir: /app/ifc
+    volumes:
+      - ./ifc:/app/ifc:ro
+      - ./model_semantics:/app/model_semantics
+      - hfcache:/app/.cache/huggingface
+    entrypoint: ["bim-import"]
+
+volumes:
+  pgdata:
+  hfcache:

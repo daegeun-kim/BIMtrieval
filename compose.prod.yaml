@@ -1,0 +1,88 @@
+# Production overlay for a self-hosted BIMtrieval instance.
+#
+#     docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+#
+# A small, deliberate extension of compose.yaml — not a second stack. It changes
+# five things: credentials become mandatory, containers are hardened, restart
+# policy survives a reboot, resources are bounded, and nothing developer-facing
+# is left enabled.
+#
+# ---------------------------------------------------------------------------
+# What this is NOT
+# ---------------------------------------------------------------------------
+# This does not deploy a public, multi-tenant service, and there is no hosted
+# BIMtrieval that answers questions on the author's OpenAI account. This profile
+# runs YOUR instance, on YOUR machine, with YOUR key, against YOUR building
+# models. See docs/self-hosting.md for the reasoning.
+
+services:
+  db:
+    # No default. `docker compose up` fails loudly if these are unset rather
+    # than quietly running a production database on a password published in a
+    # public Git repository.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  setup:
+    environment:
+      db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Developer diagnostics stay off. `/dev/*` exposes binding internals and
+      # is not an authenticated surface.
+      ENABLE_DEV_ENDPOINTS: "false"
+      BIM_RAG_TRACE: "0"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:5173"]}
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      # The filesystem is read-only; these are the only paths that need writes.
+      - /tmp
+      - /app/logs
+    deploy:
+      resources:
+        limits:
+          # The embedding model is the memory floor here, not the API.
+          memory: 4g
+          cpus: "2.0"
+
+  frontend:
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  import:
+    environment:
+      db_url: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    security_opt:
+      - no-new-privileges:true
