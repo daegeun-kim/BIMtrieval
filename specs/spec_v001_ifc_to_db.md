@@ -7,19 +7,21 @@ Task 09, all active ingestion code and assets are owned by the independent `inge
 project:
 
 ```text
+ifc/                        # local IFC models, at the repository root (Task 34)
 ingestion/
 ├── environment.yml
 ├── pyproject.toml
-├── ifc_original/
 ├── notebooks/
 ├── src/bim_rag/
-└── tests/
+├── tests/                  # offline gate
+└── tests_live/             # database-backed, separately named
 ```
 
-Any later examples using root `src/bim_rag/`, `tests/`, `notebooks/`, `ifc_original/`,
-`environment.yml`, or `pyproject.toml` must be read using the corresponding path under
-`ingestion/`. Those old paths document the original implementation milestone; they are not
-active project locations.
+Any later examples using root `src/bim_rag/`, `tests/`, `notebooks/`, `environment.yml`,
+or `pyproject.toml` must be read using the corresponding path under `ingestion/`. Those
+old paths document the original implementation milestone; they are not active project
+locations. Likewise `ingestion/ifc_original/`, which Task 34 replaced with `ifc/` at the
+repository root.
 
 The ingestion application is independent from `backend/` and `frontend/`. It may write the
 five BIM data tables and stored vectors, but it must not import or invoke backend/frontend
@@ -48,10 +50,11 @@ This specification covers IFC ingestion and vector storage only. It does not inc
 
 ### 2.1 Source IFC
 
-Use this exact file:
+The reference model is `IFC Schependomlaan incl planningsdata.ifc`, supplied as a **local path** — never
+an absolute path baked into the repository, and never a browser upload:
 
 ```text
-C:\Users\kdgki\Desktop\MSCDP\Projects\BIM_RAG\ingestion\ifc_original\IFC Schependomlaan incl planningsdata.ifc
+<repository root>/ifc/IFC Schependomlaan incl planningsdata.ifc
 ```
 
 The source IFC is authoritative and must never be edited, rewritten, repaired in place, renamed, or moved.
@@ -474,7 +477,8 @@ Task 01 implemented the full v001 pipeline code without executing database opera
 | `src/bim_rag/schema/stage2_ddl.sql` | Stage 2 DDL (pgvector + element_vectors) |
 | `src/bim_rag/stage1_import.py` | Stage 1 entry point (`bim-stage1`) |
 | `src/bim_rag/stage2_embed.py` | Stage 2 entry point (`bim-stage2`) |
-| `src/bim_rag/pipeline.py` | Convenience orchestrator (`bim-pipeline`) |
+| `src/bim_rag/cli.py` | `bim-import` — the documented import command (Task 34, replacing the broken `bim-pipeline`) |
+| `src/bim_rag/db_admin/init_db.py` | `bim-db-init` — idempotent schema setup (Task 34) |
 | `src/bim_rag/reporting.py` | Reconciliation reports for both stages |
 | `tests/` | 59 unit tests, 0 DB connections |
 | `docs/pipeline_v001.md` | Command reference and schema documentation |
@@ -934,15 +938,18 @@ this model look as capable as model 3 would require exactly the name inference �
 
 ### Test coverage
 
-Ingestion: **356 passed, 6 skipped, 0 failed** (was 264 passed / 6 skipped). 92 new tests —
-`tests/test_measures.py` (36), `tests/test_semantic_manifest_measurement.py` (24), and measurement
-invariants added to `tests/test_semantic_manifest_live.py` (32 parametrised over the four models).
+Ingestion: 92 new tests — `tests/test_measures.py` (36),
+`tests/test_semantic_manifest_measurement.py` (24), and measurement invariants added to the live
+manifest suite (32 parametrised over the four models).
 
-Backend: **27 failures, all pre-existing** (baseline 30 — three `query_live/test_rag_search.py`
-cases recovered as a side effect of re-embedding). Zero new failures. New backend tests:
-`tests/query_sql/test_units.py` (rewritten, 30), `tests/binding/test_measurement_binding.py` (21),
-`tests/query_live/test_measurement_live.py` (21, read-only, all passing against the four
-re-ingested models).
+Backend: new tests `tests/query_sql/test_units.py` (rewritten, 30),
+`tests/binding/test_measurement_binding.py` (21), `tests/query_live/test_measurement_live.py` (21,
+read-only, against the four re-ingested models).
+
+> **Superseded by Task 32.** This section originally recorded a tolerated red backend baseline
+> ("27 failures, all pre-existing"). Task 32 resolved every one of them and split the fast offline
+> gate from the database-backed suites. Current totals, commands, and the live-test contract are in
+> `README.md` and in Task 32's record — this section is kept only for the test counts it added.
 
 `ruff format` / `ruff check` clean in both projects. No frontend source, test, dependency, build
 output, or OpenAPI client snapshot was changed.

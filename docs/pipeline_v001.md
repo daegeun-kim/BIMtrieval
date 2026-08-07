@@ -4,7 +4,7 @@
 > Paths and run commands in this document reflect the pre-split layout
 > (`backend/src`, `api.app:app`, and the `bim_rag` compatibility shim). The
 > authoritative current structure and commands are in [`README.md`](../README.md)
-> and [`workflow.md`](../workflow.md): ingestion lives under `ingestion/`, the
+> is in [`README.md`](../README.md): ingestion lives under `ingestion/`, the
 > backend is a Poetry app run from `backend/` with `poetry run uvicorn app.main:app`,
 > and the backend has no dependency on the ingestion `bim_rag` package.
 
@@ -51,8 +51,8 @@ Reusable notebook: `notebooks/02_vectorize.ipynb`. Structured-only historical no
 CLI equivalents (both run the same full pipeline):
 
 ```bash
-bim-stage2       # python -m bim_rag.stage2_embed --ifc-path <path>
-bim-pipeline     # python -m bim_rag.pipeline
+bim-import <path>   # the documented command: the complete idempotent workflow
+bim-stage2 --ifc-path <path>   # lower-level equivalent, kept for debugging
 ```
 
 ### Staged CUDA smoke tests (`tasks/task03.md` crash-recovery requirement)
@@ -180,7 +180,7 @@ torch 2.11.0+cu128.
 ## Source IFC
 
 ```
-ifc_original/IFC Schependomlaan incl planningsdata.ifc
+ifc/IFC Schependomlaan incl planningsdata.ifc
 ```
 
 File is never modified. SHA-256 fingerprint is computed and stored as model identity.
