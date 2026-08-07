@@ -7,8 +7,12 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# v002 query architecture scaffold
+# Run logs and experiment traces — private output, never committed. The
+# repository-root `logs/` was tracked historically (task29 archive) and is
+# purged from history along with backend/app/evaluation/query_trace.jsonl.
+logs/
 backend/logs/
+*.jsonl.log
 
 # Backend Poetry virtualenv + local test temp dirs (Task 09)
 backend/.venv/
