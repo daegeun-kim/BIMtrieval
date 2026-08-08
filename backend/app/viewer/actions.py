@@ -4,8 +4,7 @@ The backend supplies semantic roles and IFC GlobalIds only — never camera
 coordinates or Three.js control. `build_viewer_actions()` always returns
 every field (both role groups included, even when empty) so the frontend can
 rely on one stable shape regardless of which route produced the result
-(tasks/task04.md required verification: "Viewer action schemas always
-produce a stable shape").
+(spec_v002 Section 17: viewer action schemas always produce a stable shape).
 """
 
 from __future__ import annotations

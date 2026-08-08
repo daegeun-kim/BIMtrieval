@@ -16,8 +16,8 @@ Run from `backend/`:
 
 The question set deliberately mixes two groups:
 
-- **acceptance** — questions drawn from `specs/test_query.md`, so slate sizes
-  can be compared against the runs recorded there;
+- **acceptance** — questions drawn from the recorded acceptance suite, so slate
+  sizes can be compared across runs;
 - **paraphrase** — unrelated rewordings written for this harness, so a slate
   that only behaves for the recorded wording is visible as a size/recall
   divergence between the two groups (§13.6).

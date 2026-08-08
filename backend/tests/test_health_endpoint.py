@@ -1,5 +1,4 @@
-"""FastAPI health/readiness routes pass without database or OpenAI access
-(tasks/task04.md required verification)."""
+"""FastAPI health/readiness routes pass without database or OpenAI access."""
 
 from __future__ import annotations
 

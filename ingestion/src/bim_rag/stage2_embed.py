@@ -5,7 +5,7 @@ Internal helper: run_vector_phase() — called by pipeline_structured.ifc_to_db(
 
 Do NOT run without Task 02-1 complete for the target source model.
 
-CLOCK_WATCHDOG_TIMEOUT (0x101) recovery mitigations (tasks/task03.md):
+CLOCK_WATCHDOG_TIMEOUT (0x101) recovery mitigations (spec_v001 §19):
   - CUDA batch size is fixed at config.CUDA_BATCH_SIZE (4); 64 is rejected
     by config.validate_batch_size().
   - Every document is tokenized with the real BAAI/bge-m3 tokenizer and

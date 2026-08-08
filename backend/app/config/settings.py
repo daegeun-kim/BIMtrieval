@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # --- Hybrid evidence bounds (spec_v005 §10) ---
     # These bound only what the ANSWER LLM sees. They are deliberately separate
     # from the exact database count (uncapped) and from the viewer match set
-    # (max_viewer_match_ids) — see tasks/task13.md §2.
+    # (max_viewer_match_ids) — see spec_v003 §19.1.
     max_primary_entities: int = 50
     max_context_entities: int = 50
     max_relationships: int = 20

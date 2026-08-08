@@ -1,4 +1,4 @@
-// Fine / Standard / Fast visualization modes (tasks/task31.md §2, §8.1).
+// Fine / Standard / Fast visualization modes (Task 31 §2, §8.1).
 //
 // A fake Fragments model and world are injected — no WebGL, no worker, no
 // backend. The adapter's real mode logic runs against them, so the mode's two

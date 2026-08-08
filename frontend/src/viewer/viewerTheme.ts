@@ -1,4 +1,4 @@
-// Derived viewer theme (tasks/task14.md §1; rehomed by tasks/task31.md §1).
+// Derived viewer theme (Task 14 §1; rehomed by Task 31 §1).
 //
 // The EDITABLE values — colors, opacity, line appearance, the Fine/Standard/Fast
 // visualization matrix, navigation/framing — now live in `./viewerCustomization`,

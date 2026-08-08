@@ -1,25 +1,13 @@
-# Prompt file locations
+# Versioned LLM prompts
 
-Versioned prompt text lives under this directory, one subfolder per role:
+Prompt text lives directly beside this file. `__init__.py` selects the active
+versions and loads `<version>.md` by filename. The current pipeline uses:
 
-```text
-backend/src/llm/prompts/
-├── planner/   # schema-enforced query-plan prompts (spec_v002 Section 7)
-└── answer/    # grounded answer-generation prompts (spec_v002 Section 13-14)
-```
+- `binder_v003.md` for semantic binding and decomposition;
+- `correction_v001.md` for the conditional corrective binding call; and
+- `grounded_answerer_v002.md` for grounded answer expression.
 
-Convention (to be followed once real prompt text is added, in v003/v004/v005):
-
-```text
-prompts/<role>/v001/system.md
-prompts/<role>/v001/<use-case>.md
-```
-
-`<role>` is `planner` or `answer`. Each version directory is immutable once
-in use; a prompt change ships as a new `vNNN` directory, not an edit in
-place, so logged plans/answers remain reproducible against the prompt
-version that produced them (spec_v002 Section 21).
-
-No prompt text is added by Task 04 — only these versioned locations
-(tasks/task04.md item 7: "without prematurely implementing final path
-prompts").
+Older prompt files remain immutable so recorded query metadata can be traced to
+the exact instructions that produced it. A prompt change adds a new `vNNN`
+file and updates the corresponding version constant in `__init__.py`; it does
+not overwrite an existing version.

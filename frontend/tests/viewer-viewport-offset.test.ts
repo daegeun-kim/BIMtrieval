@@ -197,7 +197,7 @@ describe("the same centering applies to the floor-plan camera (task28 §4.3)", (
 });
 
 // ---------------------------------------------------------------------------
-// Equal scale on both plan axes (tasks/task31.md §5.3)
+// Equal scale on both plan axes (Task 31 §5.3)
 // ---------------------------------------------------------------------------
 
 describe("orthographic plan keeps equal scale on both axes (task31 §5.3)", () => {

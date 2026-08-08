@@ -1,5 +1,5 @@
 """One-off, idempotent creation of a dedicated read-only PostgreSQL role for
-runtime query execution (spec_v003 §13, tasks/task05.md item 12).
+runtime query execution (spec_v003 §13).
 
 Requires CREATEROLE privilege on the connection loaded from `db_url` in
 `.env` (the existing ingestion connection). If that connection lacks

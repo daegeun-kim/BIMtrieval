@@ -1,5 +1,5 @@
 // Progressive display and three-state sorting in the Query Explanation object
-// tables (tasks/task31.md §4, §8.2).
+// tables (Task 31 §4, §8.2).
 //
 // The API client and the viewer are mocked so any backend or LLM call would be
 // observable — scrolling and sorting must make none.

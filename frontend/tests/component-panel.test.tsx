@@ -1,4 +1,4 @@
-// Component detail panel + compact chat summary (tasks/task14.md §4, §5, §8).
+// Component detail panel + compact chat summary (Task 14 §4, §5, §8).
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

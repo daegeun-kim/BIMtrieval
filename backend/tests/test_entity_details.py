@@ -1,5 +1,5 @@
 """Truthful component details + instance/type/family group matching
-(tasks/task13.md §4, §5).
+(spec_v003 §19.3 and spec_v011 §2).
 
 Offline: the DB session dependency is overridden and the entity query functions
 are monkeypatched, so no PostgreSQL or OpenAI access occurs.

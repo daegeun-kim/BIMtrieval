@@ -3,7 +3,7 @@
 Offline against the synthetic model in `conftest.py`. No DB, no OpenAI, no
 embedding service (the slate must be buildable without one).
 
-No test asserts a count or a class list taken from `specs/test_query.md`; the
+No test asserts a count or a class list taken from the recorded query suite; the
 synthetic model's numbers are invented for these tests.
 """
 

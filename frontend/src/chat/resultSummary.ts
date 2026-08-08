@@ -1,4 +1,4 @@
-// Compact class summary for chat results (tasks/task14.md §4).
+// Compact class summary for chat results (Task 14 §4).
 //
 // Turns the backend's exact per-IFC-class counts into a short readable line —
 // "5 doors, 3 windows" — instead of listing every retrieved component.

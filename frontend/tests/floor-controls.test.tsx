@@ -1,4 +1,4 @@
-// Floor-plan control rendering + accessibility (tasks/task28.md §1.1, §8.2).
+// Floor-plan control rendering + accessibility (Task 28 §1.1, §8.2).
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

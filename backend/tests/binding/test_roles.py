@@ -3,7 +3,7 @@
 Offline: reads the committed ontology JSON only. No DB, no OpenAI, no embedding.
 
 These tests assert *IFC semantic rules*, never a sample question or an expected
-count from `specs/test_query.md` (Task 24 §Non-negotiable generalization rule).
+count from the recorded query suite (Task 24 generalization rule).
 Every rule is checked on at least two unrelated class families so a fix that
 only worked for one family cannot pass (§13.6).
 """

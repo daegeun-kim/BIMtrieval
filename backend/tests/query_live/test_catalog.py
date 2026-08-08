@@ -28,7 +28,7 @@ def test_list_models_returns_seeded_catalog_entry(live_session):
     row = next(r for r in rows if r.source_model_id == SOURCE_MODEL_ID)
     assert row.status == "available"
     assert row.is_current is True
-    # not invented — left null per user decision (tasks/task05.md item 14)
+    # Not invented: optional metadata remains null when it cannot be derived.
     assert row.project_type is None
     assert row.discipline is None
     assert row.description is None

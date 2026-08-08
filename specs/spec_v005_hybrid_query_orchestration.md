@@ -473,8 +473,8 @@ Hybrid orchestration is acceptable when:
 
 ## 20. Implementation (Task 07 — IMPLEMENTED AND VALIDATED)
 
-This blueprint was implemented and validated by `tasks/task07_done.md`. Summary of the
-delivered code and how it satisfies §19.
+This blueprint was implemented and validated. The following summarizes the delivered code and how
+it satisfies §19.
 
 ### Modules
 
@@ -550,7 +550,7 @@ was modified. Secrets never logged or returned.
 
 ## 21. End-to-End Evaluation (Task 08 — VALIDATED)
 
-Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.md`.
+The current published evidence is `evaluation/benchmark_v003.md` and its machine-readable result.
 
 - Benchmark: `backend/app/evaluation/benchmark_v003_e2e_cases.jsonl` (27 versioned cases
   spanning the required matrix); runner `run_benchmark_v003.py`; committed machine-readable
@@ -570,8 +570,8 @@ Validated by `tasks/task08_done.md`. Full report: `docs/evaluation_v001_report.m
 
 ## 22. Task 13 Implementation Notes — tracing, compact answers, sample-detail intent
 
-Task 13 (`tasks/task13_done.md`) added opt-in observability and changed what the answer stage
-receives. The two-call planner/answer architecture (§2) is unchanged: tracing adds **no** OpenAI
+Task 13 added opt-in observability and changed what the answer stage receives. The two-call
+planner/answer architecture (§2) is unchanged: tracing adds **no** OpenAI
 call and alters no query result.
 
 ### 22.1 Opt-in developer trace mode
@@ -646,7 +646,7 @@ derive one from the full pre-bound evidence. `ViewerActions` gained `viewer_matc
 
 ## 23. Task 15 Amendment — terminal output semantics (supersedes parts of §22.1)
 
-Task 15 (`tasks/task15_done.md`) restructured terminal output into two layers:
+Task 15 restructured terminal output into two layers:
 
 **Always on (standard operational output, not gated on `BIM_RAG_TRACE`):**
 

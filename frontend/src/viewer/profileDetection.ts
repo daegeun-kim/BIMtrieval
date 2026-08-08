@@ -1,4 +1,4 @@
-// Automatic adaptive-profile detection (tasks/task18.md §11).
+// Automatic adaptive-profile detection (Task 18 §11).
 //
 // Signals are geometric/runtime evidence ONLY — artifact byte size, model
 // item count, edge vertex count, and an optional bounded initial frame-time
@@ -23,7 +23,7 @@ export interface ProfileSignals {
  * numbers documented in EdgeOverlay.ts (3,505 items / ~374k edge vertices for
  * the Schependomlaan model), scaled ~1.5-1.7x so that reference model itself
  * classifies "balanced". Provisional pending a second large-model data point;
- * model 2 (27,388 items / 5.37M edge vertices, measured tasks/task18.md §1)
+ * model 2 (27,388 items / 5.37M edge vertices, measured in Task 18 §1)
  * clears every one of these by a wide margin.
  */
 export const PROFILE_THRESHOLDS = {

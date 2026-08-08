@@ -4,7 +4,7 @@ Offline: pure text handling, no DB / ontology / embedding / OpenAI.
 
 Per §13.3 the same mechanism is proven on several UNRELATED BIM fields and
 classes, and per §13.6 several cases are paraphrases that appear nowhere in
-`specs/test_query.md`. No test asserts an expected model count.
+the recorded query suite. No test asserts an expected model count.
 """
 
 from __future__ import annotations
@@ -203,7 +203,7 @@ def test_token_overlap_is_zero_for_an_unrelated_field():
         ("how many external windows does the building have", "IsExternal"),
         ("are these walls load bearing", "LoadBearing"),
         ("what is the fire rating", "FireRating"),
-        # Paraphrases that appear nowhere in specs/test_query.md (§13.6).
+        # Paraphrases that appear nowhere in the recorded query suite (§13.6).
         ("list every load-bearing member", "LoadBearing"),
         ("do any partitions carry a fire rating value", "FireRating"),
         ("anything marked external on this level", "IsExternal"),

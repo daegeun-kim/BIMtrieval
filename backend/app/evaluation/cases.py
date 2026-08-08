@@ -1,7 +1,7 @@
 """Benchmark case schema (spec_v002 Section 21).
 
-Reusable failure cases are stored as JSONL, one case per line, in a
-versioned file (see `benchmark_v001_cases.jsonl` in this directory).
+Reusable failure cases are stored as JSONL, one case per line, in versioned
+files in this directory.
 """
 
 from __future__ import annotations

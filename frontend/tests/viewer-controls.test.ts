@@ -1,5 +1,5 @@
 // Camera, controls, pivot, zoom bound, elevation-zero plane, and base-color
-// restoration (tasks/task14.md §1, §2, §8).
+// restoration (Task 14 §1, §2, §8).
 //
 // A fake FragmentsModel/world is injected — no WebGL, no worker.
 import * as THREE from "three";

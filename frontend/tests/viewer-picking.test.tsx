@@ -1,5 +1,5 @@
 // Query-result-only picking, focused/unfocused primary appearance, edge roles,
-// and the doubled preview height (tasks/task15.md §2–§4, §Tests).
+// and the doubled preview height (Task 15 §2–§4, §Tests).
 //
 // A fake FragmentsModel/world is injected — no WebGL, no worker.
 import { render, screen } from "@testing-library/react";

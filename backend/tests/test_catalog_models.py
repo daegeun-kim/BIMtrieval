@@ -1,5 +1,4 @@
-"""Catalog metadata ORM is additive and reviewable (tasks/task04.md required
-verification: "Proposed catalog schema is additive and reviewable").
+"""Catalog metadata ORM is additive and reviewable (spec_v002 §14).
 
 Importing db.models must never call create_all/apply a migration, and must
 not remove or alter the five existing canonical tables.

@@ -1,5 +1,4 @@
-"""Viewer actions always produce a stable shape (spec_v002 Section 17,
-tasks/task04.md required verification)."""
+"""Viewer actions always produce a stable shape (spec_v002 Section 17)."""
 
 from __future__ import annotations
 

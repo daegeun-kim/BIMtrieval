@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 # Must run before torch/tokenizers spin up thread pools, so a sustained
 # tokenization + GPU-inference workload can't saturate every logical core
-# at once (CLOCK_WATCHDOG_TIMEOUT recovery mitigation, see tasks/task03.md).
+# at once (CLOCK_WATCHDOG_TIMEOUT recovery mitigation, see spec_v001 §19).
 os.environ.setdefault("OMP_NUM_THREADS", "4")
 os.environ.setdefault("MKL_NUM_THREADS", "4")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")

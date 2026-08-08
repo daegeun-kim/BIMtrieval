@@ -1,5 +1,5 @@
 """Truthful, bounded component details + instance/type/family identity
-(tasks/task13.md §4, §5).
+(spec_v003 §19.3 and spec_v011 §2).
 
 Deterministic and LLM-free: everything here is read from the already-stored
 `ifc_entities.canonical_json` that the ingestion pipeline wrote. No IFC parsing,

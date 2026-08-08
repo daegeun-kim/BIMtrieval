@@ -1,5 +1,5 @@
-// Spatially chunked entity edge overlay (tasks/task15.md §2; rewritten by
-// tasks/task18.md §7 from a single whole-model object into 20-160 spatially
+// Spatially chunked entity edge overlay (Task 15 §2; rewritten by
+// Task 18 §7 from a single whole-model object into 20-160 spatially
 // bounded `THREE.LineSegments` chunks with real frustum culling).
 //
 // Geometry comes from the already-loaded Fragments model (`getItemsGeometry`,
@@ -26,7 +26,7 @@
 // so it never blocks load or input — chunking adds a cheap grid-bucketing
 // step inline in that same loop, not a second pass.
 //
-// tasks/task20.md §1/§2 replaced task18's motion handling: camera motion used
+// Task 20 §1/§2 replaced Task 18's motion handling: camera motion used
 // to hide base edges by rewriting every non-highlighted vertex's ALPHA across
 // all chunks (still submitted to the GPU at alpha 0) and requesting a color
 // upload on every hide/restore. That regressed real-hardware interaction on
@@ -217,39 +217,39 @@ export class EdgeOverlay {
     return this.thresholdDeg;
   }
 
-  /** Total model item count seen during the last build (tasks/task18.md §1 instrumentation). */
+  /** Total model item count seen during the last build (Task 18 §1 instrumentation). */
   getItemCount(): number {
     return this.itemCount;
   }
 
-  /** Edge vertex count of the built overlay (tasks/task18.md §1 instrumentation). */
+  /** Edge vertex count of the built overlay (Task 18 §1 instrumentation). */
   getVertexCount(): number {
     return this.vertexCount;
   }
 
-  /** Populated spatial chunk count (tasks/task18.md §1/§7 instrumentation). */
+  /** Populated spatial chunk count (Task 18 §1/§7 instrumentation). */
   getChunkCount(): number {
     return this.chunks.length;
   }
 
-  /** Base chunks currently submitted for rendering (tasks/task20.md §6 instrumentation) —
+  /** Base chunks currently submitted for rendering (Task 20 §6 instrumentation) —
    * 0 while motion-hidden, since chunks are toggled invisible, not alpha-zeroed. */
   getVisibleChunkCount(): number {
     return this.chunks.reduce((n, c) => n + (c.lines.visible ? 1 : 0), 0);
   }
 
-  /** True while base chunks are hidden for camera motion (tasks/task20.md §2). */
+  /** True while base chunks are hidden for camera motion (Task 20 §2). */
   isMotionHidden(): boolean {
     return this.motionHidden;
   }
 
-  /** Vertex count of the small always-separate highlight overlay, or 0 (tasks/task20.md §2/§6). */
+  /** Vertex count of the small always-separate highlight overlay, or 0 (Task 20 §2/§6). */
   getHighlightVertexCount(): number {
     if (!this.highlight) return 0;
     return (this.highlight.lines.geometry.getAttribute("position") as THREE.BufferAttribute).count;
   }
 
-  /** Whether a highlight overlay drawable currently exists (tasks/task20.md §6). */
+  /** Whether a highlight overlay drawable currently exists (Task 20 §6). */
   hasHighlightOverlay(): boolean {
     return this.highlight !== null;
   }

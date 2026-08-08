@@ -1,4 +1,4 @@
-// Typed viewer adapter (spec_v006 §11; tasks/task11, task14 §1-§3). All
+// Typed viewer adapter (spec_v006 §11; Task 11 and Task 14 §1-§3). All
 // imperative That Open / Three.js scene mutation lives here; React components
 // never touch the scene directly. One active Fragments model at a time.
 //
@@ -633,7 +633,7 @@ export class ViewerAdapter {
   }
 
   /**
-   * Current performance profile (tasks/task18.md §11) — now consumed ONLY by
+   * Current performance profile (Task 18 §11) — now consumed ONLY by
    * the isolated component preview for its fps cap / pixel ratio. It no longer
    * affects any main-viewer rendering (spec_v006 §28).
    */

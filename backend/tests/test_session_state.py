@@ -1,5 +1,5 @@
 """reset() clears session state but never touches persistent data
-(spec_v002 Section 15, tasks/task04.md required verification)."""
+(spec_v002 Section 15)."""
 
 from __future__ import annotations
 

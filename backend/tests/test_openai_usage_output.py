@@ -1,4 +1,4 @@
-"""Per-question OpenAI token-usage terminal output (tasks/task15.md §1).
+"""Per-question OpenAI token-usage terminal output (spec_v005 §23).
 
 Offline: fake clients only — the tests prove the aggregation/snapshot wiring,
 never a live call. The values summed are the ones the client log records from

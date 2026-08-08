@@ -276,8 +276,8 @@ The RAG path is acceptable when:
 
 ## 17. Task 06 Implementation Notes
 
-Task 06 (`tasks/task06_done.md`) implemented this specification against the
-live database and the real BGE-M3 embedding service:
+Task 06 implemented this specification against the live database and the real
+BGE-M3 embedding service:
 `backend/app/query/rag/{schemas,embedding_service,search,thresholds,fusion,
 hydration,relationship_expansion,errors}.py`. Full command reference,
 per-question calibration detail, and two documented negative findings

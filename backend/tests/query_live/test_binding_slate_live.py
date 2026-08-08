@@ -6,7 +6,7 @@ one of the points (§10.1: exactly two principal LLM calls, neither of them here
 
 These tests assert STRUCTURAL properties that must hold for any well-formed
 model — closure shape, role separation, scope-vs-condition typing, bounds. They
-deliberately do NOT assert expected counts from `specs/test_query.md`: §13.6
+deliberately do NOT assert expected counts from the recorded query suite: §13.6
 forbids production rules keyed to sample questions, and a test that pinned a
 count would break on re-ingestion without indicating a real defect.
 

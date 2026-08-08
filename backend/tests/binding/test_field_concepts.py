@@ -194,7 +194,7 @@ def test_categorical_property_infers_text_type_and_string_operators(index):
         ("how many external windows are there", "IsExternal"),
         ("what is the gross area of the slabs", "GrossArea"),
         ("show the nominal width of each door", "NominalWidth"),
-        # Paraphrases written for this test, absent from specs/test_query.md (§13.6).
+        # Paraphrases written for this test, absent from the acceptance suite (§13.6).
         ("do any partitions carry a fire rating value", "FireRating"),
         ("anything marked external", "IsExternal"),
         ("total gross area please", "GrossArea"),

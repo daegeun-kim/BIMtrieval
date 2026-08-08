@@ -1,5 +1,5 @@
 """Terminal observability: standard operational output + opt-in trace mode
-(tasks/task13.md §1, amended by tasks/task15.md §1).
+(spec_v005 §22.1, amended by §23).
 
 Two layers with different gating:
 

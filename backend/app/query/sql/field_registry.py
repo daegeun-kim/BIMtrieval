@@ -12,8 +12,7 @@ Two layers:
   bounded cache), so a field missing from the capped sample can still be
   validated correctly. `resolve_concept()` searches attribute, quantity,
   property, and type_fact sources for a bare name and returns every match
-  with provenance rather than guessing (spec_v003 §8) — the deterministic
-  field-resolution registry required by tasks/task05.md item 6.
+  with provenance rather than guessing (spec_v003 §8).
 
 The JSON shape this module reads matches `bim_rag.ifc_parser.extract_canonical_json`
 exactly (extraction v002, task27):
@@ -404,7 +403,7 @@ def resolve_field(session: Session, source_model_id: int, field_ref: FieldRef) -
 def resolve_concept(session: Session, source_model_id: int, field_name: str) -> list[ResolvedField]:
     """Search attribute, quantity, property, and type_fact sources for a bare
     field name. Returns every match with provenance rather than guessing
-    (spec_v003 §8, tasks/task05.md item 6)."""
+    (spec_v003 §8)."""
     matches: list[ResolvedField] = []
 
     if field_name in _ATTRIBUTE_COLUMN_FIELDS or field_name in _ATTRIBUTE_JSON_FIELDS:

@@ -5,7 +5,7 @@ import {
   VISUALIZATION_MODE_ORDER,
 } from "../viewer/viewerCustomization";
 
-// Fine | Standard | Fast — the visualization-quality control (tasks/task31.md
+// Fine | Standard | Fast — the visualization-quality control (Task 31
 // §2.1), sitting in the existing bottom-left readout beside Fit.
 //
 // This is a QUALITY choice the user makes, not the removed Task 18

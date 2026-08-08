@@ -1,4 +1,4 @@
-// Floor-plan range derivation (tasks/task28.md §3, §8.2).
+// Floor-plan range derivation (Task 28 §3, §8.2).
 //
 // Pure arithmetic over already-resolved SCENE elevations — no WebGL, no worker,
 // no Fragments. The point of these cases is that the numbers are exactly the

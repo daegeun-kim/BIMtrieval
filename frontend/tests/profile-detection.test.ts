@@ -1,4 +1,4 @@
-// Automatic adaptive-profile detection (tasks/task18.md §11).
+// Automatic adaptive-profile detection (Task 18 §11).
 import { describe, expect, it } from "vitest";
 
 import { PROFILE_THRESHOLDS, detectProfile } from "../src/viewer/profileDetection";

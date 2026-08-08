@@ -1,7 +1,7 @@
 import type { ExplanationGraph, ExplanationGraphNode, ExplanationGroup } from "../api/types";
 import { formatCount, graphNodeAsGroup } from "./explanation";
 
-// The grouped relationship diagram (tasks/task29.md §5.4).
+// The grouped relationship diagram (Task 29 §5.4).
 //
 // Deterministic layout only. The backend already decided which nodes and edges
 // exist, how they group, and whether the diagram qualifies at all; this file

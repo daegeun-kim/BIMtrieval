@@ -1,4 +1,4 @@
-// Centralized viewer theme + semantic class mapping (tasks/task14.md §1, §8).
+// Centralized viewer theme + semantic class mapping (Task 14 §1, §8).
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 

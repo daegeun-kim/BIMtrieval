@@ -1,9 +1,7 @@
 """Staged CUDA smoke tests for the Task 03 vectorization recovery run.
 
-Run ONE stage at a time (separate process invocations) and inspect the
-result before advancing, per tasks/task03.md: "stop between stages to
-inspect the result... If Windows crashes... report the exact last
-completed stage."
+Run ONE stage at a time (separate process invocations) and inspect the result
+before advancing. If Windows crashes, report the exact last completed stage.
 
     python -m bim_rag.smoke_test --stage 1
     python -m bim_rag.smoke_test --stage 2

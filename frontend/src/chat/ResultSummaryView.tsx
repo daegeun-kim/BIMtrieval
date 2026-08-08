@@ -1,7 +1,7 @@
 import type { ResultSummary } from "../api/types";
 import { formatClassSummary } from "./resultSummary";
 
-// Compact result line under an answer (tasks/task14.md §4): the exact total and
+// Compact result line under an answer (Task 14 §4): the exact total and
 // a short class summary — never a dump of every retrieved component. The viewer
 // shows the user which objects matched; this states how many.
 //

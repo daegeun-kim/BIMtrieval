@@ -1,4 +1,4 @@
-// Floor-plan mode inside the existing viewer (tasks/task28.md §1.2, §3, §4,
+// Floor-plan mode inside the existing viewer (Task 28 §1.2, §3, §4,
 // §6, §8.2).
 //
 // A fake Fragments model, world, and `OBC.Views` component are injected — no
@@ -600,7 +600,7 @@ describe("cut geometry (task28 §4.2, §4.3)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Black wall cuts + plan wheel-zoom speed (tasks/task31.md §5.1, §5.2)
+// Black wall cuts + plan wheel-zoom speed (Task 31 §5.1, §5.2)
 // ---------------------------------------------------------------------------
 
 describe("black wall cuts (task31 §5.1)", () => {

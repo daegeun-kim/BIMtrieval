@@ -75,9 +75,9 @@ def test_every_relative_link_resolves(markdown_files):
 def test_no_document_points_at_something_this_session_removed(markdown_files):
     """Stale names outlive the thing they name, and only a reader notices.
 
-    `tasks/`, `specs/spec_v012` and `CHANGELOG.md` are exempt: recording what was
-    removed is precisely their job, and a changelog that cannot name a deleted
-    file is useless.
+    `specs/spec_v012` and `CHANGELOG.md` are exempt: recording what was removed
+    is precisely their job, and a changelog that cannot name a deleted file is
+    useless.
     """
     removed = {
         "Start BIM RAG.lnk": "launcher removed in Task 35",
@@ -88,7 +88,6 @@ def test_no_document_points_at_something_this_session_removed(markdown_files):
         "CODEX.md": "consolidated into AGENTS.md in Task 39",
     }
     exempt = (
-        "tasks/",
         "specs/spec_v012",
         "update_plan.md",
         "docs/images/",

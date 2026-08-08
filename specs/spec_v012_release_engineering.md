@@ -345,9 +345,9 @@ checksum-verified migration.
 
 ### 3.5 A broken entry point, shipped
 
-`bim-pipeline` was a documented console script in `pyproject.toml` and in
-`docs/pipeline_v001.md`. It imported `run_stage1` and `run_stage2`, which no
-longer exist — so it had been failing with `ImportError` on every invocation.
+`bim-pipeline` was a documented console script in `pyproject.toml` and in the
+original v001 pipeline notes. It imported `run_stage1` and `run_stage2`, which
+no longer exist — so it had been failing with `ImportError` on every invocation.
 Removed; `bim-import` runs the same complete workflow. A test now imports every
 declared console script's target and asserts it is callable, so a dead entry
 point cannot ship again.
@@ -675,13 +675,12 @@ and that the README does not overstate the result.
 
 A published table that drifts from the results file now fails the offline gate.
 
-### 5.5 Historical results preserved
+### 5.5 Historical results consolidated
 
-`docs/evaluation_v001_report.md` keeps its original text — including the six
-defects found and fixed during that run, which is its most useful content — under
-a header stating what has since changed and why it is not corrected in place.
-`specs/test_query_v1`–`v3-1` and the RAG calibration/failure-case datasets are
-listed in the report as historical, not restated under current scoring.
+The historical evaluation narrative and generated query transcripts were
+removed after their durable findings were consolidated into this specification
+and `evaluation/benchmark_v003.md`. The versioned RAG calibration and failure-case
+datasets remain as reusable evidence rather than prose snapshots.
 
 ### 5.6 Validation
 
@@ -897,30 +896,22 @@ not.
 | `Start BIM RAG.lnk` | Removed in Task 35 |
 | `scripts/create-shortcut.ps1` | Generated the above |
 
-Six root Markdown files remain: `README.md`, `AGENTS.md`, `CLAUDE.md`,
-`CHANGELOG.md`, `SECURITY.md`, and the tracked `update_plan.md` evaluation
-record. The last two were added in Task 41 because they carry release and
-security information that does not belong in the README.
+Five root Markdown files remain: `README.md`, `AGENTS.md`, `CLAUDE.md`,
+`CHANGELOG.md`, and `SECURITY.md`. Release and security information stays in
+the changelog and security policy rather than a transient evaluation record.
 
 ### 8.3 Preserved
 
-`specs/` (the eleven blueprints plus this one) and the `tasks/*_done.md` ledger
-are kept in full. They are the visible, disciplined-engineering evidence the
-review singles out as a differentiator — "legible design documents in their own
-right… they'd survive a design review with the AI removed."
+`specs/` retains the twelve authoritative blueprints. The completed task ledger
+was retired after its durable requirements were merged into those specifications.
 
-The three `docs/architecture_v00*.md` files are kept too: each is cited by a spec
-or by production code (`app/query/rag/thresholds.py` points at v004's
-precision/recall calibration table), so they carry evidence, not just history.
-Their headers now point at `README.md` instead of the deleted `workflow.md`.
-
-`docs/evaluation_v001_report.md` was relabelled as historical in Task 36 rather
-than deleted, because its record of six defects found and fixed during a live run
-is worth more than the superseded numbers around it.
+`docs/architecture_v004.md` remains because production code and the README cite
+its precision/recall calibration table. Superseded v001–v003 command notes and
+the historical evaluation transcript were removed after consolidation.
 
 ### 8.4 Stale references
 
-A link checker over all 84 tracked Markdown files reports **no broken relative
+A link checker over all tracked Markdown files reports **no broken relative
 links**. Remaining mentions of removed things are all explanatory — the README
 note saying why the `.lnk` is gone, and `spec_v001`'s note that `ifc_original/`
 became `ifc/`. Fixed in `spec_v001`: the directory listing, the reference-model

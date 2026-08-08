@@ -1,6 +1,6 @@
 // Component-panel controller flows: detail loading, stale-response guards,
 // deterministic group actions, and Clear Chat vs Reset App interaction
-// (tasks/task14.md §5, §6, §8).
+// (Task 14 §5, §6, §8).
 //
 // The viewer adapter and API client are fully mocked — no scene, no network,
 // no LLM.

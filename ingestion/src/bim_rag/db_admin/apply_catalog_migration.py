@@ -1,14 +1,13 @@
 """One-off, idempotent application of the additive catalog-metadata migration
-(spec_v003 §5, tasks/task05.md item 2).
+(spec_v003 §5).
 
 Verifies, before and after, that the five existing canonical tables'
 row counts are unchanged, then creates exactly the two new tables
 (`model_families`, `source_model_catalog_entries` — mirrors
 bim_rag/schema/migrations/0001_catalog_metadata_proposal.sql) and seeds one
 catalog-metadata row per currently-ingested source model that doesn't
-already have one, using only values derivable from the ingested data itself
-(tasks/task05.md item 14: "do not invent building use/version metadata" —
-project_type/discipline/tags/description are left null).
+already have one, using only values derivable from the ingested data itself;
+project_type/discipline/tags/description are left null when not derivable.
 
 Run manually from ingestion/ in the bim_rag Conda env (idempotent):
     python -m bim_rag.db_admin.apply_catalog_migration

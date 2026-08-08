@@ -1,6 +1,6 @@
 // The Query Explanation card: presentation rendering, the persistent
 // information region, subgroup selection, and the fixed stacked layout
-// (tasks/task29.md §3, §4, §6, §7; tasks/task26.md §3, §4, §5).
+// (Task 29 §3, §4, §6, §7; Task 26 §3, §4, §5).
 //
 // The card renders only what the backend declared. Task 29 left it three
 // families — bounded table, horizontal bars, grouped diagram — and removed the

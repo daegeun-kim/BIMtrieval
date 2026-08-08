@@ -5,7 +5,7 @@ which reproduces the exact Task 24 defect and proves it is now unrepresentable
 rather than merely detected.
 
 Cases are written over unrelated and paraphrased wording, not the questions in
-`specs/test_query.md`, so passing them means the invariant holds rather than
+the recorded query suite, so passing them means the invariant holds rather than
 that a suite was fitted.
 """
 

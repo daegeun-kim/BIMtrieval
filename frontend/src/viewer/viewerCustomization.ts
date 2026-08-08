@@ -1,5 +1,5 @@
 // THE easy-to-edit source for the viewer's user-facing appearance, quality and
-// navigation values (tasks/task31.md §1).
+// navigation values (Task 31 §1).
 //
 // This file is deliberately **constants only**. It contains no functions, no
 // derived Three.js/Fragments materials, no class-mapping logic, no state, no

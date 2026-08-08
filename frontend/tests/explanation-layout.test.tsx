@@ -1,5 +1,5 @@
 // The fixed 60/40 stacked right column and its interaction with the existing
-// component-detail panel (tasks/task26.md §3, §7).
+// component-detail panel (Task 26 §3, §7).
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

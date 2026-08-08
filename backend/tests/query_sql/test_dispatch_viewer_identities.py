@@ -1,5 +1,5 @@
 """`execute_sql` attaches viewer match identities for entity operations
-(tasks/task13.md §2).
+(spec_v003 §19.1).
 
 Offline: the entity operations are monkeypatched, so no PostgreSQL is touched.
 This covers the wiring — that a COUNT operation, which previously returned only

@@ -1,4 +1,4 @@
-// Projected-size rendering policy (tasks/task23.md issue 2).
+// Projected-size rendering policy (Task 23 issue 2).
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
@@ -330,7 +330,7 @@ describe("threshold and hysteresis (Fine: 20/24 px)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Visualization modes (tasks/task31.md §2.2)
+// Visualization modes (Task 31 §2.2)
 // ---------------------------------------------------------------------------
 
 describe("Fine / Standard / Fast thresholds", () => {

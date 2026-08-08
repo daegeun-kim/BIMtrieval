@@ -3,9 +3,7 @@
 No engine is created at import time. `check_connectivity()` is the only
 function that opens a connection, and it always catches/sanitizes failures
 rather than raising — this is what backs the `/ready` health endpoint, which
-must respond even when the database is unreachable (spec_v002 Section 16.3,
-tasks/task04.md required verification: "FastAPI health tests pass without
-database or OpenAI access").
+must respond even when the database is unreachable (spec_v002 Section 16.3).
 """
 
 from __future__ import annotations

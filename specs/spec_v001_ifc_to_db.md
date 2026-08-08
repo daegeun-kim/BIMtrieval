@@ -481,7 +481,6 @@ Task 01 implemented the full v001 pipeline code without executing database opera
 | `src/bim_rag/db_admin/init_db.py` | `bim-db-init` — idempotent schema setup (Task 34) |
 | `src/bim_rag/reporting.py` | Reconciliation reports for both stages |
 | `tests/` | 59 unit tests, 0 DB connections |
-| `docs/pipeline_v001.md` | Command reference and schema documentation |
 
 ### Test Results
 
@@ -647,7 +646,7 @@ Existing IFC entities: PRESERVED AND VALIDATED
 IFC relationships: IMPORTED AND VALIDATED
 Relationship members: IMPORTED AND VALIDATED
 Vector generation: NOT EXECUTED
-Current tasks/task03.md: OUTDATED AND NOT EXECUTED
+Original Task 03 plan: SUPERSEDED BY THE EXECUTION NOTES BELOW
 ```
 
 ---
@@ -681,7 +680,7 @@ destabilizing the driver.
   `torch.inference_mode()` + per-batch `torch.cuda.synchronize()` + stop-on-device-error (no
   retry), shared `_upsert_rag_document()` helper, additive `_add_rag_document_hash_columns()`
   migration.
-- `src/bim_rag/smoke_test.py` — staged CUDA smoke tests 1–6 from `tasks/task03.md`, independently
+- `src/bim_rag/smoke_test.py` — staged CUDA smoke tests 1–6, independently
   invocable (`python -m bim_rag.smoke_test --stage N`).
 - `notebooks/02_vectorize.ipynb` — reusable full-pipeline notebook (executed, real outputs),
   supersedes `01_structured_import.ipynb` as the primary entry point.

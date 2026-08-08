@@ -1,5 +1,5 @@
 """Request/response envelopes accept valid examples and reject invalid shapes
-(spec_v002 Section 16, tasks/task04.md required verification)."""
+(spec_v002 Section 16)."""
 
 from __future__ import annotations
 

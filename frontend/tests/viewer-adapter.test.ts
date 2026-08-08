@@ -48,7 +48,7 @@ describe("ViewerAdapter identity + roles", () => {
   });
 });
 
-describe("adaptive profile override (tasks/task18.md §11)", () => {
+describe("adaptive profile override (Task 18 §11)", () => {
   it("defaults to no override, and overriding takes effect immediately", () => {
     const adapter = new ViewerAdapter(5);
     expect(adapter.getProfileOverride()).toBeNull();

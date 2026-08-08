@@ -1,5 +1,5 @@
-// Isolated single-instance preview for the component panel (tasks/task14.md §5;
-// scheduling/visibility/lifetime rewritten by tasks/task18.md §10).
+// Isolated single-instance preview for the component panel (Task 14 §5;
+// scheduling/visibility/lifetime rewritten by Task 18 §10).
 //
 // Resource strategy: this renders ONLY the selected instance, from geometry
 // buffers extracted out of the model the main viewer already has loaded

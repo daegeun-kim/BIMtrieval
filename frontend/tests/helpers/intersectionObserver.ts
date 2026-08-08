@@ -1,4 +1,4 @@
-// Per-test controllable IntersectionObserver mock (tasks/task18.md §10). The
+// Per-test controllable IntersectionObserver mock (Task 18 §10). The
 // global default in tests/setup.ts always reports "visible" immediately;
 // tests that need to drive visibility explicitly (e.g. PreviewScene pausing
 // off-screen) should install this instead via vi.stubGlobal, then call

@@ -1,4 +1,4 @@
-// The grouped relationship diagram (tasks/task29.md §5.4).
+// The grouped relationship diagram (Task 29 §5.4).
 //
 // What these tests protect: the diagram states its own counts and directions,
 // only backend-declared selectable nodes act on the viewer, overlapping node

@@ -1,8 +1,8 @@
-"""Live acceptance runner that regenerates `specs/test_query.md` as v2.
+"""Live acceptance runner that generates an owner-local query transcript.
 
 Runs every recorded query against the Task 24 pipeline and writes
-`specs/test_query_v2.md` with the SAME sections, case ids, queries and expected
-values, and NEW answers, verdicts and measurements.
+an ignored report under `evaluation/results/` with the same sections, case ids,
+queries and expected values, and new answers, verdicts and measurements.
 
 **This makes real, billed OpenAI calls** — two per answered question. It is never
 imported by the request path and never runs as part of `pytest`.
@@ -30,8 +30,8 @@ from app.api.schemas.request import HistoryTurn, SessionQueryRequest
 from app.query.service import QueryService
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_OUTPUT = _REPO_ROOT / "specs" / "test_query_v2.md"
-_OUTPUT_V3 = _REPO_ROOT / "specs" / "test_query_v3.md"
+_OUTPUT = _REPO_ROOT / "evaluation" / "results" / "test_query_v2.md"
+_OUTPUT_V3 = _REPO_ROOT / "evaluation" / "results" / "test_query_v3.md"
 
 
 @dataclass
@@ -52,8 +52,8 @@ class Section:
     cases: list[Case] = field(default_factory=list)
 
 
-#: Transcribed from specs/test_query.md. Queries and expected values are
-#: verbatim; only answers and measurements are regenerated.
+#: Recorded acceptance queries and expected values are stable; only answers and
+#: measurements are regenerated.
 SECTIONS: list[Section] = [
     Section(
         title="Run 1 — Task 23 constraint-preservation set",
@@ -243,7 +243,7 @@ SECTIONS: list[Section] = [
     ),
 ]
 
-#: Verbatim from specs/test_query.md, carried forward unchanged.
+#: Stable reference values carried forward unchanged.
 REFERENCE_TABLE = """## Reference counts used as expected values (model 2)
 
 | filter | count |
@@ -525,8 +525,8 @@ def _write_report(
         else [
             "# Query & Answer Log — v2 (Task 24 pipeline)",
             "",
-            "Regenerated from `test_query.md` against the Task 24 model-aware binding pipeline.",
-            "Queries and expected values are identical to v1; answers and measurements are new.",
+            "Generated from the versioned benchmark cases against the Task 24 model-aware ",
+            "binding pipeline; answers and measurements are new.",
             "",
             "Answers are recorded verbatim as returned to the user. Expected values are DB ground",
             f"truth. Captured live (`gpt-5-nano` binder + answerer) on {run_date}.",
@@ -578,12 +578,11 @@ def _v3_header(run_date: str, planner: str, answerer: str) -> list[str]:
     return [
         "# Query & Answer Log — v3 (Task 25 pipeline)",
         "",
-        "Regenerated from `test_query.md` against the full Task 25 pipeline: the",
+        "Generated from the versioned benchmark cases against the full Task 25 pipeline: the",
         "ingestion-generated semantic manifest fed whole to the binder, the typed constraint",
         "ledger, deterministic ledger-coverage gating with one optional corrective call, and the",
-        "Responses API with strict structured outputs. Queries and expected values are identical",
-        "to v1 and v2; answers and measurements are new. Compare against `test_query_v2.md` for",
-        "the Task 24 baseline.",
+        "Responses API with strict structured outputs. Answers and measurements are new; the",
+        "v2 output in the same directory provides the Task 24 baseline.",
         "",
         "Answers are recorded verbatim as returned to the user. Expected values are DB ground",
         f"truth. Captured live on {run_date} with the cost-reduced roster:",
@@ -615,12 +614,12 @@ def main() -> int:
     parser.add_argument("--smoke", action="store_true", help="run a 4-case smoke subset")
     parser.add_argument("--only", nargs="*", help="run only these case ids")
     parser.add_argument(
-        "--v3", action="store_true", help="write specs/test_query_v3.md instead of v2"
+        "--v3", action="store_true", help="write the v3 evaluation transcript instead of v2"
     )
     parser.add_argument(
         "--v3-output",
         type=Path,
-        help="write a full v3 report to this path without replacing test_query_v3.md",
+        help="write a full v3 report to this path without replacing the default transcript",
     )
     parser.add_argument(
         "--tpm-limit",

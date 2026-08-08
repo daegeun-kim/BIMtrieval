@@ -1,4 +1,4 @@
-// Floor-plan range derivation (tasks/task28.md §3). PURE arithmetic over
+// Floor-plan range derivation (Task 28 §3). PURE arithmetic over
 // already-resolved SCENE elevations — no Three.js scene access, no Fragments
 // call, no React. The imperative half (views, clipping, section geometry) lives
 // in ViewerAdapter; this module owns the numbers so they can be tested exactly.

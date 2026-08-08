@@ -1,7 +1,7 @@
 import { controller } from "../state/controller";
 import { useStore } from "../state/store";
 
-// Floor-plan mode control (tasks/task28.md §1.1), directly below Reset app.
+// Floor-plan mode control (Task 28 §1.1), directly below Reset app.
 //
 // A compact vertical stack: 3D, then one button per LOGICAL floor band the
 // backend's read-only `/floors` contract reported — never one per raw

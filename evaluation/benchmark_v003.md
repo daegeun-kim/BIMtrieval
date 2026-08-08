@@ -180,7 +180,8 @@ patterns with zero hits.
 The v003 runner (`run_benchmark_v003.py`) was removed when Task 25 replaced the
 planner architecture. Its successor is
 `backend/app/evaluation/run_test_query_suite.py`, which runs the recorded query
-set against the current binder pipeline and writes `specs/test_query_v3.md`.
+set against the current binder pipeline and writes an ignored transcript under
+`evaluation/results/`.
 
 **These two are not interchangeable**, and the difference matters: v003's
 27-case scored JSON and the current suite's Markdown transcript measure
@@ -190,16 +191,11 @@ behaviour on the same questions.
 
 Commands are in [`README.md`](README.md).
 
-## Historical results
+## Supporting datasets
 
-Earlier runs are preserved with their original context and are **not** restated
-under current scoring:
+The reusable inputs retained alongside the current benchmark are:
 
 | Document | Scope |
 | --- | --- |
-| `docs/evaluation_v001_report.md` | The Task 08 report this benchmark's numbers come from, including the defects found and fixed during that run |
-| `specs/test_query_v1.md` | First recorded query set |
-| `specs/test_query_v2.md` | Regenerated against the Task 24 pipeline |
-| `specs/test_query_v3.md`, `specs/test_query_v3-1.md` | Regenerated against the Task 25 binder pipeline |
 | `backend/app/evaluation/rag_calibration_v001.jsonl` | The 8-question calibration behind the 0.50 / 0.55 similarity thresholds |
 | `backend/app/evaluation/hybrid_failure_cases_v001.jsonl` | Curated failure cases kept as a regression dataset |

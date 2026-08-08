@@ -57,3 +57,6 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
+
+# Owner-run live evaluation transcripts are regenerable and may spend tokens.
+evaluation/results/test_query_*.md

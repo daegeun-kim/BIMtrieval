@@ -1,5 +1,5 @@
 // Left-click select vs left-drag pan, and the dual-panel layout math
-// (tasks/task14.md §2, §5, §8).
+// (Task 14 §2, §5, §8).
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 

@@ -1108,8 +1108,8 @@ This architecture is considered correctly implemented by later tasks only when:
 
 ## 25. Task 04 Implementation Notes
 
-Task 04 (`tasks/task04_done.md`) implemented the shared foundation described
-above: the `backend/`/`frontend/` folder structure (Section 19), a FastAPI
+Task 04 implemented the shared foundation described above: the
+`backend/`/`frontend/` folder structure (Section 19), a FastAPI
 skeleton with `/health`, `/ready`, and `POST /api/query`, Pydantic base
 schemas (query scope/route, `QueryPlan` shells, session/query request,
 viewer actions, model candidates, primary/context entity and relationship
@@ -1118,8 +1118,7 @@ results, the response envelope), an `LLMClient` interface configured for
 locations with no prompt text yet, session-state models with `reset()`
 semantics, an additive (NOT EXECUTED) catalog-metadata migration proposal,
 JSONL logging with secret redaction, and compatibility shims over the
-existing `src/bim_rag/` ingestion pipeline. Full command reference:
-`docs/architecture_v002.md`.
+existing `src/bim_rag/` ingestion pipeline.
 
 No SQL, RAG, graph, or hybrid query path was implemented — those remain
 governed by `spec_v003_sql_query_path.md`, `spec_v004_rag_query_path.md`,

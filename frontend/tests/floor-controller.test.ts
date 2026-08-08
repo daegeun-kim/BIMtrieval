@@ -1,5 +1,5 @@
 // Floor-plan mode is a user-controlled VIEWER state, not an answer presentation
-// (tasks/task28.md §1.3, §6, §8.2).
+// (Task 28 §1.3, §6, §8.2).
 //
 // The whole point of this suite is what must NOT happen: no chat turn, no
 // natural-language query, no LLM call, no change to the Query Explanation panel,

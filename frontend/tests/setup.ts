@@ -9,7 +9,7 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver = globalThis.ResizeObserver ?? (ResizeObserverStub as never);
 
-// jsdom has no IntersectionObserver either (tasks/task18.md §10 preview
+// jsdom has no IntersectionObserver either (Task 18 §10 preview
 // visibility gating). Default stub reports "visible" immediately so existing
 // tests aren't starved; tests that need to drive visibility explicitly should
 // use tests/helpers/intersectionObserver.ts instead of relying on this default.

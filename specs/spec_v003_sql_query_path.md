@@ -378,12 +378,11 @@ The SQL path is acceptable when:
 
 ## 18. Task 05 Implementation Notes
 
-Task 05 (`tasks/task05_done.md`) implemented this specification in full
-against the live database: `backend/app/query/sql/*` (schemas, field
+Task 05 implemented this specification in full against the live database:
+`backend/app/query/sql/*` (schemas, field
 registry, compiler, catalog/entities/relationships/aggregates/hydration,
 errors) and `backend/app/query/graph/*` (semantic registry, bounded BFS
-traversal, hydration). Full command reference and data-specific caveats:
-`docs/architecture_v003.md`.
+traversal, hydration).
 
 Executed against the database (both idempotent, re-run-safe):
 `db.apply_catalog_migration` (created `model_families` and
@@ -399,7 +398,7 @@ The only ingested model at that time (Schependomlaan) had zero populated
 `quantity_sets`/`materials` and a single messy `property_sets` bucket — the
 engine is built spec-complete and generic, but live validation against this
 model correctly reports missing quantity/material data as *absent* rather
-than fabricating it (see `docs/architecture_v003.md`). The `mm`-only
+than fabricating it. The `mm`-only
 unit-conversion caveat recorded here was removed by task27: nothing is
 converted any more, and unit safety is decided from the semantic manifest
 (§10). That model's flattened `IFCREAL` properties carry no IFC measure type,
@@ -422,8 +421,8 @@ OpenAI orchestration: NOT EXECUTED
 
 ## 19. Task 13 Implementation Notes — separate limits, class expansion, component details
 
-Task 13 (`tasks/task13_done.md`) extended this path with three independent result limits, explicit
-IFC class expansion, and two deterministic read-only component contracts. Read-only throughout: no
+Task 13 extended this path with three independent result limits, explicit IFC class expansion, and
+two deterministic read-only component contracts. Read-only throughout: no
 migration, no re-ingestion, no IFC parsing, no new table.
 
 ### 19.1 Three independent limits (supersedes the single §11 reading)
@@ -487,8 +486,7 @@ type/family is therefore the expected, correct result for Schependomlaan — not
 frontend actions degrade cleanly. Other future models expose these automatically from already-stored
 canonical data with no schema change or re-ingestion.
 
-Contracts, routes, and validation results: `tasks/task13_done.md`; frontend-facing shape:
-`spec_v011_component_panel.md` §2.
+The frontend-facing contract is specified in `spec_v011_component_panel.md` §2.
 
 ---
 

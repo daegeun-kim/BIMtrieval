@@ -130,7 +130,7 @@ costly).
   raises cleanly, and `query.sql.entities.count_entities` immediately succeeds afterward in the
   same session — SQL/graph paths are unaffected by a RAG failure.
 
-## Stop condition (tasks/task06.md)
+## Stop condition
 
 ```text
 RAG query path: IMPLEMENTED AND VALIDATED

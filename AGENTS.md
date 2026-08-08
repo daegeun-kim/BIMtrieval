@@ -65,20 +65,9 @@ explicit owner-run command, never a test.
 
 - Before coding, make a plan. After coding, run the tests.
 - Follow `specs/` — the project blueprints — one spec version at a time.
-- `tasks/` holds smaller updates and fixes.
+- The completed task ledger has been retired; update the relevant specification
+  directly when a future change alters documented behavior.
 - Format and lint with `ruff format .` and `ruff check .`.
-
-### The task ledger
-
-After a task in `tasks/` is complete:
-
-1. Merge its content into the appropriate `specs/` file.
-2. Rename it by appending `_done` — `task01.md` becomes `task01_done.md`.
-
-Naming: `tasks/taskNN.md`, `specs/spec_vNNN_short_name.md`. No descriptive
-suffixes on task filenames unless asked. Task numbers are execution order;
-assume every lower-numbered task is complete rather than adding prerequisite
-checks.
 
 ### Experiment output
 

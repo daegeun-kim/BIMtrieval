@@ -1,5 +1,5 @@
-"""Live, read-only database tests (spec_v003 §16, tasks/task05.md required
-validation). All queries here run through `db.session.get_engine()`, which
+"""Live, read-only database tests (spec_v003 §16). All queries here run
+through `db.session.get_engine()`, which
 uses `DATABASE_URL` when set — the dedicated `bim_rag_query_ro` read-only
 role created by the ingestion-owned `bim_rag.db_admin.bootstrap_readonly_role`,
 not the ingestion superuser connection. Every test in this package is read-only.

@@ -7,7 +7,7 @@ for or depending on a model call.
 
 Assertions are structural and cross-checked against the database itself (e.g.
 "the count equals an independent COUNT(*) over the same classes") rather than
-against numbers copied from `specs/test_query.md` — §13.6 forbids pinning
+against numbers copied from the recorded query suite — §13.6 forbids pinning
 sample-specific expected counts, and a re-ingest must not break the suite.
 
 The whole package skips when the database is unreachable (see conftest).

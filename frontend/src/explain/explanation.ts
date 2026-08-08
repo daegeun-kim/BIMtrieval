@@ -1,5 +1,4 @@
-// Pure derivations for the query-explanation card (tasks/task26.md §4,
-// tasks/task29.md §2, §6).
+// Pure derivations for the query-explanation card (Task 26 §4, Task 29 §2, §6).
 //
 // Everything here is descriptive: it restates fields the backend already
 // computed for the accepted answer. Nothing in this file introduces a new
@@ -210,7 +209,7 @@ export function maxGroupCount(explanation: AnswerExplanation): number {
 }
 
 // ---------------------------------------------------------------------------
-// Object-table progressive display and sorting (tasks/task31.md §4)
+// Object-table progressive display and sorting (Task 31 §4)
 // ---------------------------------------------------------------------------
 
 /** Rows rendered initially, and appended per end-of-scroll (task31 §4.2). */

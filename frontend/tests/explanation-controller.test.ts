@@ -1,4 +1,4 @@
-// Query-explanation lifecycle and viewer synchronization (tasks/task26.md
+// Query-explanation lifecycle and viewer synchronization (Task 26
 // §2, §5, §6, §7). The viewer adapter and API client are fully mocked — no
 // scene, no network, no LLM.
 //

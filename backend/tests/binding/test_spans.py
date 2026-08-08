@@ -40,7 +40,7 @@ def _of_kind(question: str, kind: ModifierKind) -> list[str]:
         "give me a summary of this building",
         "what is the estimated construction cost of this building",
         "how many escalators are in this building?",
-        # Paraphrases not drawn from specs/test_query.md (§13.6).
+        # Paraphrases not drawn from the recorded query suite (§13.6).
         "what does the model contain",
         "describe the entire structure",
         "how much glazing is in the whole project",

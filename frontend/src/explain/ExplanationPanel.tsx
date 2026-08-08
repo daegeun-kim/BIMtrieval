@@ -5,7 +5,7 @@ import ExplanationInfo from "./ExplanationInfo";
 import ExplanationVisual from "./ExplanationVisual";
 import { activeGroup, isGraphNodeSelection } from "./explanation";
 
-// The Query Explanation card (tasks/task26.md). A visual explanation of the
+// The Query Explanation card (Task 26). A visual explanation of the
 // backend's already-computed authoritative result — not a second analysis
 // system. It never issues a query, so selecting a group or restoring the full
 // result costs nothing and consumes no tokens.

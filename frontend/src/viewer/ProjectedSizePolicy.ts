@@ -1,4 +1,4 @@
-// Projected-size rendering policy (tasks/task23.md issue 2).
+// Projected-size rendering policy (Task 23 issue 2).
 //
 // Reduces visualization load by hiding objects that are too small ON SCREEN to
 // justify rendering non-fundamental detail. The rule depends ONLY on an object's

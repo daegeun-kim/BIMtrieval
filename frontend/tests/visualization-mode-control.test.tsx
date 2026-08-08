@@ -1,5 +1,5 @@
 // The Fine | Standard | Fast control in the bottom-left readout
-// (tasks/task31.md §2.1, §8.1). The viewer adapter is mocked — this suite is
+// (Task 31 §2.1, §8.1). The viewer adapter is mocked — this suite is
 // about the control, the store, and the controller boundary.
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

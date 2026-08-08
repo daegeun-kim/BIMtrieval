@@ -18,7 +18,7 @@ import {
   type RowSortColumn,
 } from "./explanation";
 
-// The visualization half of the explanation card (tasks/task29.md §3, §4, §5).
+// The visualization half of the explanation card (Task 29 §3, §4, §5).
 // Ordinary React/CSS/SVG — no charting or graph dependency is needed for a bar
 // row, a table and a node-link diagram, and none is added.
 //

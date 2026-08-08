@@ -1,5 +1,5 @@
 """Terminal output: always-on statement/error/usage records + opt-in trace mode
-(tasks/task13.md §1 as amended by tasks/task15.md §1).
+(spec_v005 §22.1 as amended by §23).
 
 Offline: uses an in-memory SQLite engine to exercise the statement hook (the
 listener is registered on the SQLAlchemy `Engine` class, so any engine triggers
