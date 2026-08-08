@@ -897,8 +897,10 @@ not.
 | `Start BIM RAG.lnk` | Removed in Task 35 |
 | `scripts/create-shortcut.ps1` | Generated the above |
 
-Four root Markdown files remain: `README.md`, `AGENTS.md`, `CLAUDE.md`, and the
-untracked `update_plan.md` working document.
+Six root Markdown files remain: `README.md`, `AGENTS.md`, `CLAUDE.md`,
+`CHANGELOG.md`, `SECURITY.md`, and the tracked `update_plan.md` evaluation
+record. The last two were added in Task 41 because they carry release and
+security information that does not belong in the README.
 
 ### 8.3 Preserved
 
@@ -918,7 +920,7 @@ is worth more than the superseded numbers around it.
 
 ### 8.4 Stale references
 
-A link checker over all 70 tracked Markdown files reports **no broken relative
+A link checker over all 84 tracked Markdown files reports **no broken relative
 links**. Remaining mentions of removed things are all explanatory — the README
 note saying why the `.lnk` is gone, and `spec_v001`'s note that `ifc_original/`
 became `ifc/`. Fixed in `spec_v001`: the directory listing, the reference-model
@@ -968,20 +970,17 @@ against a baseline, **not** broadly validated (one model, no quantity sets),
 **not** geometry-aware, and **not** a design authoring tool. Plus cost
 expectations and the security boundary.
 
-### 9.4 Screenshots — deferred to the owner, with no broken placeholder
+### 9.4 Real application screenshots published
 
-The owner is capturing these. The README's image block sits inside an HTML
-comment, so nothing renders as a broken-image icon in the meantime, and
-publishing them is a two-step operation: drop the files in `docs/images/`, delete
-two comment markers.
+The README now publishes six real application images from `docs/images/`: a
+hero composition, the 3D viewer, a grounded query result, linked object
+selection, floor-plan mode, and the query-explanation experience. Together they
+show the AEC-specific interface and the connection between retrieved evidence
+and visible geometry rather than presenting the repository as a wall of text.
 
-`docs/images/README.md` specifies the six shots, what each must show, why it
-earns its place, capture size and format, redaction checks, and — usefully —
-which are free: loading a model, orbiting, switching floors, and selection make
-**no** OpenAI calls, so only the chat answer and explanation panel cost anything.
-
-A 60-second demo is described as optional with a suggested arc, ending on the
-refusal, and with the instruction not to add a link until it resolves.
+The temporary capture checklist and commented placeholders were removed once
+the final files landed. No fabricated mockup, broken placeholder, or redundant
+image-instruction document remains.
 
 ### 9.5 The check is now a test, not a script
 
@@ -992,7 +991,7 @@ default gate:
 - no document names something this session removed, except lines that explain
   the removal;
 - the README references no image that does not exist;
-- the screenshot checklist exists;
+- all six portfolio screenshots are published and resolve;
 - the README still starts with `# BIMtrieval`;
 - the README alone contains every command needed to run the app — quick start,
   `.env`, database setup, import, manual setup, shutdown — so the linked docs
@@ -1007,10 +1006,11 @@ repository.
 
 ### 9.6 Validation
 
-- Backend offline gate: **849 passed, 239 deselected** (8 new). Ruff clean.
-- No broken relative links across 70 Markdown files.
-- Screenshots and any demo recording remain **outstanding, by the owner's
-  choice**. Until the files land, the README is complete but image-free.
+- Backend offline gate: **866 passed, 239 deselected**. Ruff check and format
+  clean (**199 files**).
+- No broken relative links across 84 tracked Markdown files.
+- Six real application screenshots are published in the README and verified by
+  the documentation gate.
 
 ---
 
@@ -1020,13 +1020,13 @@ repository.
 
 | Finding | Prescribed fix | State |
 | --- | --- | --- |
-| "Nothing runs" — no Dockerfile, no compose, no migrations, no seed script | `docker compose up` works | Compose stack + production overlay written; migrations and `bim-db-init` done. **Runtime unvalidated** — see 10.4 |
+| "Nothing runs" — no Dockerfile, no compose, no migrations, no seed script | `docker compose up` works | **Done.** A clean, secret-free Compose acceptance run validated build/start, local fixture import, read-only access, missing-key behavior, browser connectivity, persistence, and teardown |
 | Windows-only `.lnk` as the documented entry point | Delete it, replace with a Makefile or compose file | Done. `.lnk` and its generator deleted, Compose documented as the entry point |
 | No `.env.example` | Add one | Done, with the read-only-role boundary explained |
 | No CI on anything that matters | GitHub Actions running pytest + ruff | Done — 4 jobs, plus the Playwright critical path |
 | Parallel `CLAUDE.md` / `CODEX.md` that will drift | Consolidate into one | Done. `AGENTS.md` canonical; `CLAUDE.md` is a 4-line import |
 | No stated evaluation numbers | Publish accuracy per query type, SQL vs RAG vs hybrid | Done — `evaluation/`, headline in the README, traceability enforced by tests |
-| No screenshots, GIFs, or demo video | Add them | **Outstanding** — owner is capturing them; checklist and comment-block ready |
+| No screenshots, GIFs, or demo video | Add them | **Done.** Six real application screenshots cover the viewer, grounded answers, selection, floor-plan mode, and query explanations |
 | "Tests that execute only when the author remembers are documentation, not a safety net" | Gate them | Done — CI gate, and the red baseline resolved (27 backend failures → 0) |
 | Evaluation harnesses, cost/latency budgets, retries, failure modes, observability, prompt-versioning | Fill the production half | Audited; most existed. Budgets added and test-enforced; three dead reporting paths removed |
 | 19 opaque commits; coarse commit hygiene | — | **Not addressed.** Out of scope for repository work; see 10.5 |
@@ -1036,10 +1036,10 @@ repository.
 
 | Check | Result |
 | --- | --- |
-| Ingestion offline `pytest` | **296 passed** |
-| Ingestion `ruff check` / `format --check` | clean / 73 files |
+| Ingestion offline `pytest` | **298 passed** |
+| Ingestion `ruff check` / `format --check` | clean / 46 files |
 | Ingestion `pytest tests_live` | **76 passed, 6 skipped** |
-| Backend offline `pytest` | **849 passed, 239 deselected** |
+| Backend offline `pytest` | **866 passed, 239 deselected** |
 | Backend `ruff check` / `format --check` | clean / 199 files |
 | Backend `pytest -m live` | **235 passed, 4 skipped** |
 | Frontend `npm test` | **476 passed** |
@@ -1056,23 +1056,26 @@ Playwright failures, 17 live failures.
 - The only tracked `.ifc` is the 1.6 KB `frontend/tests/fixtures/smoke-wall.ifc`.
 - Largest tracked file: the 1.2 MB generated IFC ontology vectors — a genuine
   runtime artifact.
+- The former 63 MB IFC is absent from the current tree and all Git history; the
+  largest blob anywhere in history is the same 1.2 MB ontology-vector artifact.
 - A credential-pattern scan over tracked files returns hits only inside
   `test_logging_redaction.py` and `test_settings.py`, which exist to assert that
   such strings are redacted.
 - Generated artifacts (`frontend/dist/`, `*.tsbuildinfo`, `playwright-report/`,
   `test-results/`) untracked and ignored.
 
-### 10.4 Not done, and why
+### 10.4 Visual evidence completed
 
-1. **Compose has never been run.** Docker is not installed on the development
-   machine — verified absent from PATH, Program Files, the registry, running
-   processes, and WSL. The stack is written and statically validated, and
-   building it surfaced two real defects, but `docker compose up --build` has
-   not executed. It is recorded as owner-verified-pending rather than claimed to
-   work.
-2. **No screenshots or demo video.** The owner elected to capture these.
-3. **Git history still contains the 63 MB IFC.** Untracking it does not shrink a
-   clone; that needs a history rewrite and a force-push.
+No engineering validation remains outstanding. Task 35's clean, secret-free
+acceptance run is recorded in Section 4.11 and `docs/container-boundaries.md`:
+the disposable stack built and started, imported the 1.6 KB fixture, enforced
+the read-only backend role, handled an empty OpenAI key without crashing,
+connected from both documented browser origins, preserved data across restart,
+and removed its volumes and containers on teardown.
+
+The README now publishes the six owner-supplied application screenshots. The
+temporary placeholder comments and capture checklist were removed, and the
+documentation gate verifies that every rendered image resolves.
 
 ### 10.5 Maintenance files added — and deliberately not added
 
@@ -1088,45 +1091,27 @@ while conveying nothing.
 
 ### 10.6 Manual owner actions
 
-Repository work is complete. These are GitHub-side or require a force-push:
-
-**Before tagging**
-
-1. Capture the six screenshots into `docs/images/`, then delete the two
-   `<!-- SCREENSHOTS ... -->` markers in `README.md`. Optionally record the
-   60-second demo and link it.
-2. Validate the container stack once Docker is installed:
-   ```bash
-   docker compose up --build
-   docker compose run --rm import "IFC Schependomlaan incl planningsdata.ifc"
-   docker compose down && docker compose up      # persistence
-   docker compose down -v                        # clean teardown
-   ```
-   Correct anything it surfaces before tagging.
-3. Optional, recommended: purge the 63 MB IFC from history and force-push.
-   ```bash
-   git filter-repo --path "ingestion/ifc_original/IFC Schependomlaan incl planningsdata.ifc" --invert-paths
-   ```
-   Until this runs, a clone is ~342 MB.
+Repository work is complete. These remaining actions require GitHub access:
 
 **Release**
 
-4. Commit in coherent slices rather than one batch — the review specifically
+1. Commit the screenshot and final documentation update coherently rather than
+   as an opaque batch — the review specifically
    criticises opaque changesets. Suggested: test contract → CI → config/DB/IFC →
    containers → evaluation → hardening → docs/README.
-5. Push, open a PR, confirm all four CI jobs pass.
-6. Tag `v0.1.0` and publish a release using the `CHANGELOG.md` 0.1.0 section.
+2. Push, open a PR, confirm all four CI jobs pass.
+3. Tag `v0.1.0` and publish a release using the `CHANGELOG.md` 0.1.0 section.
 
 **Repository settings**
 
-7. Description: *"Ask a building model a question, and see the answer in 3D.
+4. Description: *"Ask a building model a question, and see the answer in 3D.
    IFC → PostgreSQL + pgvector, hybrid SQL/graph/RAG retrieval, React/Three.js
    viewer."*
-8. Topics: `bim`, `ifc`, `aec`, `rag`, `pgvector`, `postgresql`, `fastapi`,
+5. Topics: `bim`, `ifc`, `aec`, `rag`, `pgvector`, `postgresql`, `fastapi`,
    `threejs`, `llm`, `digital-twin`, `ifcopenshell`, `retrieval-augmented-generation`.
-9. Branch protection on `main`: require the `Ingestion`, `Backend`, `Frontend`,
+6. Branch protection on `main`: require the `Ingestion`, `Backend`, `Frontend`,
    and `Critical path` checks.
-10. Pin the repository on the GitHub profile, and use the hero screenshot as the
+7. Pin the repository on the GitHub profile, and use the hero screenshot as the
     social preview image.
 
 ### 10.7 What this session did not fix

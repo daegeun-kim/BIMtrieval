@@ -5,12 +5,7 @@
 [![CI](https://github.com/daegeun-kim/BIMtrieval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/daegeun-kim/BIMtrieval/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-<!-- SCREENSHOTS — drop the five PNGs into docs/images/ and delete this comment
-     marker and the closing one below. Framing notes: docs/images/README.md
-
-![BIMtrieval answering a question about a building model](docs/images/hero.png)
-
--->
+![BIMtrieval answering a grounded question with matching BIM elements highlighted in 3D](docs/images/hero.png)
 
 ## The problem
 
@@ -63,6 +58,18 @@ there?" against a model whose `IfcSpace` entities are not parking, the pipeline
 does **not** answer with every space in the building — it says it could not apply
 "parking". Confident fabrication about a building is the failure mode this
 system is built to prevent.
+
+## Visual walkthrough
+
+| 3D model viewer | Grounded query result |
+| --- | --- |
+| ![A BIM model loaded in the Three.js viewer](docs/images/viewer.png) | ![A BIM question with an exact, evidence-grounded answer](docs/images/chat-answer.png) |
+
+| Linked selection and highlighting | AEC floor-plan mode |
+| --- | --- |
+| ![Query results selected in chat and highlighted in the BIM model](docs/images/selection.png) | ![A storey displayed in BIMtrieval floor-plan mode](docs/images/floor-plan.png) |
+
+![The query explanation panel showing how BIMtrieval produced an answer](docs/images/explanation.png)
 
 ## Quick start — Docker Compose
 

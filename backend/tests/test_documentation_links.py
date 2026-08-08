@@ -20,8 +20,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: `[text](target)` — the trailing `#anchor`, if any, is not resolved.
 _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+?)(?:#[^)]*)?\)")
-#: HTML comments do not render, so a link inside one cannot be broken. The
-#: README parks its screenshot block in one until the images exist.
+#: HTML comments do not render, so links inside them are excluded from checks
+#: that model the rendered document.
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
@@ -115,11 +115,7 @@ def test_no_document_points_at_something_this_session_removed(markdown_files):
 
 
 def test_the_readme_references_no_image_that_does_not_exist():
-    """A broken image is the one documentation defect nobody can miss.
-
-    The screenshot block stays inside an HTML comment until the files land, so
-    the rendered README never shows a broken-image icon.
-    """
+    """A broken image is the one documentation defect nobody can miss."""
     readme = _REPO_ROOT / "README.md"
     for target in re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", _rendered(readme)):
         if target.startswith(("http://", "https://")):
@@ -127,13 +123,22 @@ def test_the_readme_references_no_image_that_does_not_exist():
         assert (readme.parent / target).exists(), f"README shows a missing image: {target}"
 
 
-def test_the_screenshot_checklist_exists_for_whoever_captures_them():
-    """The images are not published yet; the instructions for producing them are."""
-    checklist = _REPO_ROOT / "docs" / "images" / "README.md"
-    assert checklist.is_file()
-    text = checklist.read_text(encoding="utf-8")
-    for required in ("hero.png", "floor-plan.png", "explanation.png"):
-        assert required in text
+def test_the_readme_publishes_the_complete_screenshot_set():
+    """Every portfolio view is visible in the rendered README."""
+    readme = _REPO_ROOT / "README.md"
+    rendered = _rendered(readme)
+    targets = set(re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", rendered))
+    for filename in (
+        "hero.png",
+        "viewer.png",
+        "chat-answer.png",
+        "selection.png",
+        "floor-plan.png",
+        "explanation.png",
+    ):
+        target = f"docs/images/{filename}"
+        assert target in targets, f"README does not publish {target}"
+        assert (readme.parent / target).is_file(), f"README image is missing: {target}"
 
 
 def test_the_readme_is_the_current_project_name():
