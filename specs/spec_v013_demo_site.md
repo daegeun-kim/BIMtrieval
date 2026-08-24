@@ -491,8 +491,8 @@ that has nowhere to go, because nothing fits beside anything.
 
 The demo restacks it along the usual convention for a viewer-plus-conversation
 app on a small screen: **the thing you are looking at on top, the thing you are
-reading and typing into below it.** Viewer in the upper 46%, panels as a
-full-width sheet under it.
+reading and typing into below it.** Viewer in the upper two thirds, panels
+as a full-width sheet under it.
 
 All of it is CSS in `demo.css`, inside a single `max-width: 768px` media query.
 Above that width not one declaration applies, so the desktop rendering is
@@ -523,6 +523,38 @@ rather than a house style.
 stack full-width and meet exactly, the picker and the quality control are
 clickable, the page does not scroll sideways, and the disclosure and CC BY credit
 survive the narrow layout.
+
+---
+
+### 6.8 Touch orbits around the touched point
+
+The application resolves an orbit pivot from whatever is under the cursor, but
+only for the middle mouse button — the one it maps to `ROTATE`:
+
+```
+if (e.button === 1) { void this.setPivotFromCursor(e); ... }
+```
+
+A touch reports `button === 0`, so that branch never runs on a phone. Meanwhile
+`configureControls` sets only `mouseButtons` and leaves `touches` at the
+camera-controls default, where one finger rotates. The model therefore orbited
+around whatever the target happened to be — usually the centre of the last fit —
+rather than around the thing being dragged, which reads as the building sliding
+away from your finger.
+
+`demoTouchPivot.ts` forwards a primary touch to the application's own
+`setPivotFromCursor`. It resolves nothing itself: no raycasting, no target
+arithmetic, no second definition of what a pivot is, so if that method changes,
+touch changes with it. The listener is registered with `capture` on the viewer
+container, which runs before camera-controls' own listener on the canvas inside
+it. Only the primary pointer qualifies — a pinch's second finger would otherwise
+move the ground mid-zoom.
+
+The module exposes a counter on `window` purely as a test seam. Where the pivot
+lands is the application's logic and its tests; what belongs here is narrower —
+that a touch reaches the resolver and a mouse press does not — and nothing else
+can observe that from outside. A browser test that cannot fail would be worse
+than none.
 
 ---
 
@@ -957,8 +989,8 @@ holds the page in its loading state by never fulfilling the model request.
 `npm run build:demo` succeeds; the emitted `index.html` carries the
 `/BIMtrieval/` base; **no backend URL survives anywhere in the demo bundle**; all
 487 existing frontend tests, `tsc -b --force`, and `eslint .` still pass; the 13
-guards in `tests/demo-site.test.ts` pass; and the 10 browser cases in
-`demo-site/e2e/` (6 desktop, 4 mobile) pass.
+guards in `tests/demo-site.test.ts` pass; and the 14 browser cases in
+`demo-site/e2e/` (6 desktop, 8 mobile) pass.
 
 Served locally, the demo boots, auto-loads the model without a confirmation
 click, renders the picker showing question text alone, replays a question through

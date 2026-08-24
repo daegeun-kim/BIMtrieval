@@ -29,7 +29,9 @@ async function stubModel(page: Page) {
   );
 }
 
-test.use({ viewport: { width: 390, height: 844 } });
+// hasTouch so `touchscreen` produces real touch pointer events — without it
+// Playwright synthesises mouse events and the touch-pivot case cannot be tested.
+test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
 // Checked BEFORE the model loads, which every other case here skips past by
 // waiting for the curtain. That window is not a detail: until the model arrives
@@ -47,8 +49,12 @@ test.describe("mobile layout before the model loads", () => {
     const panel = await page.locator(".panel").boundingBox();
     expect(banner).not.toBeNull();
 
-    // Inside the viewer band, which is the top 46% of the screen.
-    const viewerBottom = page.viewportSize()!.height * 0.46;
+    // Inside the viewer band. Read from the CSS variable rather than repeated
+    // here, so changing the split does not silently invalidate this bound.
+    const band = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue("--demo-viewer-h").trim(),
+    );
+    const viewerBottom = (page.viewportSize()!.height * parseFloat(band)) / 100;
     expect(banner.y + banner.height).toBeLessThanOrEqual(viewerBottom + 1);
 
     if (panel) {
@@ -139,6 +145,44 @@ test.describe("mobile layout", () => {
       await page.waitForTimeout(400); // past the settle re-measure
       await sane();
     }
+  });
+
+  test("gives the panel about a third of the screen", async ({ page }) => {
+    const panel = (await page.locator(".panel").boundingBox())!;
+    const screen = page.viewportSize()!.height;
+    const share = panel.height / screen;
+
+    // The model is what a visitor came to see; the panel only has to hold three
+    // buttons and an answer, and scrolls when the answer is long.
+    expect(share).toBeGreaterThan(0.25);
+    expect(share).toBeLessThan(0.4);
+  });
+
+  test("routes a touch to the orbit-pivot resolver, and a mouse press not", async ({ page }) => {
+    // The application resolves an orbit pivot from what is under the cursor, but
+    // only for the middle mouse button — a touch reports button 0, so on a phone
+    // that never ran and the model orbited around the stale target, sliding away
+    // from the finger.
+    //
+    // Asserted here is only what this demo module owns: a touch reaches the
+    // resolver and a mouse press does not. Where the pivot lands is the
+    // application's own logic, with its own tests.
+    const count = () => page.evaluate(() => window.__demoTouchPivotCount ?? 0);
+    const box = (await page.locator(".viewer-canvas").boundingBox())!;
+    const x = box.x + box.width * 0.35;
+    const y = box.y + box.height * 0.4;
+
+    expect(await count()).toBe(0);
+
+    await page.touchscreen.tap(x, y);
+    await expect.poll(count).toBe(1);
+
+    // A mouse press over the same spot must not: the application already handles
+    // the desktop case, and double-resolving would fight it.
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+    expect(await count()).toBe(1);
   });
 
   test("still discloses that it is a recording, with attribution", async ({ page }) => {

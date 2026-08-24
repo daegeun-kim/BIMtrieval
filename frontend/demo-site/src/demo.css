@@ -366,8 +366,13 @@
   :root {
     /* Height of the viewer band, as a share of the app (which is fixed to the
        viewport). One value drives the viewer, the panel's top edge, and the
-       readout's position, so the three cannot drift apart. */
-    --demo-viewer-h: 46%;
+       readout's position, so the three cannot drift apart.
+
+       Two thirds to the model, one third to the panel. The model is what a
+       visitor came to look at, and the panel below it only has to hold three
+       question buttons and an answer — it scrolls when an answer is long,
+       which is the ordinary bargain for a bottom sheet. */
+    --demo-viewer-h: 67%;
   }
 
   /* --- viewer occupies the top band ------------------------------------- */

@@ -15,6 +15,7 @@ import { controller } from "../../src/state/controller";
 import { useStore } from "../../src/state/store";
 import DemoBanner from "./DemoBanner";
 import { frameForDemo } from "./demoCamera";
+import { enableTouchPivot } from "./demoTouchPivot";
 
 export default function DemoApp() {
   const models = useStore((s) => s.models);
@@ -90,6 +91,13 @@ export default function DemoApp() {
     window.addEventListener("resize", apply);
     return () => window.removeEventListener("resize", apply);
   }, [panelWidth, panelCollapsed, componentOpen, explanationOpen, loadPhase]);
+
+  // Touch orbits around what the finger is on, matching what a middle-drag does
+  // with a mouse (§6.8). Attached once the viewer container exists.
+  useEffect(() => {
+    if (loadPhase === "idle") return;
+    return enableTouchPivot();
+  }, [loadPhase]);
 
   return (
     <>
