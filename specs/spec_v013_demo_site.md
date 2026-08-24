@@ -922,7 +922,29 @@ bottom-left. Getting them to share it took three goes:
 
 `demo.spec.ts` now asserts the left edge, the width, and a positive gap.
 
-### 14.9 Verified
+### 14.9 Measuring a card mid-reflow, twice
+
+The disclosure card docks by measuring `.readout`, and that measurement has now
+been wrong in two different ways:
+
+- **Stale.** The mutation observer was connected only when the readout was
+  missing at mount, then stopped. The card docked once against a half-rendered
+  readout and kept those numbers (§14.8).
+- **Transient.** Crossing the mobile breakpoint reflows the readout — the media
+  query hides its text lines, the remaining controls re-wrap — and a measurement
+  taken inside the `resize` handler caught it mid-reflow. The card pinned itself
+  at 34 px wide and 1200 px tall, off the top of the screen. **Rotating a phone
+  is enough to reach it.**
+
+Both come from the same root: a synchronous read of a layout that has not
+settled. Measurement now happens on the next animation frame rather than inside
+the event, a resize gets a second look 250 ms later for reflows that span several
+frames, and an implausibly narrow reading is discarded rather than cached.
+
+`mobile.spec.ts` rotates portrait → landscape → desktop → portrait and asserts
+the card stays sane at every step.
+
+### 14.10 Verified
 
 `npm run build:demo` succeeds; the emitted `index.html` carries the
 `/BIMtrieval/` base; **no backend URL survives anywhere in the demo bundle**; all

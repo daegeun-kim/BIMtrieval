@@ -29,11 +29,22 @@ interface Dock {
   bottom: number;
 }
 
+/**
+ * Below this, a `.readout` measurement is not a real one.
+ *
+ * Crossing the mobile breakpoint reflows that card — the media query hides its
+ * text lines and the remaining controls re-wrap — and a measurement taken mid
+ * reflow can catch it a few dozen pixels wide. Caching such a value docked the
+ * banner at 34 px wide and 1200 px tall, off the top of the screen. Rotating a
+ * phone is enough to reach it.
+ */
+const MIN_PLAUSIBLE_WIDTH_PX = 80;
+
 function readDock(): Dock | null {
   const readout = document.querySelector<HTMLElement>(".readout");
   if (!readout) return null;
   const rect = readout.getBoundingClientRect();
-  if (rect.width === 0) return null;
+  if (rect.width < MIN_PLAUSIBLE_WIDTH_PX || rect.height === 0) return null;
   return {
     left: Math.round(rect.left),
     width: Math.round(rect.width),
@@ -54,15 +65,36 @@ export default function DemoBanner() {
     // observer below watches the whole document, so an unconditional setState
     // here would re-render, mutate, and measure again without end.
     let current: Dock | null = null;
+    let frame = 0;
+    let settle = 0;
+
     const measure = () => {
       const next = readDock();
-      if (same(current, next)) return;
+      if (next === null || same(current, next)) return;
       current = next;
       setDock(next);
     };
 
+    // Always measured on the next frame, never synchronously inside the event
+    // that triggered it: a resize handler runs before the layout it caused has
+    // settled, and the value read there can be a snapshot of a card mid-reflow.
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+
+    // A breakpoint crossing reflows over more than one frame — the media query
+    // switches, the readout re-wraps, fonts settle — so a resize also gets a
+    // late second look. Cheap, and it is the difference between docking against
+    // the final layout and docking against a moment inside the transition.
+    const onResize = () => {
+      scheduleMeasure();
+      clearTimeout(settle);
+      settle = window.setTimeout(measure, 250);
+    };
+
     measure();
-    window.addEventListener("resize", measure);
+    window.addEventListener("resize", onResize);
 
     // The readout renders with the model, so it does not exist on first paint —
     // and React can replace the node afterwards, which silently orphans a
@@ -75,7 +107,7 @@ export default function DemoBanner() {
     // was missing at mount, then stopped. The card docked once against a
     // half-rendered readout and kept those numbers, ending up narrower than the
     // card it was supposed to match and overlapping it by 33 px.
-    const resizeObserver = new ResizeObserver(measure);
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
     let observed: Element | null = null;
     const attach = () => {
       const readout = document.querySelector(".readout");
@@ -87,13 +119,15 @@ export default function DemoBanner() {
 
     const mutationObserver = new MutationObserver(() => {
       attach();
-      measure();
+      scheduleMeasure();
     });
     attach();
     mutationObserver.observe(document.body, { childList: true, subtree: true });
 
     return () => {
-      window.removeEventListener("resize", measure);
+      window.removeEventListener("resize", onResize);
+      cancelAnimationFrame(frame);
+      clearTimeout(settle);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
     };

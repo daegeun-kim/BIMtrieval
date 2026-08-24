@@ -87,6 +87,34 @@ test.describe("mobile layout", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  test("survives crossing the breakpoint, as a rotation does", async ({ page }) => {
+    // The disclosure card measures the status readout to dock against it, and
+    // crossing the breakpoint reflows that readout. Measuring mid-reflow once
+    // pinned the card at 34 px wide and 1200 px tall, off the top of the screen
+    // — reachable by simply rotating a phone.
+    const sane = async () => {
+      const readout = (await page.locator(".readout").boundingBox())!;
+      const banner = (await page.locator(".demo-banner").boundingBox())!;
+      expect(banner.width).toBeGreaterThan(80);
+      expect(banner.y).toBeGreaterThanOrEqual(0);
+      expect(Math.abs(banner.width - readout.width)).toBeLessThan(2);
+      expect(banner.y + banner.height).toBeLessThan(readout.y + 1);
+    };
+
+    await sane();
+
+    // portrait -> landscape -> desktop -> back
+    for (const size of [
+      { width: 844, height: 390 },
+      { width: 1280, height: 800 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.waitForTimeout(400); // past the settle re-measure
+      await sane();
+    }
+  });
+
   test("still discloses that it is a recording, with attribution", async ({ page }) => {
     // The disclosure and the CC BY credit are obligations, not decoration, and
     // a narrow screen is exactly where a card like this tends to get dropped.
