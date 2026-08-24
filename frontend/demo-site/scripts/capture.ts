@@ -184,8 +184,22 @@ async function main(): Promise<void> {
   await write("models.json", { models: demoModels });
 
   const floors = (await getJson(`/api/models/${MODEL_ID}/floors`)) as {
-    floors?: Array<{ storey_global_ids?: string[]; storey_names?: string[] }>;
+    floors?: Array<{ label?: string; storey_global_ids?: string[]; storey_names?: string[] }>;
   };
+
+  // The backend numbers logical floor bands, so a single band comes back as
+  // "Floor 1" — which promises a "Floor 2" that does not exist, and implies the
+  // model has meaningful storey structure. This one does not: its storey
+  // labelling is faulty in the source IFC, and BIMtrieval deliberately does not
+  // correct source data. "Floor plan" says what the button actually does
+  // without making a claim about the building.
+  //
+  // Applied only when there is exactly one band. A model with real floors keeps
+  // the backend's numbering, which is correct for it.
+  if (floors.floors?.length === 1 && floors.floors[0]) {
+    floors.floors[0].label = "Floor plan";
+  }
+
   await write("floors.json", floors);
 
   // The storey a visitor would click before asking "what is in THIS storey?".

@@ -8,7 +8,7 @@
   "floors": [
     {
       "band_index": 0,
-      "label": "Floor 1",
+      "label": "Floor plan",
       "is_reference": true,
       "storey_global_ids": [
         "2uHHjIJM98q8JM83XVa$l1"

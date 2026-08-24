@@ -112,6 +112,26 @@ test.describe("static demo", () => {
     );
   });
 
+  test("labels the single floor band 'Floor plan', not 'Floor 1'", async ({ page }) => {
+    await page.goto("/");
+    const controls = page.getByTestId("floor-controls");
+    await expect(controls).toBeVisible({ timeout: 45_000 });
+
+    // The backend numbers logical bands, so one band arrives as "Floor 1" —
+    // which promises a Floor 2 that does not exist and implies this model has
+    // meaningful storey structure. Its storey labelling is faulty in the source
+    // IFC, and BIMtrieval does not correct source data, so the button says what
+    // it does rather than making a claim about the building.
+    //
+    // Asserted because `capture.ts` regenerates floors.json from the backend:
+    // without this, a re-capture would quietly restore "Floor 1".
+    await expect(controls.getByRole("button", { name: "Floor plan" })).toBeVisible();
+    await expect(controls.getByRole("button", { name: "Floor 1" })).toHaveCount(0);
+
+    // The 3D toggle is untouched.
+    await expect(controls.getByRole("button", { name: "3D" })).toBeVisible();
+  });
+
   test("docks the disclosure card above the readout, matching its width", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".demo-curtain")).toHaveClass(/is-lifted/, { timeout: 45_000 });
