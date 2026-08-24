@@ -106,10 +106,21 @@ export default function DemoBanner() {
       style={dock ? { left: dock.left, width: dock.width, bottom: dock.bottom } : undefined}
     >
       <p className="demo-banner-title">Static demo</p>
-      <p className="demo-banner-body">
+
+      {/* Two wordings, one shown at a time by CSS. On a phone the card shares a
+          ~390 px band with the viewer, and the full paragraph pushed it to
+          228 px — over half the viewer, and on top of the 3D controls. Trimming
+          the type alone was not enough; the sentence itself has to be shorter.
+          Toggled in CSS rather than JS so it follows a rotation with no state to
+          resynchronise. */}
+      <p className="demo-banner-body demo-on-wide">
         Real interface, real 3D model, three pre-recorded answers. There is no
         backend, no database, and no API key behind this page — so answers appear
         instantly that really took 6–22 seconds.
+      </p>
+      <p className="demo-banner-body demo-on-narrow">
+        Real interface and 3D model. Three answers recorded in advance — no
+        backend, no API key.
       </p>
       <a
         className="demo-banner-link"
@@ -122,8 +133,28 @@ export default function DemoBanner() {
 
       {/* CC BY 4.0 requires attribution to reach the recipient, and a text file
           nobody opens does not achieve that — so the credit is on the page
-          itself, not only in ATTRIBUTION.txt (spec_v013 §8.2). */}
-      <p className="demo-attribution">
+          itself, not only in ATTRIBUTION.txt (spec_v013 §8.2).
+
+          The narrow variant is shorter but not lighter: title, author, source,
+          licence, and the fact of modification are all still named, because
+          those are the licence's actual requirements rather than a house
+          style. */}
+      <p className="demo-attribution demo-on-narrow">
+        <em>Schependomlaan</em> by ROOT bv via{" "}
+        <a href="https://github.com/buildingSMART/Sample-Test-Files" target="_blank" rel="noreferrer">
+          buildingSMART
+        </a>{" "}
+        &middot;{" "}
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">
+          CC BY 4.0
+        </a>{" "}
+        &middot; converted to Fragments &middot;{" "}
+        <a href="ATTRIBUTION.txt" target="_blank" rel="noreferrer">
+          notice
+        </a>
+      </p>
+
+      <p className="demo-attribution demo-on-wide">
         Model: <em>IFC Schependomlaan incl planningsdata</em> by ROOT bv via{" "}
         <a href="https://github.com/buildingSMART/Sample-Test-Files" target="_blank" rel="noreferrer">
           buildingSMART

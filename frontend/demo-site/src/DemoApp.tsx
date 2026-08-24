@@ -20,6 +20,12 @@ export default function DemoApp() {
   const models = useStore((s) => s.models);
   const activeModel = useStore((s) => s.activeModel);
   const loadPhase = useStore((s) => s.loadPhase);
+  // Watched only so the obstruction effect below re-runs whenever the
+  // application's own does — it keys off exactly these.
+  const panelWidth = useStore((s) => s.panelWidth);
+  const panelCollapsed = useStore((s) => s.panelCollapsed);
+  const componentOpen = useStore((s) => s.componentGuid !== null);
+  const explanationOpen = useStore((s) => s.explanation !== null);
   const started = useRef(false);
   const framed = useRef(false);
   const [revealed, setRevealed] = useState(false);
@@ -62,6 +68,28 @@ export default function DemoApp() {
     framed.current = true;
     void frameForDemo().finally(() => setRevealed(true));
   }, [loadPhase]);
+
+  // On a phone the panels sit BELOW the viewer rather than beside it, so
+  // nothing obstructs it horizontally. The application computes an obstruction
+  // from the chat panel's width and feeds it to the camera, which is right for
+  // the desktop layout and badly wrong for this one — the camera would frame
+  // the model into a sliver on the left of a viewport that is actually full
+  // width.
+  //
+  // Child effects run before parent effects in React, and `App` is a child
+  // here, so this lands after the application's own call and wins. The store
+  // values it depends on are exactly the ones the application keys off, so the
+  // two stay in step rather than this going stale after a panel resize.
+  useEffect(() => {
+    const apply = () => {
+      if (window.matchMedia("(max-width: 768px)").matches) {
+        controller.viewer.setViewportObstruction(0);
+      }
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [panelWidth, panelCollapsed, componentOpen, explanationOpen, loadPhase]);
 
   return (
     <>

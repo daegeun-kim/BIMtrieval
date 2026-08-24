@@ -164,7 +164,9 @@ test.describe("static demo", () => {
 
     // CC BY 4.0 requires the credit to reach the person looking at the work, so
     // its presence on the page is a licence obligation, not decoration (§8.2).
-    const attribution = page.locator(".demo-attribution");
+    // Two variants exist in the DOM (wide and narrow copy); assert the one
+    // actually in the layout at this width.
+    const attribution = page.locator(".demo-attribution:visible");
     await expect(attribution).toContainText("Schependomlaan");
     await expect(attribution).toContainText("CC BY 4.0");
     await expect(attribution).toContainText(/converted/i);

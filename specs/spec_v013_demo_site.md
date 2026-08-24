@@ -483,6 +483,49 @@ could not be made (§14.8).
 
 ---
 
+### 6.7 Mobile layout
+
+The application is desktop-first by design — floating panels docked right, a
+status readout bottom-left, a viewer filling everything behind them. On a phone
+that has nowhere to go, because nothing fits beside anything.
+
+The demo restacks it along the usual convention for a viewer-plus-conversation
+app on a small screen: **the thing you are looking at on top, the thing you are
+reading and typing into below it.** Viewer in the upper 46%, panels as a
+full-width sheet under it.
+
+All of it is CSS in `demo.css`, inside a single `max-width: 768px` media query.
+Above that width not one declaration applies, so the desktop rendering is
+exactly the application's own. Two details are worth recording:
+
+- **The viewer is genuinely resized, not merely covered.** The canvas is what
+  the renderer measures for its aspect ratio, so a canvas extending behind the
+  sheet would frame the model for a viewport the visitor cannot see.
+- **The camera obstruction is zeroed.** `App` derives it from the chat panel's
+  width, which is correct when the panel is beside the viewer and badly wrong
+  when it is below — the model would be framed into a sliver. `DemoApp` sets it
+  to `0` on mobile; child effects run before parent effects in React, so this
+  lands after the application's own call, and it keys off the same store values
+  so the two cannot drift apart.
+
+Two things shrink rather than move. The status readout drops its model name,
+fingerprint, and phase — desktop luxuries that would cost a third of the viewer
+to repeat what the page already says — and keeps its actions row, which carries
+Fit and the quality control the demo opens on. The disclosure card carries a
+second, shorter wording: the full paragraph rendered at 228 px on a 390 px
+screen, over half the viewer and on top of the 3D controls. Trimming the type
+was not enough; the sentence had to be shorter. The narrow attribution is
+shorter but not lighter — title, author, source, licence, and the fact of
+modification are all still named, because those are the licence's requirements
+rather than a house style.
+
+`demo-site/e2e/mobile.spec.ts` runs the suite at 390 x 844: the viewer and panel
+stack full-width and meet exactly, the picker and the quality control are
+clickable, the page does not scroll sideways, and the disclosure and CC BY credit
+survive the narrow layout.
+
+---
+
 ## 7. Fixture data contract
 
 ### 7.1 Files
@@ -884,8 +927,8 @@ bottom-left. Getting them to share it took three goes:
 `npm run build:demo` succeeds; the emitted `index.html` carries the
 `/BIMtrieval/` base; **no backend URL survives anywhere in the demo bundle**; all
 487 existing frontend tests, `tsc -b --force`, and `eslint .` still pass; the 13
-guards in `tests/demo-site.test.ts` pass; and the 5 cases in
-`demo-site/e2e/demo.spec.ts` pass.
+guards in `tests/demo-site.test.ts` pass; and the 10 browser cases in
+`demo-site/e2e/` (6 desktop, 4 mobile) pass.
 
 Served locally, the demo boots, auto-loads the model without a confirmation
 click, renders the picker showing question text alone, replays a question through

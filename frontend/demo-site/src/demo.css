@@ -3,8 +3,15 @@
 
    Everything here uses the application's own design tokens from
    src/styles/theme.css, so the demo reads as the same product rather than a
-   landing page wrapped around it. No rule in this file targets a class owned by
-   src/ — the real components are styled by their own stylesheets, untouched. */
+   landing page wrapped around it.
+
+   Two groups of rules live here. The demo's own surfaces (curtain, picker,
+   banner) own their classes outright. The mobile layout at the bottom of this
+   file is different: it RESTYLES classes owned by src/ — .panel, .readout,
+   .viewer-canvas and friends — because the application is desktop-first and
+   lays those out for a wide screen, and spec_v013 forbids editing src/. Those
+   overrides are confined to one media query, so the desktop rendering is
+   byte-identical to the application's own. */
 
 /* ---- load curtain ------------------------------------------------------- */
 
@@ -320,7 +327,169 @@
   color: var(--ink-2);
 }
 
+/* Breakpoint-toggled copy. The disclosure and the CC BY credit both have a long
+   and a short wording (see DemoBanner.tsx); exactly one is in the layout at any
+   width. Defaults to the wide pair, so anything that fails to match a query
+   still shows the fuller text rather than nothing. */
+.demo-on-narrow {
+  display: none;
+}
+
 /* No narrow-screen override: the card is positioned from the readout's own
    measured box, so it follows it at every width — including the readout's own
    44vw cap — without a second set of numbers to keep in step. */
 
+
+/* ============================================================================
+   MOBILE LAYOUT
+   ============================================================================
+
+   The application is desktop-first by design: floating panels docked to the
+   right, a status readout bottom-left, and a viewer filling everything behind
+   them. On a phone that collapses into an unusable pile, because there is no
+   room beside anything.
+
+   The convention for a viewer-plus-conversation app on a small screen is a
+   stack: the thing you are looking at on top, the thing you are reading and
+   typing into below it. That is what this does — viewer in the upper band,
+   panels as a full-width sheet under it.
+
+   Everything below restyles classes owned by src/. That is not a liberty taken
+   lightly; spec_v013's central constraint is that no file under frontend/src/
+   is modified, and the layout that needs changing lives in src/App.css. The
+   overrides are therefore confined to this one media query. Above the
+   breakpoint not a single declaration here applies, so the desktop rendering is
+   exactly the application's own.
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  :root {
+    /* Height of the viewer band, as a share of the app (which is fixed to the
+       viewport). One value drives the viewer, the panel's top edge, and the
+       readout's position, so the three cannot drift apart. */
+    --demo-viewer-h: 46%;
+  }
+
+  /* --- viewer occupies the top band ------------------------------------- */
+
+  /* Genuinely resized rather than merely covered: the canvas is what the
+     renderer measures for its aspect ratio, so a canvas that extended behind
+     the sheet would frame the model for a viewport the visitor cannot see. */
+  .viewer-canvas {
+    inset: 0 0 auto 0;
+    height: var(--demo-viewer-h);
+  }
+
+  /* Keep the 3D / Floor plan controls inside the viewer band. */
+  .viewer-controls {
+    top: 12px;
+    left: 12px;
+    bottom: auto;
+    max-height: calc(var(--demo-viewer-h) - 24px);
+  }
+
+  /* --- the status readout becomes a quality control --------------------- */
+
+  /* The model name, fingerprint, and phase are desktop luxuries; on a phone
+     they would cost a third of the viewer to say what the page already says.
+     The actions row stays, because it carries Fit and the Fine / Standard /
+     Fast control that the demo deliberately opens on (§6.6). */
+  .readout-line,
+  .readout-meta {
+    display: none;
+  }
+
+  .readout {
+    left: 12px;
+    bottom: calc(100% - var(--demo-viewer-h) + 12px);
+    padding: 6px 10px;
+    max-width: calc(100% - 24px);
+  }
+
+  /* --- panels become a bottom sheet ------------------------------------- */
+
+  /* `width` is set as an inline style by ChatPanel (it is the draggable
+     desktop width), so only !important can reach it. The resizer is hidden
+     with it: there is nothing to drag when the sheet spans the screen. */
+  .panel {
+    top: var(--demo-viewer-h);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto !important;
+    border-right: none;
+    border-bottom: none;
+    border-left: none;
+    border-radius: var(--r-panel) var(--r-panel) 0 0;
+  }
+
+  .panel-resizer {
+    display: none;
+  }
+
+  /* Collapsed, the sheet leaves a button where the sheet was, not up in the
+     corner where a phone user is not reaching. */
+  .panel-restore {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+  }
+
+  /* The component detail panel docks beside the chat on desktop; here it takes
+     the same band and sits above it, which is how a detail sheet behaves. */
+  .component-panel {
+    top: var(--demo-viewer-h);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    border-radius: var(--r-panel) var(--r-panel) 0 0;
+    z-index: 11;
+  }
+
+  /* Explanation above transcript, both full width. */
+  .right-stack {
+    top: var(--demo-viewer-h);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    gap: var(--sp-2);
+  }
+
+  /* --- the demo's own surfaces ------------------------------------------ */
+
+  /* The disclosure card is positioned from the readout's measured box, so it
+     follows the compact readout up into the viewer band automatically. It only
+     needs to be smaller, since the band it now shares is a fraction of a
+     desktop screen. */
+  .demo-banner {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .demo-on-wide {
+    display: none;
+  }
+
+  .demo-on-narrow {
+    display: block;
+  }
+
+  .demo-banner-body {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .demo-attribution {
+    margin-top: var(--sp-2);
+    padding-top: var(--sp-1);
+    font-size: 9px;
+    line-height: 1.45;
+  }
+
+  /* Touch targets: the picker is the only way to ask anything, so its buttons
+     get real height rather than the desktop's compact rows. */
+  .demo-question {
+    padding: var(--sp-3) var(--sp-3);
+  }
+}
