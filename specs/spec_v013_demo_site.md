@@ -944,6 +944,14 @@ frames, and an implausibly narrow reading is discarded rather than cached.
 `mobile.spec.ts` rotates portrait → landscape → desktop → portrait and asserts
 the card stays sane at every step.
 
+A third variant of the same fault followed on the live site: **before the model
+loads**, the readout is an empty shell with no measurable width, so the card
+never docks and falls back to CSS — and the desktop fallback (`bottom: 150px`)
+lands inside the panel sheet on a phone. Every test then written waited for the
+curtain to lift, so none of them could see the state that was broken. The mobile
+fallback is now anchored to the viewer band, and `mobile.spec.ts` has a case that
+holds the page in its loading state by never fulfilling the model request.
+
 ### 14.10 Verified
 
 `npm run build:demo` succeeds; the emitted `index.html` carries the

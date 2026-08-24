@@ -463,8 +463,17 @@
      follows the compact readout up into the viewer band automatically. It only
      needs to be smaller, since the band it now shares is a fraction of a
      desktop screen. */
+  /* The pre-dock fallback has to be mobile-aware too. Until the model loads,
+     the readout is an empty shell with no measurable width, so the card stays
+     undocked and falls back to CSS — and the desktop fallback (bottom: 150px)
+     lands inside the panel sheet on a phone. Anchored to the viewer band
+     instead, roughly where the readout will appear, so the card does not jump
+     across the screen when the measurement finally succeeds. */
   .demo-banner {
     padding: var(--sp-2) var(--sp-3);
+    left: 12px;
+    width: calc(100% - 24px);
+    bottom: calc(100% - var(--demo-viewer-h) + 64px);
   }
 
   .demo-on-wide {

@@ -31,6 +31,32 @@ async function stubModel(page: Page) {
 
 test.use({ viewport: { width: 390, height: 844 } });
 
+// Checked BEFORE the model loads, which every other case here skips past by
+// waiting for the curtain. That window is not a detail: until the model arrives
+// the status readout is an empty shell with no measurable width, so the
+// disclosure card cannot dock and falls back to CSS. The desktop fallback put it
+// inside the panel sheet on a phone, and no test that waits for load could see
+// it.
+test.describe("mobile layout before the model loads", () => {
+  test("keeps the disclosure card in the viewer band, not over the panel", async ({ page }) => {
+    // Deliberately never fulfilled: this pins the page in its loading state.
+    await page.route("**/model.frag", () => {});
+    await page.goto("/");
+
+    const banner = (await page.locator(".demo-banner").boundingBox())!;
+    const panel = await page.locator(".panel").boundingBox();
+    expect(banner).not.toBeNull();
+
+    // Inside the viewer band, which is the top 46% of the screen.
+    const viewerBottom = page.viewportSize()!.height * 0.46;
+    expect(banner.y + banner.height).toBeLessThanOrEqual(viewerBottom + 1);
+
+    if (panel) {
+      expect(banner.y + banner.height).toBeLessThanOrEqual(panel.y + 1);
+    }
+  });
+});
+
 test.describe("mobile layout", () => {
   test.beforeEach(async ({ page }) => {
     await stubModel(page);
