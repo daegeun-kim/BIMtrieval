@@ -1,0 +1,10 @@
+{
+  "models": [
+    {
+      "source_model_id": 1,
+      "display_name": "IFC Schependomlaan incl planningsdata",
+      "source_fingerprint": "57fafa59f03b18c05be211a456e346bdd0445d5c35d66522e598d339e81dfcf4",
+      "viewer_asset_status": "ready"
+    }
+  ]
+}

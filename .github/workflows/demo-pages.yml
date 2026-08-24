@@ -1,0 +1,109 @@
+name: Demo site
+
+# Builds and publishes the static demo (spec_v013) to GitHub Pages.
+#
+# Secret-free by construction, and for a stronger reason than CI's: this
+# workflow's output is a PUBLIC web page. It holds no OPENAI_API_KEY, no
+# database URL, and no `.env` — there is nothing for it to authenticate to. The
+# demo answers three questions from recorded fixtures and calls no service at
+# runtime, so a credential here would have no purpose other than to leak.
+#
+# Prerequisites, both manual owner steps (spec_v013 §10):
+#   1. The repository is public.
+#   2. Settings → Pages → Source is set to "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The demo itself.
+      - "frontend/demo-site/**"
+      # The demo imports the real application, so a change to the frontend it
+      # composes must redeploy it too, or the published demo silently drifts
+      # from the code it claims to show.
+      - "frontend/src/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/demo-pages.yml"
+  workflow_dispatch:
+
+# One deploy at a time; a superseded build should not race a newer one to the
+# same URL. Not cancel-in-progress: a half-finished deploy is worse than a
+# redundant one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # The structural guards that keep the demo honest: the two aliased modules
+      # are still single-import, no file under src/ reaches into demo-site/, and
+      # the fixture manifest is complete (spec_v013 §11.1).
+      - name: Demo guards
+        run: npx vitest run tests/demo-site.test.ts
+
+      # This workflow's output is a public page, so it is worth paying for a
+      # real browser check that the demo still boots, loads a model, and reveals
+      # its routing — the failures the structural guards above cannot see. The
+      # suite stubs the 3D artifact with the small tracked fixture, so it does
+      # not need the model that is absent from Git.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Demo browser suite
+        run: npm run test:e2e:demo
+
+      - name: Build demo
+        run: npm run build:demo
+
+      - name: Fail if the 3D model is missing
+        # The demo's whole point is the building. Publishing without the
+        # artifact would put up a page that looks broken rather than one that
+        # is obviously unfinished, so this fails the deploy instead.
+        run: |
+          if [ ! -f dist-demo/model.frag ]; then
+            echo "::error::dist-demo/model.frag is missing."
+            echo "The demo cannot render without the Fragments artifact."
+            echo "It is a committed file — see spec_v013 §8 and frontend/demo-site/README.md."
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist-demo
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

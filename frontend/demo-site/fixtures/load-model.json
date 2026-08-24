@@ -1,0 +1,44 @@
+{
+  "request_id": "4e6b2c14-5f78-4d85-a79f-5c3d900eee0f",
+  "session_id": "demo-capture-count-01-1-1787594140866",
+  "status": "success",
+  "scope": "active_model",
+  "route": "sql",
+  "answer_basis": "exact_sql",
+  "answer": "Loaded model IFC Schependomlaan incl planningsdata. Ask a question about it.",
+  "active_source_model_id": 1,
+  "model_candidates": [],
+  "primary_entities": [],
+  "context_entities": [],
+  "relationships": [],
+  "viewer_actions": {
+    "model_action": "load_model",
+    "selection_action": "clear",
+    "primary_global_ids": [],
+    "context_global_ids": [],
+    "role_groups": [
+      {
+        "role": "primary_match",
+        "global_ids": []
+      },
+      {
+        "role": "relationship_context",
+        "global_ids": []
+      }
+    ],
+    "load_model_id": 1,
+    "viewer_source_location": "/api/models/1/viewer-asset",
+    "viewer_matches_total": null,
+    "viewer_matches_truncated": false
+  },
+  "evidence_summary": {
+    "basis": "exact_sql",
+    "sql_match_count": null,
+    "rag_candidate_count": null,
+    "relationship_count": null,
+    "notes": []
+  },
+  "result_summary": null,
+  "answer_explanation": null,
+  "warnings": []
+}

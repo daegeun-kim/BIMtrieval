@@ -1,0 +1,23 @@
+{
+  "source_model_id": 1,
+  "available": true,
+  "unavailable_reason": null,
+  "reference_band_index": 0,
+  "reference_basis": "elevation_zero",
+  "total_storeys": 1,
+  "floors": [
+    {
+      "band_index": 0,
+      "label": "Floor 1",
+      "is_reference": true,
+      "storey_global_ids": [
+        "2uHHjIJM98q8JM83XVa$l1"
+      ],
+      "storey_names": [
+        "Storey-1"
+      ],
+      "min_elevation": 0,
+      "max_elevation": 0
+    }
+  ]
+}

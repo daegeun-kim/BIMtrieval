@@ -1,0 +1,326 @@
+/* Styles for the two demo-only surfaces: the question picker that stands in for
+   the composer, and the disclosure banner (spec_v013 §6.4).
+
+   Everything here uses the application's own design tokens from
+   src/styles/theme.css, so the demo reads as the same product rather than a
+   landing page wrapped around it. No rule in this file targets a class owned by
+   src/ — the real components are styled by their own stylesheets, untouched. */
+
+/* ---- load curtain ------------------------------------------------------- */
+
+/* The application frames a freshly loaded model along whatever direction the
+   camera already faces, which is side-on. The demo re-poses it to a
+   three-quarter aerial view the moment the load finishes — but without this,
+   the side-on frame renders first and the visitor sees the view snap.
+
+   Rather than race the render, the canvas is simply covered until the opening
+   frame is posed. It carries the identical background as `.viewer-canvas`, so
+   what shows through is an empty viewport rather than a panel: the wait reads as
+   "still loading", which it is.
+
+   z-index 7 sits above the canvas and below the application's own loading card
+   (8), so the phase indicator stays visible throughout. */
+.demo-curtain {
+  /* Fixed, not absolute: this element is a sibling of `.app` rather than a
+     child, so it has no positioned ancestor to resolve against. */
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  background: radial-gradient(120% 120% at 50% 0%, var(--sheet-0) 0%, var(--sheet-1) 70%);
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 260ms ease;
+}
+
+.demo-curtain.is-lifted {
+  opacity: 0;
+}
+
+.demo-curtain-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  /* Retires as soon as the application's own phase card takes over, so the two
+     progress indicators are never on screen together. */
+  transition: opacity 200ms ease;
+}
+
+.demo-curtain.is-lifted .demo-curtain-inner {
+  opacity: 0;
+}
+
+.demo-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid color-mix(in srgb, var(--blue) 18%, transparent);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: demo-spin 820ms linear infinite;
+}
+
+.demo-curtain-text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+@keyframes demo-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-curtain {
+    transition: none;
+  }
+  /* Slowed rather than stopped: a still ring is not a progress indicator, and
+     the point of this element is to show that something is happening. */
+  .demo-spinner {
+    animation-duration: 2400ms;
+  }
+}
+
+/* ---- question picker ---------------------------------------------------- */
+
+.demo-picker-label {
+  margin: var(--sp-2) 0 var(--sp-2);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.demo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demo-question {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  font-family: var(--font-body);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.demo-question:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: var(--blue-wash);
+}
+
+.demo-question:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.demo-question:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.demo-question-text {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.demo-question.is-answered {
+  background: var(--surface-2);
+}
+
+.demo-question-blurb {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
+/* The routing reveal. Appears only after the question has been asked, so the
+   visitor watches the route being CHOSEN rather than reading it off a label
+   (spec_v013 §5.1). */
+.demo-routed {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  animation: demo-reveal 220ms ease both;
+}
+
+.demo-routed-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+@keyframes demo-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-routed {
+    animation: none;
+  }
+}
+
+/* The real cost of the recorded run, shown beside the revealed route so the
+   instant replay never reads as a latency claim (spec_v013 §6.4). */
+.demo-question-cost {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+/* Route badges, coloured by the three paths the demo exists to contrast. */
+.demo-route {
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-chip);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Coloured by retrieval method (`answer_basis`), which is what actually differs
+   between these answers — the route is "hybrid" for all of them. */
+.demo-route-exact_sql {
+  background: var(--blue-wash);
+  color: var(--blue);
+}
+
+.demo-route-graph_traversal {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+
+.demo-route-hybrid_evidence,
+.demo-route-semantic_retrieval {
+  background: #e2f7fa;
+  color: #0a8493;
+}
+
+.demo-route-insufficient_evidence,
+.demo-route-general_knowledge {
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+
+/* The operation the binder chose — the decision the retrieval mode is derived
+   from, so it belongs next to the method rather than hidden. */
+.demo-op {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* ---- disclosure banner -------------------------------------------------- */
+
+/* Docked above the application's status readout, matching its width (§6.4).
+
+   The position and width come from JS, which measures `.readout` — it sizes to
+   its content under a 44vw cap, so no fixed number is right for every model and
+   viewport. The rule below is the pre-measurement fallback, used for the moment
+   before the readout exists; `.is-docked` takes over once it does.
+
+   NOT placed ON the readout, which is where this started: it covered the
+   Fine / Standard / Fast control completely, leaving a choice that could be seen
+   but not made (§14.8). */
+.demo-banner {
+  position: fixed;
+  left: 20px;
+  bottom: 150px;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-panel);
+  font-family: var(--font-body);
+  /* Only the measured state animates into place; the fallback must not slide. */
+  transition: none;
+}
+
+.demo-banner.is-docked {
+  max-width: none;
+}
+
+.demo-banner-title {
+  margin: 0 0 var(--sp-1);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.demo-banner-body {
+  margin: 0 0 var(--sp-2);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.demo-banner-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.demo-banner-link:hover {
+  text-decoration: underline;
+}
+
+.demo-attribution {
+  margin: var(--sp-3) 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.demo-attribution a {
+  color: var(--ink-2);
+}
+
+/* No narrow-screen override: the card is positioned from the readout's own
+   measured box, so it follows it at every width — including the readout's own
+   44vw cap — without a second set of numbers to keep in step. */
+
