@@ -1,0 +1,1747 @@
+{
+  "request_id": "4db9c30a-9282-456f-9908-88a87693b27a",
+  "session_id": "demo-capture-count-01-1-1787594140866",
+  "status": "success",
+  "scope": "active_model",
+  "route": "hybrid",
+  "answer_basis": "exact_sql",
+  "answer": "There are 205 doors in this model.",
+  "active_source_model_id": 1,
+  "model_candidates": [],
+  "primary_entities": [
+    {
+      "entity_id": 621,
+      "global_id": "04PDIFJZXAA8R34kAXRvCn",
+      "ifc_class": "IfcDoor",
+      "name": "stelkozijn_(#143009)",
+      "summary": null
+    },
+    {
+      "entity_id": 623,
+      "global_id": "0T$nAC26PBZfnA7kWSCytO",
+      "ifc_class": "IfcDoor",
+      "name": "stelkozijn_(#86878)",
+      "summary": null
+    },
+    {
+      "entity_id": 625,
+      "global_id": "0BWtNdvyX0afioMW2CMtwK",
+      "ifc_class": "IfcDoor",
+      "name": "D2R_(#261759)",
+      "summary": null
+    }
+  ],
+  "context_entities": [],
+  "relationships": [],
+  "viewer_actions": {
+    "model_action": "keep_current",
+    "selection_action": "select_and_fit",
+    "primary_global_ids": [
+      "04PDIFJZXAA8R34kAXRvCn",
+      "0T$nAC26PBZfnA7kWSCytO",
+      "0BWtNdvyX0afioMW2CMtwK",
+      "1Uo8RaB_bDWA9BY6VlAcwo",
+      "2xvA_r$qvFC9zCBpYoYZKC",
+      "0QOizPQWHBZQ2D2tvdfZ6N",
+      "1SQtV9eAn5_Q1IsAvSwY8I",
+      "36RqsKGgnAtwiE40wqkr4_",
+      "0H2ypHDCr0BRCn4DQCiDdN",
+      "3lzeIrqN94Ww4su1Zq9ZXj",
+      "2GDkCtBCv2Kv4AnnZaOHy1",
+      "2_KAmB$JbBc8f9puZ0mA$z",
+      "0D7Id7MzH2uxJt4hcUb5uK",
+      "2EWHr2vvLEXhiQuQ0EXmUD",
+      "2r36KpN6z5Yvkd6nZ3NvOF",
+      "2HU8K_V9v2Hw2ctUl4$hFK",
+      "2E5AMxkYHCvvYGcrASMuPR",
+      "3DSayuD19FMAxyeSl4WzCB",
+      "1JRydtVc97cvwHAKXmm4q6",
+      "1qvmx_lMvFke78p$3zHwXO",
+      "0CWMdjbaDDwPGljxG5H$Pb",
+      "1XDhdMMb1Ea889W5huCDnE",
+      "2swAdW_6v84PsgbDqk$qXg",
+      "0dMjugeQj6X9iOeqRaS5Ij",
+      "0MBbjJaMX2N8x5EjwwkSJp",
+      "1fTV47sCf93QtKu7Xg8gFV",
+      "2QdSvMWH5Ae8Q4y2pmVjAl",
+      "0GSCEc2jz2QQHsY7vU6wah",
+      "1WOqi8lsr82QR9BFfyxMwD",
+      "35tbku5k197AncrC67czOQ",
+      "2nPLk4yavBremgrANqr6AV",
+      "1QhrEDw5L8YRWCWKsw4IXz",
+      "36luv8eiv6T8p4FqtPI9Cy",
+      "0iF69O0izB3P0oGDoyQCk2",
+      "15jopka3bA$fhzYPWcpr5Q",
+      "21K6IvJcD6S8LpzzqSjjCL",
+      "09YgJlwtPBZPXVROIrWdz0",
+      "3hCmUHy2r5KBS2HxOwpG$0",
+      "1bZOp7EYv1LPmsDGrxk0Df",
+      "2qhwZ3sdTBvwVobagNU94I",
+      "3DD3p1taPCU8NqjcITG1Rd",
+      "0RYpA7Yb1C1Pwv3FB31h2i",
+      "0gW6p_9cbDu8bX7gLw9$EM",
+      "3nt5yZBfzEhO2s4LtBCXiy",
+      "2AteZfCsnB0vn3iJO7wGs6",
+      "12bzBvWwP3XABoFAM5aCL9",
+      "2Jwj7CPxf6Pv_NhzDSpOzC",
+      "0HwqiWcMbDyRWdzArPqtTD",
+      "0PW_b4BLvEeRoppB8WwkbN",
+      "0lVn$Y_759cQUasvxkXfoO",
+      "1$$sLFtS1Fquud_AL06huE",
+      "3Ep$RfZ51BvQpgdKFAFn0q",
+      "2vlI$QeTP4G9YIWk86NFAi",
+      "0cx3Pz8Wv2zwOp0jE5VcYL",
+      "1BnpukGqn2OfhJzX1u$fmY",
+      "0DRT9ZI8H50hf$8EpIo8w2",
+      "0urQIRDLnF6Pf2S8VV_tQJ",
+      "0gLFztMZT6kB3AGpbabR0y",
+      "0L5SY_Do52GPmuP1oyni8I",
+      "0qC0BjM$LEihw9rhaU6soM",
+      "03EsVWJLz4DP5qdjaBI8E0",
+      "2DqYWqOXXF_OkO0XhzIbjE",
+      "1Xnj16HH157hj_4b0D7V5t",
+      "0Onla2hpLEdBBD4UepMzKJ",
+      "1tI56Zzqv56hALkTEe$jI7",
+      "3GNvlJOTnCZgas3iV__Q7h",
+      "25$S9_X891iO$gqkYrhHJR",
+      "2md_98AVP00A8tdTlxTNHH",
+      "1NWGoX4Rz6GRa1DHxzyDy6",
+      "3Gxt9wdyf0CP81hz3n6B$I",
+      "1__2Oqjbv5XAxtPkC13kkD",
+      "2ocDFGALz5b8ewo6rsffUj",
+      "3ZB9HMOMn6eQsHxAR0CUbn",
+      "3UwKoATcPEsOJYw5R1PA5z",
+      "3T6NXncNvBXx7h2iCZANrZ",
+      "2vn42Vk9v22OFhZQ1mzu$X",
+      "3rXPeT4an7$wN11sj0XGGI",
+      "19KFf_kzDEigi2BNHjEY$n",
+      "0yvv9KZmfCgxwgMryfcS2_",
+      "3M8megtGL73e1skmtB2pUf",
+      "24ShdhoKfEJwp_w_JSpczT",
+      "2aU8V735H7_AbMR7LwEnmc",
+      "2hjOYT9eT8qeiaKOfwHZOM",
+      "0PiJb3_L1FIQEV3As345uO",
+      "34zdoEEHP2S9fJg5gXsZqI",
+      "1A3P8e92f9EQCZlIaLUQrq",
+      "0KJ1dbZjDDbR1Yyl_k$mfS",
+      "0oziDNi1PF6RBTwiBEzocY",
+      "1hSZw6wC9BRuw9hekMd1C9",
+      "3NgiBKD7r4vviLopiS4MVv",
+      "0gR8OQ$9rFrRO453pw0q4k",
+      "0RQdud4mn188kT$iIZ5O2U",
+      "33yXJZhWD7x9tfJ9y9DWJs",
+      "1nR9GVbOL4KhdFhsF8pjL0",
+      "0UQvH56Nb5ShCJgzkYRmti",
+      "0XVIEjk8j8hRYHgCRmyLc2",
+      "1WSb0$iWL7peB9sECofy4l",
+      "0nM8hgtAvBe86VkOTwLJsO",
+      "0LnfVBC4TAOvlqw6kdtGrt",
+      "0lL911xmHBvArhCZtLQ0gq",
+      "1bjPfm5OD5sQYyFJU70PUm",
+      "1gR_7F$Kf9IwYWOiw_08O6",
+      "1sjN$ROi55eQi38LFNtaix",
+      "31g$8p$M9EIvtu1xQOQGKN",
+      "3My44kBFTARABD4rhpARyK",
+      "0Ioq9qsWT3jRHXtLGF19XI",
+      "0IOD4J2g15aetV4apvOA_u",
+      "0vYGh$SuL1LuTluoT_w$kF",
+      "3QFCfAj$jAhxNi3NmLhcbQ",
+      "30dWkZvUT6UOYZK$6qBgBD",
+      "0Ow_KsfnL1494P4mR3dNbm",
+      "1LFOrr5O98keJSTRSa5lls",
+      "3K9QAYfJnCigI_U3Aa5ZGT",
+      "3b0f1ahbD8e89ZNVxjtf9b",
+      "2I06TNCRX3cwIoPo71khpy",
+      "0IRIjldlL2MQ47SiY$bPnI",
+      "3i18OQRGjC7wdqHbUz$OD3",
+      "0FiGs_kA97ZPerIeXUVwGr",
+      "3TgASrMuv2NfZi7Jto0RDh",
+      "29L5nEyQT4UBEQFH4EVPW_",
+      "11g7yz38D8gRURxRKGgwtM",
+      "13alXc_4nFwOM2OrL_8ao3",
+      "31iMbvdzzF5v0jCoFAGjsv",
+      "1mwKhoH8D2hBAQ21nJlx0G",
+      "1UK75ZWz59LenhZ91PErV$",
+      "1aDoM8_dz7uBDYojn5jb4$",
+      "05GfwcovnAcgvnShGePzq8",
+      "1hseL6eqD3MQfhkcNXWz0$",
+      "1mLHtFxejFswyEDsN7gBn5",
+      "0qRJD5qbv43u5vahDV1oK8",
+      "3lvOx6YzT3UQRIfFPTqEXi",
+      "253h4v_lrAIORK90ew6gp5",
+      "1IVlKR2Tf24OW2TycSUGD9",
+      "3byU80ZV94IRJ9OiQvEXbi",
+      "1qb1RgeE16fg0YYMFFa$4H",
+      "1myuwR15v7MwxCOhfZSAzQ",
+      "2KUae0gX9AiPu909BLwdfJ",
+      "1gm4$Iv619OfFnFvyIyfZT",
+      "0HCH73Qnr1NR0muFPLFtfz",
+      "2o9w$kzxHCpOQrbnwHEF9T",
+      "1pzyH7qvf2SPBG5x3xupH4",
+      "3tcRk34350y9y8t2yU45y4",
+      "2lnRFmy4HFQwPQdvNwGFjz",
+      "2PDUkvpMXDRQ3LtdI7yRBF",
+      "01gVLV3oTBmwR703fMLHQQ",
+      "1REmJCRk51$QTXP$ogF_AS",
+      "2m9$QxXEj6ZB8HiNH1dk0G",
+      "2kXG_6BBP8CQEd_yJ90zE$",
+      "2j1BRncxH4DgiaelU6Q2V2",
+      "2EYLIE5FH1rhMSHuTfIEwo",
+      "2SReM$UVfDmgBVxohwI78d",
+      "1YmiZHYFfDmOO8eljPH_qi",
+      "32bBaPB5T35BeCUaR6weRT",
+      "1_3kYuINr5TwsP6Q2Upxmr",
+      "21p6o8P$TEYgLtHEImxqfG",
+      "0vlrJe_jv4IB9cvbW4CnrG",
+      "3CBMv$blbDM8qjhWWKR7gZ",
+      "3B$EuqV156LvX_4X8mldme",
+      "2yQmKfwrb5vATStYSMJnr_",
+      "1vGdaG9avAYO7AEklup$Cj",
+      "0Y67a6nj11Z9d1QtNyCb7g",
+      "35WlnsUf99ZR3kVbT6cE2j",
+      "1ty8RjYRn53wJA8Y2sySNX",
+      "1ouOynhDzAJxZsRUJcuK50",
+      "27pFf1NVr8U8_Uo1jtbjaP",
+      "2f$790Hcz969otqqc5DRNE",
+      "3pJ$Qd_XPB2vkL40RLYagA",
+      "2$aVgOHSD2PfsdmqgQAmjX",
+      "3qo5hk4HvDxhwxiXVUUQ5M",
+      "1xPx7ws65FmO8wIdIMubUN",
+      "3qOlkor2HBSvpamf_gJPd_",
+      "3EkNIGtVX6RBZr5KIt73X_",
+      "1RCelxXQHEquV$blyKtcDr",
+      "1cAakn$LvF48iULhlWWfi0",
+      "0SRKcqVrH2dfFqd01qtubJ",
+      "0$MXZNzRXBNv4VWgMEdVIg",
+      "2_uvu2uCr0F9ALtUmmMeA_",
+      "0MpFpKfbn4UAdxBYiD99bv",
+      "3ZL_NRU7f1Cxf23xJScxOr",
+      "0ZDUwvQTXDVxzFTanFXqPz",
+      "1YHSsdrHb2EgwW9l2d4Ahc",
+      "2awR$Krn55xBl1usT02m1h",
+      "1ucQvSDF9AnQgXd7$7Qmxg",
+      "235xPYZzn63uKqSpwhwc8S",
+      "2Iywgx9NL3COQsECzlNa7k",
+      "07AEgPc4T4PA9y$uuSi4AC",
+      "26PEnhIRP84w9lRBxOMn4B",
+      "2GugWqLN151O$Jif35EFJ3",
+      "3wZntAmJrBogfOHW7yl57s",
+      "1eugkmFzzBBRkg4KebLPbm",
+      "2L8ARnlSn7$gi6rY5VfT3a",
+      "0IUmw014v41A$pFagegCcN",
+      "0H3zj6jMvAdhGj8GrIl$s$",
+      "1tyz7oTqn5k9_zlDXIWHc4",
+      "1zjlZrbzbBS8ly$f1KAnNn",
+      "1XfjlNr$H5SBLVT47aOqJF",
+      "0pIv0hWZfBiA$_CRu76FSy",
+      "0M0b2WPCbBOhiXgGvA4GnH",
+      "0b$Kj8aN90NRfOIwKO0kpO",
+      "1e1TMS88vBfRbg_I2ithoR",
+      "11SKULRCTCAgZyivhhX2kf",
+      "0fzg76vdD0cww37HCpBMZ2",
+      "1$f33SeFv0uRyn$83EnHto",
+      "3i9YYw3LLF3uvjI2rq6cGg",
+      "3Xg39GjxL9gfwt_H8jQo5W"
+    ],
+    "context_global_ids": [],
+    "role_groups": [
+      {
+        "role": "primary_match",
+        "global_ids": [
+          "04PDIFJZXAA8R34kAXRvCn",
+          "0T$nAC26PBZfnA7kWSCytO",
+          "0BWtNdvyX0afioMW2CMtwK",
+          "1Uo8RaB_bDWA9BY6VlAcwo",
+          "2xvA_r$qvFC9zCBpYoYZKC",
+          "0QOizPQWHBZQ2D2tvdfZ6N",
+          "1SQtV9eAn5_Q1IsAvSwY8I",
+          "36RqsKGgnAtwiE40wqkr4_",
+          "0H2ypHDCr0BRCn4DQCiDdN",
+          "3lzeIrqN94Ww4su1Zq9ZXj",
+          "2GDkCtBCv2Kv4AnnZaOHy1",
+          "2_KAmB$JbBc8f9puZ0mA$z",
+          "0D7Id7MzH2uxJt4hcUb5uK",
+          "2EWHr2vvLEXhiQuQ0EXmUD",
+          "2r36KpN6z5Yvkd6nZ3NvOF",
+          "2HU8K_V9v2Hw2ctUl4$hFK",
+          "2E5AMxkYHCvvYGcrASMuPR",
+          "3DSayuD19FMAxyeSl4WzCB",
+          "1JRydtVc97cvwHAKXmm4q6",
+          "1qvmx_lMvFke78p$3zHwXO",
+          "0CWMdjbaDDwPGljxG5H$Pb",
+          "1XDhdMMb1Ea889W5huCDnE",
+          "2swAdW_6v84PsgbDqk$qXg",
+          "0dMjugeQj6X9iOeqRaS5Ij",
+          "0MBbjJaMX2N8x5EjwwkSJp",
+          "1fTV47sCf93QtKu7Xg8gFV",
+          "2QdSvMWH5Ae8Q4y2pmVjAl",
+          "0GSCEc2jz2QQHsY7vU6wah",
+          "1WOqi8lsr82QR9BFfyxMwD",
+          "35tbku5k197AncrC67czOQ",
+          "2nPLk4yavBremgrANqr6AV",
+          "1QhrEDw5L8YRWCWKsw4IXz",
+          "36luv8eiv6T8p4FqtPI9Cy",
+          "0iF69O0izB3P0oGDoyQCk2",
+          "15jopka3bA$fhzYPWcpr5Q",
+          "21K6IvJcD6S8LpzzqSjjCL",
+          "09YgJlwtPBZPXVROIrWdz0",
+          "3hCmUHy2r5KBS2HxOwpG$0",
+          "1bZOp7EYv1LPmsDGrxk0Df",
+          "2qhwZ3sdTBvwVobagNU94I",
+          "3DD3p1taPCU8NqjcITG1Rd",
+          "0RYpA7Yb1C1Pwv3FB31h2i",
+          "0gW6p_9cbDu8bX7gLw9$EM",
+          "3nt5yZBfzEhO2s4LtBCXiy",
+          "2AteZfCsnB0vn3iJO7wGs6",
+          "12bzBvWwP3XABoFAM5aCL9",
+          "2Jwj7CPxf6Pv_NhzDSpOzC",
+          "0HwqiWcMbDyRWdzArPqtTD",
+          "0PW_b4BLvEeRoppB8WwkbN",
+          "0lVn$Y_759cQUasvxkXfoO",
+          "1$$sLFtS1Fquud_AL06huE",
+          "3Ep$RfZ51BvQpgdKFAFn0q",
+          "2vlI$QeTP4G9YIWk86NFAi",
+          "0cx3Pz8Wv2zwOp0jE5VcYL",
+          "1BnpukGqn2OfhJzX1u$fmY",
+          "0DRT9ZI8H50hf$8EpIo8w2",
+          "0urQIRDLnF6Pf2S8VV_tQJ",
+          "0gLFztMZT6kB3AGpbabR0y",
+          "0L5SY_Do52GPmuP1oyni8I",
+          "0qC0BjM$LEihw9rhaU6soM",
+          "03EsVWJLz4DP5qdjaBI8E0",
+          "2DqYWqOXXF_OkO0XhzIbjE",
+          "1Xnj16HH157hj_4b0D7V5t",
+          "0Onla2hpLEdBBD4UepMzKJ",
+          "1tI56Zzqv56hALkTEe$jI7",
+          "3GNvlJOTnCZgas3iV__Q7h",
+          "25$S9_X891iO$gqkYrhHJR",
+          "2md_98AVP00A8tdTlxTNHH",
+          "1NWGoX4Rz6GRa1DHxzyDy6",
+          "3Gxt9wdyf0CP81hz3n6B$I",
+          "1__2Oqjbv5XAxtPkC13kkD",
+          "2ocDFGALz5b8ewo6rsffUj",
+          "3ZB9HMOMn6eQsHxAR0CUbn",
+          "3UwKoATcPEsOJYw5R1PA5z",
+          "3T6NXncNvBXx7h2iCZANrZ",
+          "2vn42Vk9v22OFhZQ1mzu$X",
+          "3rXPeT4an7$wN11sj0XGGI",
+          "19KFf_kzDEigi2BNHjEY$n",
+          "0yvv9KZmfCgxwgMryfcS2_",
+          "3M8megtGL73e1skmtB2pUf",
+          "24ShdhoKfEJwp_w_JSpczT",
+          "2aU8V735H7_AbMR7LwEnmc",
+          "2hjOYT9eT8qeiaKOfwHZOM",
+          "0PiJb3_L1FIQEV3As345uO",
+          "34zdoEEHP2S9fJg5gXsZqI",
+          "1A3P8e92f9EQCZlIaLUQrq",
+          "0KJ1dbZjDDbR1Yyl_k$mfS",
+          "0oziDNi1PF6RBTwiBEzocY",
+          "1hSZw6wC9BRuw9hekMd1C9",
+          "3NgiBKD7r4vviLopiS4MVv",
+          "0gR8OQ$9rFrRO453pw0q4k",
+          "0RQdud4mn188kT$iIZ5O2U",
+          "33yXJZhWD7x9tfJ9y9DWJs",
+          "1nR9GVbOL4KhdFhsF8pjL0",
+          "0UQvH56Nb5ShCJgzkYRmti",
+          "0XVIEjk8j8hRYHgCRmyLc2",
+          "1WSb0$iWL7peB9sECofy4l",
+          "0nM8hgtAvBe86VkOTwLJsO",
+          "0LnfVBC4TAOvlqw6kdtGrt",
+          "0lL911xmHBvArhCZtLQ0gq",
+          "1bjPfm5OD5sQYyFJU70PUm",
+          "1gR_7F$Kf9IwYWOiw_08O6",
+          "1sjN$ROi55eQi38LFNtaix",
+          "31g$8p$M9EIvtu1xQOQGKN",
+          "3My44kBFTARABD4rhpARyK",
+          "0Ioq9qsWT3jRHXtLGF19XI",
+          "0IOD4J2g15aetV4apvOA_u",
+          "0vYGh$SuL1LuTluoT_w$kF",
+          "3QFCfAj$jAhxNi3NmLhcbQ",
+          "30dWkZvUT6UOYZK$6qBgBD",
+          "0Ow_KsfnL1494P4mR3dNbm",
+          "1LFOrr5O98keJSTRSa5lls",
+          "3K9QAYfJnCigI_U3Aa5ZGT",
+          "3b0f1ahbD8e89ZNVxjtf9b",
+          "2I06TNCRX3cwIoPo71khpy",
+          "0IRIjldlL2MQ47SiY$bPnI",
+          "3i18OQRGjC7wdqHbUz$OD3",
+          "0FiGs_kA97ZPerIeXUVwGr",
+          "3TgASrMuv2NfZi7Jto0RDh",
+          "29L5nEyQT4UBEQFH4EVPW_",
+          "11g7yz38D8gRURxRKGgwtM",
+          "13alXc_4nFwOM2OrL_8ao3",
+          "31iMbvdzzF5v0jCoFAGjsv",
+          "1mwKhoH8D2hBAQ21nJlx0G",
+          "1UK75ZWz59LenhZ91PErV$",
+          "1aDoM8_dz7uBDYojn5jb4$",
+          "05GfwcovnAcgvnShGePzq8",
+          "1hseL6eqD3MQfhkcNXWz0$",
+          "1mLHtFxejFswyEDsN7gBn5",
+          "0qRJD5qbv43u5vahDV1oK8",
+          "3lvOx6YzT3UQRIfFPTqEXi",
+          "253h4v_lrAIORK90ew6gp5",
+          "1IVlKR2Tf24OW2TycSUGD9",
+          "3byU80ZV94IRJ9OiQvEXbi",
+          "1qb1RgeE16fg0YYMFFa$4H",
+          "1myuwR15v7MwxCOhfZSAzQ",
+          "2KUae0gX9AiPu909BLwdfJ",
+          "1gm4$Iv619OfFnFvyIyfZT",
+          "0HCH73Qnr1NR0muFPLFtfz",
+          "2o9w$kzxHCpOQrbnwHEF9T",
+          "1pzyH7qvf2SPBG5x3xupH4",
+          "3tcRk34350y9y8t2yU45y4",
+          "2lnRFmy4HFQwPQdvNwGFjz",
+          "2PDUkvpMXDRQ3LtdI7yRBF",
+          "01gVLV3oTBmwR703fMLHQQ",
+          "1REmJCRk51$QTXP$ogF_AS",
+          "2m9$QxXEj6ZB8HiNH1dk0G",
+          "2kXG_6BBP8CQEd_yJ90zE$",
+          "2j1BRncxH4DgiaelU6Q2V2",
+          "2EYLIE5FH1rhMSHuTfIEwo",
+          "2SReM$UVfDmgBVxohwI78d",
+          "1YmiZHYFfDmOO8eljPH_qi",
+          "32bBaPB5T35BeCUaR6weRT",
+          "1_3kYuINr5TwsP6Q2Upxmr",
+          "21p6o8P$TEYgLtHEImxqfG",
+          "0vlrJe_jv4IB9cvbW4CnrG",
+          "3CBMv$blbDM8qjhWWKR7gZ",
+          "3B$EuqV156LvX_4X8mldme",
+          "2yQmKfwrb5vATStYSMJnr_",
+          "1vGdaG9avAYO7AEklup$Cj",
+          "0Y67a6nj11Z9d1QtNyCb7g",
+          "35WlnsUf99ZR3kVbT6cE2j",
+          "1ty8RjYRn53wJA8Y2sySNX",
+          "1ouOynhDzAJxZsRUJcuK50",
+          "27pFf1NVr8U8_Uo1jtbjaP",
+          "2f$790Hcz969otqqc5DRNE",
+          "3pJ$Qd_XPB2vkL40RLYagA",
+          "2$aVgOHSD2PfsdmqgQAmjX",
+          "3qo5hk4HvDxhwxiXVUUQ5M",
+          "1xPx7ws65FmO8wIdIMubUN",
+          "3qOlkor2HBSvpamf_gJPd_",
+          "3EkNIGtVX6RBZr5KIt73X_",
+          "1RCelxXQHEquV$blyKtcDr",
+          "1cAakn$LvF48iULhlWWfi0",
+          "0SRKcqVrH2dfFqd01qtubJ",
+          "0$MXZNzRXBNv4VWgMEdVIg",
+          "2_uvu2uCr0F9ALtUmmMeA_",
+          "0MpFpKfbn4UAdxBYiD99bv",
+          "3ZL_NRU7f1Cxf23xJScxOr",
+          "0ZDUwvQTXDVxzFTanFXqPz",
+          "1YHSsdrHb2EgwW9l2d4Ahc",
+          "2awR$Krn55xBl1usT02m1h",
+          "1ucQvSDF9AnQgXd7$7Qmxg",
+          "235xPYZzn63uKqSpwhwc8S",
+          "2Iywgx9NL3COQsECzlNa7k",
+          "07AEgPc4T4PA9y$uuSi4AC",
+          "26PEnhIRP84w9lRBxOMn4B",
+          "2GugWqLN151O$Jif35EFJ3",
+          "3wZntAmJrBogfOHW7yl57s",
+          "1eugkmFzzBBRkg4KebLPbm",
+          "2L8ARnlSn7$gi6rY5VfT3a",
+          "0IUmw014v41A$pFagegCcN",
+          "0H3zj6jMvAdhGj8GrIl$s$",
+          "1tyz7oTqn5k9_zlDXIWHc4",
+          "1zjlZrbzbBS8ly$f1KAnNn",
+          "1XfjlNr$H5SBLVT47aOqJF",
+          "0pIv0hWZfBiA$_CRu76FSy",
+          "0M0b2WPCbBOhiXgGvA4GnH",
+          "0b$Kj8aN90NRfOIwKO0kpO",
+          "1e1TMS88vBfRbg_I2ithoR",
+          "11SKULRCTCAgZyivhhX2kf",
+          "0fzg76vdD0cww37HCpBMZ2",
+          "1$f33SeFv0uRyn$83EnHto",
+          "3i9YYw3LLF3uvjI2rq6cGg",
+          "3Xg39GjxL9gfwt_H8jQo5W"
+        ]
+      },
+      {
+        "role": "relationship_context",
+        "global_ids": []
+      }
+    ],
+    "load_model_id": null,
+    "viewer_source_location": null,
+    "viewer_matches_total": 205,
+    "viewer_matches_truncated": false
+  },
+  "evidence_summary": {
+    "basis": "exact_sql",
+    "sql_match_count": 205,
+    "rag_candidate_count": null,
+    "relationship_count": null,
+    "notes": []
+  },
+  "result_summary": {
+    "exact_total": 205,
+    "viewer_match_count": 205,
+    "viewer_matches_total": 205,
+    "truncated": false,
+    "class_counts": {
+      "IfcDoor": 205
+    },
+    "sample_detail": null
+  },
+  "answer_explanation": {
+    "part_id": "part_1",
+    "request_label": "How many doors are in this model?",
+    "operation": "count",
+    "result_status": "exact",
+    "presentation": "result_table",
+    "answer_basis": "exact_sql",
+    "interpretation": null,
+    "retrieval_modes": [
+      "sql"
+    ],
+    "exact_total": 205,
+    "class_breakdown": {
+      "IfcDoor": 205
+    },
+    "distribution": [],
+    "aggregate": null,
+    "relationship_endpoint_total": null,
+    "graph": null,
+    "presentation_fallback_reason": null,
+    "chart_unit": null,
+    "limitation": null,
+    "known_parts": [],
+    "unknown_parts": [],
+    "shown_identity_count": 205,
+    "true_result_count": 205,
+    "identities_truncated": false,
+    "groups": [],
+    "rows": [
+      {
+        "global_id": "04PDIFJZXAA8R34kAXRvCn",
+        "ifc_class": "IfcDoor",
+        "name": "stelkozijn_(#143009)",
+        "storey_name": "Storey-1"
+      },
+      {
+        "global_id": "0T$nAC26PBZfnA7kWSCytO",
+        "ifc_class": "IfcDoor",
+        "name": "stelkozijn_(#86878)",
+        "storey_name": "Storey-1"
+      },
+      {
+        "global_id": "0BWtNdvyX0afioMW2CMtwK",
+        "ifc_class": "IfcDoor",
+        "name": "D2R_(#261759)",
+        "storey_name": "Storey-1"
+      },
+      {
+        "global_id": "1Uo8RaB_bDWA9BY6VlAcwo",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2xvA_r$qvFC9zCBpYoYZKC",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0QOizPQWHBZQ2D2tvdfZ6N",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1SQtV9eAn5_Q1IsAvSwY8I",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "36RqsKGgnAtwiE40wqkr4_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0H2ypHDCr0BRCn4DQCiDdN",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3lzeIrqN94Ww4su1Zq9ZXj",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2GDkCtBCv2Kv4AnnZaOHy1",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2_KAmB$JbBc8f9puZ0mA$z",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0D7Id7MzH2uxJt4hcUb5uK",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2EWHr2vvLEXhiQuQ0EXmUD",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2r36KpN6z5Yvkd6nZ3NvOF",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2HU8K_V9v2Hw2ctUl4$hFK",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2E5AMxkYHCvvYGcrASMuPR",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3DSayuD19FMAxyeSl4WzCB",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1JRydtVc97cvwHAKXmm4q6",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1qvmx_lMvFke78p$3zHwXO",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0CWMdjbaDDwPGljxG5H$Pb",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1XDhdMMb1Ea889W5huCDnE",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2swAdW_6v84PsgbDqk$qXg",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0dMjugeQj6X9iOeqRaS5Ij",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0MBbjJaMX2N8x5EjwwkSJp",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1fTV47sCf93QtKu7Xg8gFV",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2QdSvMWH5Ae8Q4y2pmVjAl",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0GSCEc2jz2QQHsY7vU6wah",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1WOqi8lsr82QR9BFfyxMwD",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "35tbku5k197AncrC67czOQ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2nPLk4yavBremgrANqr6AV",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1QhrEDw5L8YRWCWKsw4IXz",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "36luv8eiv6T8p4FqtPI9Cy",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0iF69O0izB3P0oGDoyQCk2",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "15jopka3bA$fhzYPWcpr5Q",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "21K6IvJcD6S8LpzzqSjjCL",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "09YgJlwtPBZPXVROIrWdz0",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3hCmUHy2r5KBS2HxOwpG$0",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1bZOp7EYv1LPmsDGrxk0Df",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2qhwZ3sdTBvwVobagNU94I",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3DD3p1taPCU8NqjcITG1Rd",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0RYpA7Yb1C1Pwv3FB31h2i",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0gW6p_9cbDu8bX7gLw9$EM",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3nt5yZBfzEhO2s4LtBCXiy",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2AteZfCsnB0vn3iJO7wGs6",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "12bzBvWwP3XABoFAM5aCL9",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2Jwj7CPxf6Pv_NhzDSpOzC",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0HwqiWcMbDyRWdzArPqtTD",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0PW_b4BLvEeRoppB8WwkbN",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0lVn$Y_759cQUasvxkXfoO",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1$$sLFtS1Fquud_AL06huE",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3Ep$RfZ51BvQpgdKFAFn0q",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2vlI$QeTP4G9YIWk86NFAi",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0cx3Pz8Wv2zwOp0jE5VcYL",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1BnpukGqn2OfhJzX1u$fmY",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0DRT9ZI8H50hf$8EpIo8w2",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0urQIRDLnF6Pf2S8VV_tQJ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0gLFztMZT6kB3AGpbabR0y",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0L5SY_Do52GPmuP1oyni8I",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0qC0BjM$LEihw9rhaU6soM",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "03EsVWJLz4DP5qdjaBI8E0",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2DqYWqOXXF_OkO0XhzIbjE",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1Xnj16HH157hj_4b0D7V5t",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0Onla2hpLEdBBD4UepMzKJ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1tI56Zzqv56hALkTEe$jI7",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3GNvlJOTnCZgas3iV__Q7h",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "25$S9_X891iO$gqkYrhHJR",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2md_98AVP00A8tdTlxTNHH",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1NWGoX4Rz6GRa1DHxzyDy6",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3Gxt9wdyf0CP81hz3n6B$I",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1__2Oqjbv5XAxtPkC13kkD",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2ocDFGALz5b8ewo6rsffUj",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3ZB9HMOMn6eQsHxAR0CUbn",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3UwKoATcPEsOJYw5R1PA5z",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3T6NXncNvBXx7h2iCZANrZ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2vn42Vk9v22OFhZQ1mzu$X",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3rXPeT4an7$wN11sj0XGGI",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "19KFf_kzDEigi2BNHjEY$n",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0yvv9KZmfCgxwgMryfcS2_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3M8megtGL73e1skmtB2pUf",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "24ShdhoKfEJwp_w_JSpczT",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2aU8V735H7_AbMR7LwEnmc",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2hjOYT9eT8qeiaKOfwHZOM",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0PiJb3_L1FIQEV3As345uO",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "34zdoEEHP2S9fJg5gXsZqI",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1A3P8e92f9EQCZlIaLUQrq",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0KJ1dbZjDDbR1Yyl_k$mfS",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0oziDNi1PF6RBTwiBEzocY",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1hSZw6wC9BRuw9hekMd1C9",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3NgiBKD7r4vviLopiS4MVv",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0gR8OQ$9rFrRO453pw0q4k",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0RQdud4mn188kT$iIZ5O2U",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "33yXJZhWD7x9tfJ9y9DWJs",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1nR9GVbOL4KhdFhsF8pjL0",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0UQvH56Nb5ShCJgzkYRmti",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0XVIEjk8j8hRYHgCRmyLc2",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1WSb0$iWL7peB9sECofy4l",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0nM8hgtAvBe86VkOTwLJsO",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0LnfVBC4TAOvlqw6kdtGrt",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0lL911xmHBvArhCZtLQ0gq",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1bjPfm5OD5sQYyFJU70PUm",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1gR_7F$Kf9IwYWOiw_08O6",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1sjN$ROi55eQi38LFNtaix",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "31g$8p$M9EIvtu1xQOQGKN",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3My44kBFTARABD4rhpARyK",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0Ioq9qsWT3jRHXtLGF19XI",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0IOD4J2g15aetV4apvOA_u",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0vYGh$SuL1LuTluoT_w$kF",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3QFCfAj$jAhxNi3NmLhcbQ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "30dWkZvUT6UOYZK$6qBgBD",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0Ow_KsfnL1494P4mR3dNbm",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1LFOrr5O98keJSTRSa5lls",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3K9QAYfJnCigI_U3Aa5ZGT",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3b0f1ahbD8e89ZNVxjtf9b",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2I06TNCRX3cwIoPo71khpy",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0IRIjldlL2MQ47SiY$bPnI",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3i18OQRGjC7wdqHbUz$OD3",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0FiGs_kA97ZPerIeXUVwGr",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3TgASrMuv2NfZi7Jto0RDh",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "29L5nEyQT4UBEQFH4EVPW_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "11g7yz38D8gRURxRKGgwtM",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "13alXc_4nFwOM2OrL_8ao3",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "31iMbvdzzF5v0jCoFAGjsv",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1mwKhoH8D2hBAQ21nJlx0G",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1UK75ZWz59LenhZ91PErV$",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1aDoM8_dz7uBDYojn5jb4$",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "05GfwcovnAcgvnShGePzq8",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1hseL6eqD3MQfhkcNXWz0$",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1mLHtFxejFswyEDsN7gBn5",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0qRJD5qbv43u5vahDV1oK8",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3lvOx6YzT3UQRIfFPTqEXi",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "253h4v_lrAIORK90ew6gp5",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1IVlKR2Tf24OW2TycSUGD9",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3byU80ZV94IRJ9OiQvEXbi",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1qb1RgeE16fg0YYMFFa$4H",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1myuwR15v7MwxCOhfZSAzQ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2KUae0gX9AiPu909BLwdfJ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1gm4$Iv619OfFnFvyIyfZT",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0HCH73Qnr1NR0muFPLFtfz",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2o9w$kzxHCpOQrbnwHEF9T",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1pzyH7qvf2SPBG5x3xupH4",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3tcRk34350y9y8t2yU45y4",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2lnRFmy4HFQwPQdvNwGFjz",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2PDUkvpMXDRQ3LtdI7yRBF",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "01gVLV3oTBmwR703fMLHQQ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1REmJCRk51$QTXP$ogF_AS",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2m9$QxXEj6ZB8HiNH1dk0G",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2kXG_6BBP8CQEd_yJ90zE$",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2j1BRncxH4DgiaelU6Q2V2",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2EYLIE5FH1rhMSHuTfIEwo",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2SReM$UVfDmgBVxohwI78d",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1YmiZHYFfDmOO8eljPH_qi",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "32bBaPB5T35BeCUaR6weRT",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1_3kYuINr5TwsP6Q2Upxmr",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "21p6o8P$TEYgLtHEImxqfG",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0vlrJe_jv4IB9cvbW4CnrG",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3CBMv$blbDM8qjhWWKR7gZ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3B$EuqV156LvX_4X8mldme",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2yQmKfwrb5vATStYSMJnr_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1vGdaG9avAYO7AEklup$Cj",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0Y67a6nj11Z9d1QtNyCb7g",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "35WlnsUf99ZR3kVbT6cE2j",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1ty8RjYRn53wJA8Y2sySNX",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1ouOynhDzAJxZsRUJcuK50",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "27pFf1NVr8U8_Uo1jtbjaP",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2f$790Hcz969otqqc5DRNE",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3pJ$Qd_XPB2vkL40RLYagA",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2$aVgOHSD2PfsdmqgQAmjX",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3qo5hk4HvDxhwxiXVUUQ5M",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1xPx7ws65FmO8wIdIMubUN",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3qOlkor2HBSvpamf_gJPd_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3EkNIGtVX6RBZr5KIt73X_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1RCelxXQHEquV$blyKtcDr",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1cAakn$LvF48iULhlWWfi0",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0SRKcqVrH2dfFqd01qtubJ",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0$MXZNzRXBNv4VWgMEdVIg",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2_uvu2uCr0F9ALtUmmMeA_",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0MpFpKfbn4UAdxBYiD99bv",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3ZL_NRU7f1Cxf23xJScxOr",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0ZDUwvQTXDVxzFTanFXqPz",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1YHSsdrHb2EgwW9l2d4Ahc",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2awR$Krn55xBl1usT02m1h",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1ucQvSDF9AnQgXd7$7Qmxg",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "235xPYZzn63uKqSpwhwc8S",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2Iywgx9NL3COQsECzlNa7k",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "07AEgPc4T4PA9y$uuSi4AC",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "26PEnhIRP84w9lRBxOMn4B",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2GugWqLN151O$Jif35EFJ3",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3wZntAmJrBogfOHW7yl57s",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1eugkmFzzBBRkg4KebLPbm",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "2L8ARnlSn7$gi6rY5VfT3a",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0IUmw014v41A$pFagegCcN",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0H3zj6jMvAdhGj8GrIl$s$",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1tyz7oTqn5k9_zlDXIWHc4",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1zjlZrbzbBS8ly$f1KAnNn",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1XfjlNr$H5SBLVT47aOqJF",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0pIv0hWZfBiA$_CRu76FSy",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0M0b2WPCbBOhiXgGvA4GnH",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0b$Kj8aN90NRfOIwKO0kpO",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1e1TMS88vBfRbg_I2ithoR",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "11SKULRCTCAgZyivhhX2kf",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "0fzg76vdD0cww37HCpBMZ2",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "1$f33SeFv0uRyn$83EnHto",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3i9YYw3LLF3uvjI2rq6cGg",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      },
+      {
+        "global_id": "3Xg39GjxL9gfwt_H8jQo5W",
+        "ifc_class": "IfcDoor",
+        "name": null,
+        "storey_name": null
+      }
+    ]
+  },
+  "warnings": []
+}

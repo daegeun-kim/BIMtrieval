@@ -1,0 +1,12 @@
+{
+  "source_model_id": 1,
+  "resolved": [
+    {
+      "entity_id": 254,
+      "global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "ifc_class": "IfcBuildingStorey",
+      "name": "Storey-1"
+    }
+  ],
+  "unresolved": []
+}

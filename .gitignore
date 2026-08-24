@@ -52,11 +52,17 @@ build/
 dist/
 test-results/
 
+# NOTE: frontend/demo-site/public/model.frag is deliberately NOT ignored. It is
+# the demo's 3D payload (spec_v013 §8) — 5.5 MB, redistributed under CC BY 4.0
+# with attribution in demo-site/public/ATTRIBUTION.txt and on the page itself.
+
 # Frontend build output and incremental typecheck state — regenerable.
 frontend/dist/
+frontend/dist-demo/
 frontend/*.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
 
 # Owner-run live evaluation transcripts are regenerable and may spend tokens.
 evaluation/results/test_query_*.md
+/BIMtrieval_support

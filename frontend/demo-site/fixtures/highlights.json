@@ -1,0 +1,308 @@
+{
+  "04PDIFJZXAA8R34kAXRvCn::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "04PDIFJZXAA8R34kAXRvCn"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcDoor": 1
+    }
+  },
+  "04PDIFJZXAA8R34kAXRvCn::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "04PDIFJZXAA8R34kAXRvCn::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0T$nAC26PBZfnA7kWSCytO::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "0T$nAC26PBZfnA7kWSCytO"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcDoor": 1
+    }
+  },
+  "0T$nAC26PBZfnA7kWSCytO::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0T$nAC26PBZfnA7kWSCytO::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0BWtNdvyX0afioMW2CMtwK::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "0BWtNdvyX0afioMW2CMtwK"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcDoor": 1
+    }
+  },
+  "0BWtNdvyX0afioMW2CMtwK::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0BWtNdvyX0afioMW2CMtwK::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0X9NHFByPEEuoRYN$4mN72::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "0X9NHFByPEEuoRYN$4mN72"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWindow": 1
+    }
+  },
+  "0X9NHFByPEEuoRYN$4mN72::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0X9NHFByPEEuoRYN$4mN72::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0iur7_4VD4xxoIiMBCeFB7::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "0iur7_4VD4xxoIiMBCeFB7"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWindow": 1
+    }
+  },
+  "0iur7_4VD4xxoIiMBCeFB7::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0iur7_4VD4xxoIiMBCeFB7::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "1Hop7C_uL2NwEiyQMadOw5::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "1Hop7C_uL2NwEiyQMadOw5"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWindow": 1
+    }
+  },
+  "1Hop7C_uL2NwEiyQMadOw5::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "1Hop7C_uL2NwEiyQMadOw5::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0scb2py45E_A5xr$zrNTSI::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "0scb2py45E_A5xr$zrNTSI"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWallStandardCase": 1
+    }
+  },
+  "0scb2py45E_A5xr$zrNTSI::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "0scb2py45E_A5xr$zrNTSI::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "1vot43PmLCP8CY_O5YVkFs::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "1vot43PmLCP8CY_O5YVkFs"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWall": 1
+    }
+  },
+  "1vot43PmLCP8CY_O5YVkFs::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "1vot43PmLCP8CY_O5YVkFs::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "31_nln1kX8tBXoRFmX3WTy::instance": {
+    "source_model_id": 1,
+    "scope": "instance",
+    "available": true,
+    "unavailable_reason": null,
+    "total": 1,
+    "global_ids": [
+      "31_nln1kX8tBXoRFmX3WTy"
+    ],
+    "truncated": false,
+    "class_counts": {
+      "IfcWall": 1
+    }
+  },
+  "31_nln1kX8tBXoRFmX3WTy::type": {
+    "source_model_id": 1,
+    "scope": "type",
+    "available": false,
+    "unavailable_reason": "This model has no explicit IFC type data for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  },
+  "31_nln1kX8tBXoRFmX3WTy::family": {
+    "source_model_id": 1,
+    "scope": "family",
+    "available": false,
+    "unavailable_reason": "This model has no explicit family property for this object.",
+    "total": 0,
+    "global_ids": [],
+    "truncated": false,
+    "class_counts": {}
+  }
+}

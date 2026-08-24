@@ -14,7 +14,13 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "gen:api": "openapi-typescript ../frontend_openapi_snapshot.json -o src/types/api.ts --default-non-nullable=false",
-    "prepare:model": "tsx scripts/prepare-viewer-model.ts"
+    "prepare:model": "tsx scripts/prepare-viewer-model.ts",
+    "dev:demo": "vite --config demo-site/vite.config.ts",
+    "build:demo": "tsc -p demo-site/tsconfig.json && vite build --config demo-site/vite.config.ts",
+    "preview:demo": "vite preview --config demo-site/vite.config.ts",
+    "typecheck:demo": "tsc -p demo-site/tsconfig.json",
+    "test:e2e:demo": "playwright test --config demo-site/playwright.config.ts",
+    "capture:demo": "tsx demo-site/scripts/capture.ts"
   },
   "dependencies": {
     "@thatopen/components": "~3.4.6",

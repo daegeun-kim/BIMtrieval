@@ -1,0 +1,39 @@
+BIMtrieval static demo — dataset attribution
+============================================
+
+3D MODEL
+--------
+Title    : IFC Schependomlaan incl planningsdata
+Authors  : Design model produced in ArchiCAD by ROOT bv, published as part of the
+           Schependomlaan open BIM dataset by openBIMstandards.
+Source   : buildingSMART International, "Sample-Test-Files" repository,
+           path: IFC 2x3/Schependomlaan
+           https://github.com/buildingSMART/Sample-Test-Files
+Licence  : Creative Commons Attribution 4.0 International (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+
+MODIFICATIONS
+-------------
+CC BY 4.0 requires that changes be indicated. This demo does NOT ship the
+original IFC file. The model was modified as follows:
+
+  1. Converted from IFC (IFC2X3 STEP) to the That Open "Fragments" binary
+     format (@thatopen/fragments 3.4.6 / web-ifc 0.0.77) for rendering in a
+     browser.
+  2. No geometry was added or removed in that conversion; it is a format change,
+     not an edit to the building design.
+
+The resulting file is served from this site as `model.frag`.
+
+NO ENDORSEMENT
+--------------
+Attribution does not imply that buildingSMART International, openBIMstandards,
+or ROOT bv endorse BIMtrieval or this demo.
+
+WHAT THIS DEMO IS
+-----------------
+A static page. Every answer shown was recorded in advance from a local run of
+BIMtrieval against this model. There is no database, no backend, and no language
+model behind this page.
+
+Project source: https://github.com/daegeun-kim/BIMtrieval

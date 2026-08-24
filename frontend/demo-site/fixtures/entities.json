@@ -1,0 +1,272 @@
+{
+  "2uHHjIJM98q8JM83XVa$l1": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "ifc_class": "IfcBuildingStorey",
+      "name": "Storey-1",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": null,
+      "storey_name": null,
+      "storey_global_id": null,
+      "elevation": 0,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "04PDIFJZXAA8R34kAXRvCn": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "04PDIFJZXAA8R34kAXRvCn",
+      "ifc_class": "IfcDoor",
+      "name": "stelkozijn_(#143009)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "8851F36A-C7C1-4442-A6B0-E27F6CE7070F",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "0T$nAC26PBZfnA7kWSCytO": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "0T$nAC26PBZfnA7kWSCytO",
+      "ifc_class": "IfcDoor",
+      "name": "stelkozijn_(#86878)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "0B2549E6-738A-43B6-B219-61596E67D684",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "0BWtNdvyX0afioMW2CMtwK": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "0BWtNdvyX0afioMW2CMtwK",
+      "ifc_class": "IfcDoor",
+      "name": "D2R_(#261759)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "D224634D-6238-4523-B303-6F07A3DB66BB",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "0X9NHFByPEEuoRYN$4mN72": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "0X9NHFByPEEuoRYN$4mN72",
+      "ifc_class": "IfcWindow",
+      "name": "stelkozijn_(#165818)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "EC52FD7A-C5E4-4CEF-B6F2-12456A4CC20B",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "0iur7_4VD4xxoIiMBCeFB7": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "0iur7_4VD4xxoIiMBCeFB7",
+      "ifc_class": "IfcWindow",
+      "name": "merk B1sp-R_(#102717)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "2829CC8F-B8CE-4DF9-874C-FA6DC398BCF6",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "1Hop7C_uL2NwEiyQMadOw5": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "1Hop7C_uL2NwEiyQMadOw5",
+      "ifc_class": "IfcWindow",
+      "name": "stelkozijn_(#138027)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "DA4F1C2F-6F4F-45FA-97F5-9351C4535632",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "0scb2py45E_A5xr$zrNTSI": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "0scb2py45E_A5xr$zrNTSI",
+      "ifc_class": "IfcWallStandardCase",
+      "name": "binnenwand_(#584663)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "BC566170-1661-460A-A347-C982FBFE3595",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "1vot43PmLCP8CY_O5YVkFs": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "1vot43PmLCP8CY_O5YVkFs",
+      "ifc_class": "IfcWall",
+      "name": "separatiewand_(#551661)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "8FE6B0A5-B4BA-477F-92A1-DCB1086D7EFA",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  },
+  "31_nln1kX8tBXoRFmX3WTy": {
+    "source_model_id": 1,
+    "instance": {
+      "global_id": "31_nln1kX8tBXoRFmX3WTy",
+      "ifc_class": "IfcWall",
+      "name": "separatiewand_(#551866)",
+      "description": null,
+      "object_type": null,
+      "predefined_type": null,
+      "tag": "849FB99C-A88A-41F0-BD33-D1D0DDDEDF48",
+      "storey_name": "Storey-1",
+      "storey_global_id": "2uHHjIJM98q8JM83XVa$l1",
+      "elevation": null,
+      "materials": [],
+      "quantities": [],
+      "properties": []
+    },
+    "type": null,
+    "family": null,
+    "availability": {
+      "instance": true,
+      "same_type": false,
+      "same_family": false,
+      "type_unavailable_reason": "This model has no explicit IFC type data for this object.",
+      "family_unavailable_reason": "This model has no explicit family property for this object."
+    }
+  }
+}
