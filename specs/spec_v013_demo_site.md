@@ -230,7 +230,7 @@ number.
 fixture client dispatches on the request shape:
 
 1. `confirm_model_id` present → the model-load handshake issued by
-   `controller.confirmAndLoadModel` ([controller.ts:121](frontend/src/state/controller.ts:121)).
+   `controller.confirmAndLoadModel` ([controller.ts:121](../frontend/src/state/controller.ts)).
    Returns `fixtures/load-model.json`.
 2. `question` matching a canned question id → returns that question's frozen
    envelope.
@@ -249,7 +249,7 @@ is asked, a button shows **only the question text**.
 - Disables all buttons while `pending` is true.
 - On click: applies the question's recorded pre-selection if it has one (§5.3),
   then calls `controller.submitQuestion(<question text>)` — the identical entry
-  point the real composer uses ([Composer.tsx:22](frontend/src/chat/Composer.tsx:22)).
+  point the real composer uses ([Composer.tsx:22](../frontend/src/chat/Composer.tsx)).
 - **After** the answer is asked, the card reveals what the router did: `routed
   to <route>`, the recorded cost, and one line on what that path means.
 
@@ -327,10 +327,10 @@ them.
 
 There is no independent semantic route to demonstrate, because the pipeline no
 longer has one. RAG is subordinate by design: `_execute_qualitative`
-([execute.py:474](backend/app/query/binding/execute.py:474)) runs semantic
+([execute.py:474](../backend/app/query/binding/execute.py)) runs semantic
 ranking **strictly inside an already-resolved SQL scope**, and only for the
 `description` and `comparison` operations —
-[validate.py:475](backend/app/query/binding/validate.py:475) rejects
+[validate.py:475](../backend/app/query/binding/validate.py) rejects
 `semantic_ranking_text` on anything else.
 
 `describe-01` is the demo's semantic example: it reaches `hybrid_evidence`, which
@@ -344,11 +344,11 @@ semantic path firing — just not as a route of its own.
 
 - `QueryRoute.RAG` and `QueryRoute.GRAPH` appear nowhere in `backend/app/`. Every
   active-model question returns `route: hybrid`, hardcoded at
-  [service.py:363](backend/app/query/service.py:363).
+  [service.py:363](../backend/app/query/service.py).
 - `AnswerBasis.SEMANTIC_RETRIEVAL` is defined and never emitted.
 - The service docstring says so directly: *"There is no route-classification
   call."* Retrieval mode is derived from the bound operation
-  ([llm/schemas.py:87](backend/app/llm/schemas.py:87) §5.1).
+  ([llm/schemas.py:87](../backend/app/llm/schemas.py) §5.1).
 
 This is a deliberate redesign (task24), not a regression — but the benchmark and
 the README were not updated to match, and the harness that produced them

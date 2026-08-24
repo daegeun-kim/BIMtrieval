@@ -5,6 +5,10 @@
 [![CI](https://github.com/daegeun-kim/BIMtrieval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/daegeun-kim/BIMtrieval/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**[Try the static demo →](https://daegeun-kim.github.io/BIMtrieval/)** — the real
+interface and 3D model, with three answers recorded from a live run. No backend,
+no API key, nothing to install.
+
 ![BIMtrieval answering a grounded question with matching BIM elements highlighted in 3D](docs/images/hero.png)
 
 ## The problem
@@ -116,12 +120,17 @@ CPU, dev endpoints off:
 docker compose -f compose.yaml -f compose.prod.yaml up -d --build
 ```
 
-**There is no hosted demo, deliberately.** A public endpoint would spend the
-author's OpenAI tokens on every visitor's query, and the alternative — asking
-visitors to paste their own key into a web page — teaches a habit nobody should
-have. You run your own instance with your own key, and the key never leaves your
-machine. See **[`docs/self-hosting.md`](docs/self-hosting.md)** for the full
-procedure, the security posture, and cost expectations.
+**There is no hosted *live* instance, deliberately.** A public endpoint would
+spend the author's OpenAI tokens on every visitor's query, and the alternative —
+asking visitors to paste their own key into a web page — teaches a habit nobody
+should have. You run your own instance with your own key, and the key never
+leaves your machine. See **[`docs/self-hosting.md`](docs/self-hosting.md)** for
+the full procedure, the security posture, and cost expectations.
+
+The [static demo](https://daegeun-kim.github.io/BIMtrieval/) is what that
+decision leaves room for: the real interface and the real 3D model, with three
+answers recorded in advance from a local run. No backend, no database, no key,
+no per-visitor cost.
 
 ## Evaluation
 
